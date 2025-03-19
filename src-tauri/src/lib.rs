@@ -1,7 +1,11 @@
-use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
-use std::collections::HashMap;
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+mod document_renderer;
+use document_renderer::renderer::convert_markdown_with_latex;
+use document_renderer::style::MarkdownStyle;
 
 // 定义一个全局状态来存储聊天历史
 static CHAT_HISTORY: Lazy<Mutex<HashMap<u32, ChatHistory>>> = Lazy::new(|| {
@@ -34,6 +38,7 @@ struct ChatHistoryItem {
 // 获取聊天历史列表
 #[tauri::command]
 fn get_chat_history() -> Vec<ChatHistoryItem> {
+    println!("{}", convert_markdown_with_latex("**Hello World!**"));
     let history = CHAT_HISTORY.lock().unwrap();
     let mut history_items: Vec<ChatHistoryItem> = history
         .values()
@@ -43,7 +48,7 @@ fn get_chat_history() -> Vec<ChatHistoryItem> {
             time: h.time.clone(),
         })
         .collect();
-    
+
     // 按ID排序，最新的在前面
     history_items.sort_by(|a, b| b.id.cmp(&a.id));
     history_items
@@ -54,7 +59,7 @@ fn get_chat_history() -> Vec<ChatHistoryItem> {
 fn get_chat_by_id(id: u32) -> String {
     let mut current_id = CURRENT_CHAT_ID.lock().unwrap();
     *current_id = id; // 更新当前对话ID
-    
+
     let history = CHAT_HISTORY.lock().unwrap();
     if let Some(chat) = history.get(&id) {
         chat.content.clone()
@@ -68,7 +73,7 @@ fn get_chat_by_id(id: u32) -> String {
 fn get_chat_html() -> String {
     let current_id = *CURRENT_CHAT_ID.lock().unwrap();
     let history = CHAT_HISTORY.lock().unwrap();
-    
+
     if let Some(chat) = history.get(&current_id) {
         chat.content.clone()
     } else {
@@ -143,20 +148,21 @@ fn create_new_chat() -> String {
     let mut next_id = NEXT_CHAT_ID.lock().unwrap();
     let new_id = *next_id;
     *next_id += 1;
-    
+
     // 更新当前对话ID
     let mut current_id = CURRENT_CHAT_ID.lock().unwrap();
     *current_id = new_id;
-    
+
     // 创建新对话
     let now = chrono::Local::now();
     let today = now.format("%H:%M").to_string();
-    
+
     let new_chat = ChatHistory {
         id: new_id,
         title: format!("新对话 {}", new_id),
         time: "刚刚".to_string(),
-        content: format!(r#"
+        content: format!(
+            r#"
         <div class="chat-message system">
             <div class="message-content">
                 <p>👋 你好！这是一个新对话。请问有什么我可以帮助你的？</p>
@@ -214,15 +220,17 @@ fn create_new_chat() -> String {
                 }}
             }}
         </style>
-        "#, today)
+        "#,
+            today
+        ),
     };
-    
+
     let content = new_chat.content.clone();
-    
+
     // 添加到历史记录
     let mut history = CHAT_HISTORY.lock().unwrap();
     history.insert(new_id, new_chat);
-    
+
     content
 }
 
@@ -232,12 +240,62 @@ fn process_message(message: &str) -> String {
     // 获取当前时间
     let now = chrono::Local::now();
     let today = now.format("%H:%M").to_string();
-    
+
     // 获取当前对话ID
     let current_id = *CURRENT_CHAT_ID.lock().unwrap();
+
+    let test_markdown = r#"
+# 这是一个测试标题
+
+## 这是一个测试副标题
+
+这是一个测试列表：
+- 这是一个测试列表项1
+- 这是一个测试列表项2
+
+```python
+def hello_world():
+    print("Hello, world!")
+```
+
+这是一个测试段落，包含一些**加粗文本**和*斜体文本*。
+
+这是一个测试链接：[点击这里](https://example.com)。
+
+这是一个测试图片：![测试图片](https://th.bing.com/th/id/OIP.oY0A5dYBc71GSk8z4gHMrAHaHa?rs=1&pid=ImgDetMain)
+
+这是一个测试表格：
+
+| 列1 | 列2 |
+| ---- | ---- |
+| 数据1 | 数据2 |
+
+这是一个测试数学公式：$E=mc^2$。
+
+这是一个测试数学块：
+
+$$
+E=mc^2
+$$
+
+这是一个测试数学块2：
+
+$$
+E=mc^2
+$$
+
     
+    "#;
+
+    let converted_markdown = convert_markdown_with_latex(test_markdown);
+
+    let style_css = MarkdownStyle::Default.to_css();
+
     // 构建用户消息和AI回复的HTML
-    let html = format!(r#"
+    let html = format!(
+        r#"
+    {}
+
     <div class="chat-message user">
         <div class="message-content">
             <p>{}</p>
@@ -247,7 +305,7 @@ fn process_message(message: &str) -> String {
     
     <div class="chat-message system">
         <div class="message-content">
-            <p>你好！我已收到你的消息："{}"。这是一个模拟回复。在实际应用中，这里可以接入真实的 AI 模型或其他服务来处理用户输入并生成回复。</p>
+            {}
         </div>
         <div class="message-time">今天 {}</div>
     </div>
@@ -302,7 +360,9 @@ fn process_message(message: &str) -> String {
             }}
         }}
     </style>
-    "#, message, today, message, today);
+    "#,
+        style_css, message, today, converted_markdown, today
+    );
 
     // 更新当前对话的内容
     let mut history = CHAT_HISTORY.lock().unwrap();
@@ -326,10 +386,11 @@ fn process_message(message: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-
             get_chat_html,
             get_chat_history,
             get_chat_by_id,

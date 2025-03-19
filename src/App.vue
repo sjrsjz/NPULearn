@@ -1,7 +1,9 @@
 <script setup lang="ts">
-// 保持脚本部分不变
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
+import hljs from 'highlight.js';
+import 'highlight.js/styles/github.min.css';
 
 // 定义聊天历史的类型
 interface ChatHistoryItem {
@@ -17,6 +19,55 @@ const isHistoryOpen = ref(windowWidth.value >= 768);
 const inputMessage = ref("");
 const chatContent = ref("");
 const isLoading = ref(false);
+
+// 加载 MathJax
+function loadMathJax() {
+  return new Promise<void>((resolve) => {
+    // 如果已经加载过，直接返回
+    if (window.MathJax) {
+      resolve();
+      return;
+    }
+
+    // 配置 MathJax
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']]
+      },
+      svg: {
+        fontCache: 'global'
+      },
+      startup: {
+        pageReady: () => {
+          return window.MathJax.startup.defaultPageReady().then(() => {
+            resolve();
+          });
+        },
+        defaultPageReady: () => {
+          // 这里可以添加其他初始化代码
+          return Promise.resolve();
+        }
+      }
+    };
+
+    // 创建脚本元素
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
+    script.async = true;
+    script.id = 'mathjax-script';
+    document.head.appendChild(script);
+  });
+}
+
+// 在需要时渲染数学公式
+function renderMathInElement() {
+  if (window.MathJax && window.MathJax.typesetPromise) {
+    window.MathJax.typesetPromise([document.querySelector('.chat-messages') as HTMLElement]).catch((err: Error) => {
+      console.error('MathJax 渲染错误:', err);
+    });
+  }
+}
 
 // 切换历史列表显示
 function toggleHistory() {
@@ -41,6 +92,8 @@ async function selectHistory(id: number) {
       isHistoryOpen.value = false;
     }
   }
+  // 更新聊天内容，确保样式隔离
+  updateChatContent(chatContent.value);
 }
 
 // 处理窗口大小变化
@@ -64,13 +117,95 @@ async function loadChatHistory() {
       { id: 0, title: "新对话", time: "现在" }
     ];
   }
+  updateChatContent(chatContent.value); // 确保在加载历史后更新内容
 }
 
-// 从后端加载聊天内容
+// 处理聊天内容，隔离样式
+const processedChatContent = ref("");
+
+function applyHighlight() {
+  nextTick(() => {
+    // 查找所有代码块并应用高亮
+    document.querySelectorAll('.chat-messages pre code').forEach((el) => {
+      hljs.highlightElement(el as HTMLElement);
+    });
+  });
+}
+
+
+const notification = ref({
+  visible: false,
+  message: '',
+  type: 'success' // 可以是 'success', 'info', 'warning', 'error'
+});
+
+// 显示通知的函数
+function showNotification(message: string, type: string = 'success', duration: number = 2000) {
+  notification.value = {
+    visible: true,
+    message,
+    type
+  };
+
+  // 设置通知自动关闭
+  setTimeout(() => {
+    notification.value.visible = false;
+  }, duration);
+}
+
+// 修改链接处理函数
+function setupExternalLinks() {
+  nextTick(() => {
+    document.querySelectorAll('.chat-messages a').forEach(link => {
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const href = link.getAttribute('href');
+        if (href) {
+          try {
+            await writeText(href); // 将链接复制到剪贴板
+            showNotification(`链接已复制: ${href}`, 'success');
+          } catch (error) {
+            console.error('复制链接失败:', error);
+            showNotification('复制链接失败', 'error');
+          }
+        }
+      });
+    });
+  });
+}
+
+// 修改 updateChatContent 函数，添加 MathJax 支持
+function updateChatContent(content: string) {
+  // 将内容包装在一个有范围限制的容器中
+  processedChatContent.value = `<div class="scoped-content">${content}</div>`;
+
+  // 下一个 tick 后处理样式和代码高亮
+  nextTick(() => {
+    // 处理样式范围
+    const styleElements = document.querySelectorAll('.chat-messages style');
+    styleElements.forEach(style => {
+      const styleContent = style.textContent || '';
+      style.textContent = styleContent.replace(/html|body/g, '.scoped-content');
+    });
+
+    // 应用代码高亮
+    applyHighlight();
+
+    // 渲染数学公式
+    renderMathInElement();
+
+    // 设置外部链接处理
+    setupExternalLinks();
+  });
+}
+
+// 修改现有方法以使用新函数
 async function loadChatContent() {
   isLoading.value = true;
   try {
-    chatContent.value = await invoke("get_chat_html");
+    const content = await invoke("get_chat_html") as string;
+    chatContent.value = content;
+    updateChatContent(content);
   } catch (error) {
     console.error("加载聊天内容失败:", error);
   } finally {
@@ -87,6 +222,7 @@ async function sendMessage() {
     // 调用 Rust 函数处理用户输入并返回更新的 HTML
     chatContent.value = await invoke("process_message", { message: inputMessage.value });
     inputMessage.value = ""; // 清空输入框
+    updateChatContent(chatContent.value);
 
     // 重新加载聊天历史（如果当前对话是新建的，它可能被添加到历史记录中）
     await loadChatHistory();
@@ -103,6 +239,7 @@ async function createNewChat() {
   try {
     // 调用后端创建新对话
     chatContent.value = await invoke("create_new_chat");
+    updateChatContent(chatContent.value);
     // 重新加载历史记录
     await loadChatHistory();
   } catch (error) {
@@ -112,8 +249,18 @@ async function createNewChat() {
   }
 }
 
+// 监听 chatContent 变化，确保 MathJax 重新渲染
+watch(chatContent, () => {
+  nextTick(() => {
+    renderMathInElement();
+  });
+});
+
 // 组件加载时初始化对话内容
 onMounted(async () => {
+  // 加载 MathJax
+  await loadMathJax();
+
   // 先加载历史记录，再加载当前对话内容
   await loadChatHistory();
   await loadChatContent();
@@ -126,8 +273,23 @@ onUnmounted(() => {
 });
 </script>
 
+
 <template>
   <div class="app-container">
+    <!-- 通知组件 -->
+    <div v-if="notification.visible" class="notification" :class="notification.type">
+      <div class="notification-content">
+        <svg v-if="notification.type === 'success'" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+        <span>{{ notification.message }}</span>
+      </div>
+    </div>
+
+
     <!-- 遮罩层 - 仅在小屏幕且历史栏打开时显示 -->
     <div v-if="isHistoryOpen && windowWidth < 768" class="history-overlay" @click="toggleHistory"></div>
 
@@ -191,9 +353,8 @@ onUnmounted(() => {
           <div class="loading-spinner"></div>
           <div>加载中...</div>
         </div>
-        <div v-html="chatContent" class="chat-messages"></div>
+        <div v-html="processedChatContent" class="chat-messages"></div>
       </div>
-
       <!-- 底部输入区 -->
       <div class="chat-input-area">
         <form @submit.prevent="sendMessage" class="input-form">
@@ -213,6 +374,15 @@ onUnmounted(() => {
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
 
 :root {
   --primary-color: #4f46e5;
@@ -260,6 +430,8 @@ body {
   overflow: hidden;
   position: relative;
   background-color: var(--bg-color);
+  margin: 0;
+  padding: 0;
 }
 
 /* 遮罩层 */
@@ -490,10 +662,12 @@ body {
   background-color: transparent;
 }
 
-.chat-messages {
-  max-width: 800px;
-  margin: 0 auto;
-  padding-bottom: 20px;
+.chat-messages .scoped-content {
+  all: initial;
+  /* 重置所有样式 */
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--text-color);
+  line-height: 1.5;
 }
 
 .loading {
@@ -587,6 +761,149 @@ body {
   stroke-width: 2;
 }
 
+.chat-messages .mjx-chtml {
+  margin: 0.5em 0;
+  font-size: 1.1em;
+}
+
+.chat-messages .mjx-math {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.chat-messages .mjx-chtml.MJXc-display {
+  margin: 1em 0;
+  padding: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+.chat-messages .MJX-TEX {
+  text-align: center;
+}
+
+.chat-messages .mjx-container {
+  padding: 6px 0;
+}
+
+/* 暗色模式下的 MathJax 样式 */
+@media (prefers-color-scheme: dark) {
+  .chat-messages .mjx-math {
+    color: #f1f5f9;
+  }
+}
+
+/* 通知样式 */
+.notification {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  background-color: white;
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  max-width: 400px;
+  animation: slide-in 0.3s ease forwards;
+  border-left: 4px solid;
+}
+
+.notification.success {
+  border-left-color: #10b981;
+}
+
+.notification.error {
+  border-left-color: #ef4444;
+}
+
+.notification.info {
+  border-left-color: #3b82f6;
+}
+
+.notification.warning {
+  border-left-color: #f59e0b;
+}
+
+.notification-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notification-content svg {
+  flex-shrink: 0;
+  color: #10b981;
+}
+
+.notification.error svg {
+  color: #ef4444;
+}
+
+.notification.info svg {
+  color: #3b82f6;
+}
+
+.notification.warning svg {
+  color: #f59e0b;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 暗色模式下的通知样式 */
+@media (prefers-color-scheme: dark) {
+  .notification {
+    background-color: #1e293b;
+    color: #f1f5f9;
+  }
+}
+
+
+.chat-messages a {
+  color: var(--primary-color);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--primary-color);
+  cursor: pointer;
+  position: relative;
+  padding-right: 16px;
+}
+
+.chat-messages a::after {
+  content: '📋';
+  font-size: 0.8em;
+  position: absolute;
+  right: 0;
+  top: 0;
+  opacity: 0.7;
+}
+
+.chat-messages a:hover {
+  opacity: 0.8;
+}
+
+.chat-messages a:active {
+  opacity: 0.6;
+}
+
+/* 暗色模式下的链接样式 */
+@media (prefers-color-scheme: dark) {
+  .chat-messages a {
+    color: #6366f1;
+    border-bottom-color: #6366f1;
+  }
+}
+
 /* 响应式设计 */
 @media (min-width: 768px) {
   .history-sidebar {
@@ -611,7 +928,14 @@ body {
   }
 
   .chat-content {
-    padding: 24px;
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 16px;
+    background-color: var(--bg-color);
+    scrollbar-width: thin;
+    min-height: 0;
+    position: relative;
+    /* 确保内容正确定位 */
   }
 }
 
