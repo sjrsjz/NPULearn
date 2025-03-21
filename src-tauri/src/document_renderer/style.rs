@@ -19,7 +19,6 @@ impl MarkdownStyle {
         margin-top: 24px;
         margin-bottom: 16px;
         font-weight: 600;
-        line-height: 1.25;
     }
     
     h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid #eaecef; }
@@ -160,6 +159,56 @@ impl MarkdownStyle {
         color: #116329;
         background-color: #dafbe1;
         border-color: #4ac26b;
+    }
+
+
+    .chat-message {
+        margin-bottom: 20px;
+        animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .system {
+        background-color: #f2f2f2;
+        border-radius: 12px;
+        padding: 12px 16px;
+        max-width: 85%;
+    }
+    
+    .user {
+        background-color: #e1f5fe;
+        border-radius: 12px;
+        padding: 12px 16px;
+        max-width: 85%;
+        margin-left: auto;
+    }
+    
+    .message-content {
+        margin-bottom: 5px;
+    }
+    
+    .message-time {
+        font-size: 12px;
+        color: #666;
+        text-align: right;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+        .system {
+            background-color: #2d333b;
+        }
+        
+        .user {
+            background-color: #254254;
+        }
+        
+        .message-time {
+            color: #aaa;
+        }
     }
 </style>
             "#.to_string(),
