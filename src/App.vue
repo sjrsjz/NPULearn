@@ -4,6 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.min.css';
+import LoadingLogo from './components/LoadingLogo.vue';
+import Setting from './components/Setting.vue';
+
+const isAppLoading = ref(true);
 
 // 定义聊天历史的类型
 interface ChatHistoryItem {
@@ -19,6 +23,17 @@ const isHistoryOpen = ref(windowWidth.value >= 768);
 const inputMessage = ref("");
 const chatContent = ref("");
 const isLoading = ref(false);
+
+const showSettings = ref(false);
+
+// 切换设置界面的显示
+function toggleSettings() {
+  showSettings.value = !showSettings.value;
+  // 如果在小屏幕上打开了历史栏，同时关闭它
+  if (showSettings.value && isHistoryOpen.value && windowWidth.value < 768) {
+    isHistoryOpen.value = false;
+  }
+}
 
 // 加载 MathJax
 function loadMathJax() {
@@ -258,14 +273,27 @@ watch(chatContent, () => {
 
 // 组件加载时初始化对话内容
 onMounted(async () => {
-  // 加载 MathJax
-  await loadMathJax();
+  try {
+    // 加载 MathJax
+    await loadMathJax();
 
-  // 先加载历史记录，再加载当前对话内容
-  await loadChatHistory();
-  await loadChatContent();
+    // 先加载历史记录，再加载当前对话内容
+    await loadChatHistory();
+    await loadChatContent();
+
+    // 所有内容加载完成后，隐藏启动logo
+    setTimeout(() => {
+      isAppLoading.value = false;
+    }, 5000); // 添加短暂延迟，让过渡更平滑
+  } catch (error) {
+    console.error("初始化失败:", error);
+    // 即使出错，也需要隐藏加载动画
+    isAppLoading.value = false;
+  }
+
   window.addEventListener('resize', handleResize);
 });
+
 
 // 组件卸载时清理事件监听
 onUnmounted(() => {
@@ -276,6 +304,15 @@ onUnmounted(() => {
 
 <template>
   <div class="app-container">
+    <LoadingLogo :show="isAppLoading" />
+
+    <div v-if="showSettings" class="settings-modal">
+      <div class="settings-modal-overlay" @click="toggleSettings"></div>
+      <div class="settings-modal-content">
+        <Setting @close="toggleSettings" />
+      </div>
+    </div>
+
     <!-- 通知组件 -->
     <div v-if="notification.visible" class="notification" :class="notification.type">
       <div class="notification-content">
@@ -330,6 +367,19 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+      <div class="history-footer">
+        <button @click="toggleSettings" class="settings-button">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+            </path>
+          </svg>
+          设置
+        </button>
+      </div>
     </aside>
 
     <!-- 主要聊天区域 -->
@@ -344,7 +394,17 @@ onUnmounted(() => {
             <line x1="3" y1="18" x2="21" y2="18"></line>
           </svg>
         </button>
-        <h1>AI 助手</h1>
+        <h1>NPULearn</h1>
+
+        <!-- <button class="header-settings-button" @click="toggleSettings">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+            </path>
+          </svg>
+        </button> -->
       </header>
 
       <!-- 聊天内容区域 -->
@@ -476,11 +536,16 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  position: relative;
 }
 
 .history-header h3 {
   font-size: 1.125rem;
   font-weight: 600;
+  color: var(--text-color);
+  margin: 0;
+  padding: 0;
+  flex: 1;
 }
 
 .close-history {
@@ -596,6 +661,115 @@ body {
   margin-top: 2px;
 }
 
+
+.settings-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.settings-modal-content {
+  position: relative;
+  width: 90%;
+  max-width: 800px;
+  max-height: 90vh;
+  border-radius: var(--radius-lg);
+  background-color: var(--card-bg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: modal-in 0.3s ease forwards;
+  z-index: 1001;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* 历史栏底部的设置按钮 */
+.history-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  margin-top: auto;
+}
+
+.settings-button {
+  width: 100%;
+  padding: 10px;
+  background-color: transparent;
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+  font-size: 0.95rem;
+  gap: 8px;
+}
+
+.settings-button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  border-color: var(--text-color);
+}
+
+/* 头部设置按钮 */
+.header-settings-button {
+  background: none;
+  border: none;
+  color: var(--text-color);
+  cursor: pointer;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  transition: var(--transition);
+}
+
+.header-settings-button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* 暗色模式下的设置按钮样式 */
+@media (prefers-color-scheme: dark) {
+  .settings-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--text-color);
+  }
+
+  .header-settings-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
 /* 聊天区域 */
 .chat-container {
   flex: 1;
@@ -605,20 +779,39 @@ body {
   transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   margin-left: 0;
   min-height: 0;
+  height: 100vh;
+  /* 固定高度为视口高度 */
+  overflow: hidden;
+  /* 防止整体溢出 */
 }
 
 .chat-header {
-  height: var(--header-height);
-  border-bottom: 1px solid var(--border-color);
+  grid-row: 1;
+  border-bottom: 0px solid var(--border-color);
   display: flex;
   align-items: center;
   padding: 0 16px;
   background-color: var(--card-bg);
+  z-index: 10;
+  /* 绝对固定高度，防止挤压 */
+  height: var(--header-height);
+  min-height: var(--header-height);
+  /* 确保顶部固定 */
+  position: sticky;
+  top: 0;
 }
 
 .chat-header h1 {
   font-size: 1.25rem;
   font-weight: 600;
+  line-height: 1;
+  /* 固定行高 */
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  /* 填充父容器 */
 }
 
 .toggle-history {
@@ -647,6 +840,10 @@ body {
   background-color: var(--bg-color);
   scrollbar-width: thin;
   min-height: 0;
+  /* 确保内容可以被压缩 */
+  position: relative;
+  overscroll-behavior: contain;
+  /* 防止滚动传播 */
 }
 
 .chat-content::-webkit-scrollbar {
@@ -699,10 +896,17 @@ body {
 }
 
 .chat-input-area {
-  height: var(--input-area-height);
+  grid-row: 3;
   border-top: 1px solid var(--border-color);
   padding: 12px 16px;
   background-color: var(--card-bg);
+  z-index: 10;
+  /* 绝对固定高度，防止挤压 */
+  height: var(--input-area-height);
+  min-height: var(--input-area-height);
+  /* 确保底部固定 */
+  position: sticky;
+  bottom: 0;
 }
 
 .input-form {
