@@ -68,7 +68,9 @@ fn get_chat_by_id(id: u32) -> String {
     }
 }
 
-// 获取当前聊天内容
+/**
+获取当前聊天内容
+*/
 #[tauri::command]
 fn get_chat_html() -> String {
     let current_id = *CURRENT_CHAT_ID.lock().unwrap();
@@ -141,7 +143,9 @@ fn get_chat_html() -> String {
     }
 }
 
-// 创建新对话
+/*
+创建新对话
+*/
 #[tauri::command]
 fn create_new_chat() -> String {
     // 获取新ID
