@@ -1,11 +1,17 @@
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+use tauri_plugin_fs::FsExt;
+
 
 mod document_renderer;
 use document_renderer::renderer::convert_markdown_with_latex;
 use document_renderer::style::MarkdownStyle;
+
+mod aibackend;
 
 mod history_msg;
 
@@ -477,8 +483,43 @@ pub fn run() {
             get_chat_history,
             get_chat_by_id,
             create_new_chat,
-            process_message
+            process_message,
+            aibackend::apikey::get_api_key_list_or_create,
+            aibackend::apikey::try_save_api_key_list,
         ])
+        .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            // allowed the given directory
+            let scope = app.fs_scope();
+            let path = app.path();
+            let mut checked_app_local_data_dir = None;
+            let mut checked_app_config_dir = None;
+            if let Ok(app_local_data_dir) = path.app_local_data_dir() {
+                println!("app_local_data_dir: {:?}", app_local_data_dir);
+                let result = scope.allow_directory(&app_local_data_dir, false);
+                if let Err(e) = result {
+                    eprintln!("Failed to allow directory: {}", e);
+                }
+                checked_app_local_data_dir = Some(app_local_data_dir);
+            } else {
+                eprintln!("Failed to get app_local_data_dir");
+            }
+            
+            if let Ok(app_config_dir) = path.app_config_dir() {
+                println!("app_config_dir: {:?}", app_config_dir);
+                let result = scope.allow_directory(&app_config_dir, false);
+                if let Err(e) = result {
+                    eprintln!("Failed to allow directory: {}", e);
+                }
+                checked_app_config_dir = Some(app_config_dir);
+            } else {
+                eprintln!("Failed to get app_config_dir");
+            }
+
+            aibackend::apikey::init(app.handle().clone(), checked_app_local_data_dir.unwrap(), checked_app_config_dir.unwrap());
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
