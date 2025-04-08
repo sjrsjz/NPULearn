@@ -23,7 +23,7 @@ pub fn init(handle: AppHandle, config_dir: PathBuf) {
 }
 
 // 应用设置结构体
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct AppSettings {
     pub theme: String,             // 主题: system, light, dark
     pub font_size: String,         // 字体大小: small, medium, large
@@ -34,8 +34,9 @@ pub struct AppSettings {
 }
 
 // 模型配置结构体
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ModelConfig {
+    pub temperature: f32, // 温度
     pub max_tokens: i32, // 最大生成令牌数
 }
 
@@ -47,7 +48,7 @@ impl Default for AppSettings {
             auto_save: true,
             save_path: "".to_string(),
             api_model: "gemini".to_string(),
-            model_config: ModelConfig { max_tokens: 2048 },
+            model_config: ModelConfig { temperature : 0.7, max_tokens: 2048 },
         }
     }
 }
@@ -138,6 +139,7 @@ impl AppSettings {
         let file_path = FilePath::Path(path_buf.join(config_name));
 
         println!("Saving settings to: {:?}", file_path);
+        println!("Settings content: {:?}", self);
 
         let mut opt = OpenOptions::new();
         let file = fs.open(

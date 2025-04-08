@@ -1,0 +1,96 @@
+/* 全局样式变量 */
+:root {
+    /* 浅色主题变量 */
+    --bg-color: #ffffff;
+    --text-color: #1a202c;
+    --text-secondary: #4a5568;
+    --card-bg: #f8fafc;
+    --border-color: #e2e8f0;
+    --primary-color: #4f46e5;
+    --primary-hover: #4338ca;
+    --radius: 8px;
+    --radius-sm: 4px;
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --transition: all 0.2s ease;
+
+    /* 默认字体大小 */
+    --font-size-base: 16px;
+    --font-size-sm: 14px;
+    --font-size-lg: 18px;
+}
+
+/* 深色主题 */
+:root[data-theme="dark"] {
+    --bg-color: #1a202c;
+    --text-color: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --card-bg: #2d3748;
+    --border-color: #4a5568;
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* 系统主题跟随 */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+        --bg-color: #1a202c;
+        --text-color: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --card-bg: #2d3748;
+        --border-color: #4a5568;
+        --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
+    }
+}
+
+/* 字体大小设置 */
+:root[data-font-size="small"] {
+    --font-size-base: 14px;
+    --font-size-sm: 12px;
+    --font-size-lg: 16px;
+}
+
+:root[data-font-size="medium"] {
+    --font-size-base: 16px;
+    --font-size-sm: 14px;
+    --font-size-lg: 18px;
+}
+
+:root[data-font-size="large"] {
+    --font-size-base: 18px;
+    --font-size-sm: 16px;
+    --font-size-lg: 20px;
+}
+
+/* 应用字体大小到全局元素 */
+body {
+    font-size: var(--font-size-base);
+    color: var(--text-color);
+    background-color: var(--bg-color);
+    transition: color 0.3s ease, background-color 0.3s ease;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-size: var(--font-size-lg);
+}
+
+.small-text {
+    font-size: var(--font-size-sm);
+}
+
+.large-text {
+    font-size: var(--font-size-lg);
+}
+
+button,
+input,
+select,
+textarea {
+    font-size: var(--font-size-base);
+}

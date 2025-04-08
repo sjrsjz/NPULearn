@@ -3,19 +3,21 @@ import { ref, onMounted, reactive } from 'vue';
 import { invoke } from "@tauri-apps/api/core";
 // 导入 Vue 的 watch 函数
 import { watch } from 'vue';
+import { app } from '@tauri-apps/api';
+import { applyTheme } from '../themeUtils';
 
 const emit = defineEmits(['close']);
 
 // 设置选项
 const settings = ref({
     theme: 'system', // 主题: system, light, dark
-    fontSize: 'medium', // 字体大小: small, medium, large
-    autoSave: true, // 自动保存对话
-    savePath: '', // 保存路径
-    apiModel: 'qwen', // 模型选择: qwen, gpt, claude
-    modelConfig: {
+    font_size: 'medium', // 字体大小: small, medium, large
+    auto_save: true, // 自动保存对话
+    save_path: '', // 保存路径
+    api_model: 'Gemini', // AI 模型
+    model_config: {
         temperature: 0.7, // 温度参数 0.1-1.0
-        maxTokens: 2048, // 最大生成令牌数
+        max_tokens: 2048, // 最大生成令牌数
     },
 });
 
@@ -230,7 +232,7 @@ async function selectSavePath() {
     try {
         const path = await invoke("select_save_directory");
         if (path) {
-            settings.value.savePath = path as string;
+            settings.value.save_path = path as string;
         }
     } catch (error) {
         console.error("选择路径失败:", error);
@@ -258,22 +260,22 @@ function showNotification(message: string, type: string = 'success', duration: n
     }, duration);
 }
 
-// 应用主题
-function applyTheme(theme: string) {
-    if (theme === 'system') {
-        document.documentElement.removeAttribute('data-theme');
-    } else {
-        document.documentElement.setAttribute('data-theme', theme);
-    }
-}
 
 // 监听主题变化
 watch(
     () => settings.value.theme,
     (newTheme: string) => {
-        applyTheme(newTheme);
+        applyTheme(newTheme as 'system' | 'light' | 'dark');
     }
 );
+
+watch(
+    () => settings.value.font_size,
+    (newFontSize: string) => {
+        applyTheme(settings.value.theme as 'system' | 'light' | 'dark');
+    }
+);
+
 
 // 加载设置
 async function loadSettings() {
@@ -281,7 +283,7 @@ async function loadSettings() {
         const savedSettings = await invoke("get_settings");
         if (savedSettings) {
             settings.value = { ...settings.value, ...savedSettings };
-            applyTheme(settings.value.theme);
+            applyTheme(settings.value.theme as 'system' | 'light' | 'dark');
         }
     } catch (error) {
         console.error("加载设置失败:", error);
@@ -293,8 +295,30 @@ function closeSettings() {
     emit('close');
 }
 
+// 初始化应用设置
+async function initAppSettings() {
+    try {
+        const savedSettings = await invoke("get_settings");
+        if (savedSettings) {
+            settings.value = { ...settings.value, ...savedSettings };
+            // 应用主题
+            if (settings.value.theme === 'system') {
+                document.documentElement.removeAttribute('data-theme');
+            } else {
+                document.documentElement.setAttribute('data-theme', settings.value.theme);
+            }
+
+            // 应用字体大小
+            document.documentElement.setAttribute('data-font-size', settings.value.font_size);
+        }
+    } catch (error) {
+        console.error("初始化应用设置失败:", error);
+    }
+}
+
 // 组件挂载时加载设置
 onMounted(() => {
+    initAppSettings();
     loadSettings();
     loadApiKeys();
     loadModelOptions();
@@ -361,7 +385,7 @@ onMounted(() => {
                 <div class="settings-item">
                     <label for="fontSize">字体大小</label>
                     <div class="settings-controls">
-                        <select id="fontSize" v-model="settings.fontSize">
+                        <select id="fontSize" v-model="settings.font_size">
                             <option v-for="option in fontSizeOptions" :key="option.value" :value="option.value">
                                 {{ option.label }}
                             </option>
@@ -378,7 +402,7 @@ onMounted(() => {
                     <label for="autoSave">自动保存对话</label>
                     <div class="settings-controls">
                         <label class="switch">
-                            <input type="checkbox" id="autoSave" v-model="settings.autoSave">
+                            <input type="checkbox" id="autoSave" v-model="settings.auto_save">
                             <span class="slider round"></span>
                         </label>
                     </div>
@@ -387,7 +411,7 @@ onMounted(() => {
                 <div class="settings-item">
                     <label for="savePath">保存路径</label>
                     <div class="settings-controls path-selection">
-                        <input type="text" id="savePath" v-model="settings.savePath" readonly
+                        <input type="text" id="savePath" v-model="settings.save_path" readonly
                             placeholder="点击右侧按钮选择保存路径">
                         <button @click="selectSavePath" class="directory-button">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
@@ -408,7 +432,7 @@ onMounted(() => {
                 <div class="settings-item">
                     <label for="apiModel">AI 模型</label>
                     <div class="settings-controls">
-                        <select id="apiModel" v-model="settings.apiModel">
+                        <select id="apiModel" v-model="settings.api_model">
                             <option v-for="option in modelOptions" :key="option.value" :value="option.value">
                                 {{ option.label }}
                             </option>
@@ -419,16 +443,16 @@ onMounted(() => {
                 <div class="settings-item">
                     <label for="temperature">温度参数</label>
                     <div class="settings-controls range-slider">
-                        <input type="range" id="temperature" v-model.number="settings.modelConfig.temperature" min="0.1"
+                        <input type="range" id="temperature" v-model.number="settings.model_config.temperature" min="0.1"
                             max="1" step="0.1">
-                        <span class="range-value">{{ settings.modelConfig.temperature.toFixed(1) }}</span>
+                        <span class="range-value">{{ settings.model_config.temperature.toFixed(1) }}</span>
                     </div>
                 </div>
 
                 <div class="settings-item">
                     <label for="maxTokens">最大令牌数</label>
                     <div class="settings-controls">
-                        <input type="number" id="maxTokens" v-model.number="settings.modelConfig.maxTokens" min="512"
+                        <input type="number" id="maxTokens" v-model.number="settings.model_config.max_tokens" min="512"
                             max="8192" step="512">
                     </div>
                 </div>
@@ -517,7 +541,85 @@ onMounted(() => {
     </div>
 </template>
 
-<style scoped>
+<style>
+/* 全局 CSS 变量 */
+:root {
+    /* 浅色主题变量 */
+    --bg-color: #ffffff;
+    --text-color: #1a202c;
+    --text-secondary: #4a5568;
+    --card-bg: #f8fafc;
+    --border-color: #e2e8f0;
+    --primary-color: #4f46e5;
+    --primary-hover: #4338ca;
+    --radius: 8px;
+    --radius-sm: 4px;
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --transition: all 0.2s ease;
+
+    /* 默认字体大小 */
+    --font-size-base: 16px;
+    --font-size-sm: 14px;
+    --font-size-lg: 18px;
+}
+
+/* 深色主题 */
+:root[data-theme="dark"] {
+    --bg-color: #1a202c;
+    --text-color: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --card-bg: #2d3748;
+    --border-color: #4a5568;
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* 系统主题跟随 */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+        --bg-color: #1a202c;
+        --text-color: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --card-bg: #2d3748;
+        --border-color: #4a5568;
+        --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
+    }
+}
+
+/* 字体大小设置 */
+:root[data-font-size="small"] {
+    --font-size-base: 14px;
+    --font-size-sm: 12px;
+    --font-size-lg: 16px;
+}
+
+:root[data-font-size="medium"] {
+    --font-size-base: 16px;
+    --font-size-sm: 14px;
+    --font-size-lg: 18px;
+}
+
+:root[data-font-size="large"] {
+    --font-size-base: 18px;
+    --font-size-sm: 16px;
+    --font-size-lg: 20px;
+}
+
+/* 应用字体大小 */
+body {
+    font-size: var(--font-size-base);
+}
+
+.small-text {
+    font-size: var(--font-size-sm);
+}
+
+.large-text {
+    font-size: var(--font-size-lg);
+}
+
 .settings-container {
     display: flex;
     flex-direction: column;

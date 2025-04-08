@@ -6,6 +6,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github.min.css';
 import LoadingLogo from './components/LoadingLogo.vue';
 import Setting from './components/Setting.vue';
+import { refreshGlobalStyles } from './themeUtils.ts';
 
 const isAppLoading = ref(true);
 
@@ -25,6 +26,8 @@ const chatContent = ref("");
 const isLoading = ref(false);
 
 const showSettings = ref(false);
+
+
 
 // 切换设置界面的显示
 function toggleSettings() {
@@ -189,7 +192,7 @@ function setupExternalLinks() {
   });
 }
 
-// 修改 updateChatContent 函数，添加 MathJax 支持
+// 修改 updateChatContent 函数，添加主题和字体大小支持
 function updateChatContent(content: string) {
   // 将内容包装在一个有范围限制的容器中
   processedChatContent.value = `<div class="scoped-content">${content}</div>`;
@@ -200,9 +203,70 @@ function updateChatContent(content: string) {
     const styleElements = document.querySelectorAll('.chat-messages style');
     styleElements.forEach(style => {
       const styleContent = style.textContent || '';
-      style.textContent = styleContent.replace(/html|body/g, '.scoped-content');
-    });
 
+      // 处理 html 和 body 选择器
+      let newStyleContent = styleContent.replace(/html|body/g, '.scoped-content');
+
+      // 获取当前主题和字体大小
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'system';
+      const currentFontSize = document.documentElement.getAttribute('data-font-size') || 'medium';
+
+      // 根据主题添加相应的样式
+      if (currentTheme === 'dark' || (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        // 为暗色主题添加样式覆盖
+        newStyleContent += `
+          .scoped-content {
+            color: #f1f5f9 !important;
+            background-color: transparent !important;
+          }
+          .scoped-content a { color: #6366f1 !important; }
+          .scoped-content code { background-color: rgba(71, 85, 105, 0.3) !important; }
+          .scoped-content pre { background-color: #1e293b !important; }
+          .scoped-content blockquote { color: #94a3b8 !important; border-left-color: #475569 !important; }
+          .scoped-content table th { background-color: #1e293b !important; }
+          .scoped-content table td, .scoped-content table th { border-color: #475569 !important; }
+          .scoped-content hr { background-color: #475569 !important; }
+          .scoped-content h1, .scoped-content h2 { border-bottom-color: #475569 !important; }
+          .scoped-content .system { background-color: #2d333b !important; }
+          .scoped-content .user { background-color: #254254 !important; }
+          .scoped-content .message-time { color: #aaa !important; }
+        `;
+      }
+
+      // 根据字体大小添加相应的样式
+      let fontSizeBase, fontSizeSm, fontSizeLg;
+      switch (currentFontSize) {
+        case 'small':
+          fontSizeBase = '14px';
+          fontSizeSm = '12px';
+          fontSizeLg = '16px';
+          break;
+        case 'large':
+          fontSizeBase = '18px';
+          fontSizeSm = '16px';
+          fontSizeLg = '20px';
+          break;
+        default: // medium
+          fontSizeBase = '16px';
+          fontSizeSm = '14px';
+          fontSizeLg = '18px';
+      }
+
+      newStyleContent += `
+        .scoped-content { font-size: ${fontSizeBase} !important; }
+        .scoped-content code, .scoped-content pre { font-size: calc(${fontSizeBase} * 0.85) !important; }
+        .scoped-content h1 { font-size: calc(${fontSizeBase} * 2) !important; }
+        .scoped-content h2 { font-size: calc(${fontSizeBase} * 1.5) !important; }
+        .scoped-content h3 { font-size: calc(${fontSizeBase} * 1.25) !important; }
+        .scoped-content h4 { font-size: ${fontSizeBase} !important; }
+        .scoped-content h5 { font-size: ${fontSizeSm} !important; }
+        .scoped-content h6 { font-size: calc(${fontSizeSm} * 0.95) !important; }
+        .scoped-content .message-time { font-size: ${fontSizeSm} !important; }
+      `;
+
+      style.textContent = newStyleContent;
+    });
+    refreshGlobalStyles();
     // 应用代码高亮
     applyHighlight();
 
@@ -213,7 +277,6 @@ function updateChatContent(content: string) {
     setupExternalLinks();
   });
 }
-
 // 修改现有方法以使用新函数
 async function loadChatContent() {
   isLoading.value = true;
@@ -267,8 +330,25 @@ async function createNewChat() {
 // 监听 chatContent 变化，确保 MathJax 重新渲染
 watch(chatContent, () => {
   nextTick(() => {
+    refreshGlobalStyles();
     renderMathInElement();
   });
+});
+
+// 监听主题变化，更新聊天内容
+watch(() => document.documentElement.getAttribute('data-theme'), (newTheme) => {
+  // 当主题变化时，重新应用样式
+  if (chatContent.value) {
+    updateChatContent(chatContent.value);
+  }
+});
+
+// 监听字体大小变化，更新聊天内容
+watch(() => document.documentElement.getAttribute('data-font-size'), (newFontSize) => {
+  // 当字体大小变化时，重新应用样式
+  if (chatContent.value) {
+    updateChatContent(chatContent.value);
+  }
 });
 
 // 组件加载时初始化对话内容
