@@ -7,6 +7,8 @@ mod document_renderer;
 use document_renderer::renderer::convert_markdown_with_latex;
 use document_renderer::style::MarkdownStyle;
 
+mod history_msg;
+
 // 定义一个全局状态来存储聊天历史
 static CHAT_HISTORY: Lazy<Mutex<HashMap<u32, ChatHistory>>> = Lazy::new(|| {
     let mut map = HashMap::new();
