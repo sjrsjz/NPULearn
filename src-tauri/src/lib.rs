@@ -1,17 +1,17 @@
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use tauri::Manager;
 
 use tauri_plugin_fs::FsExt;
-
 
 mod document_renderer;
 use document_renderer::renderer::convert_markdown_with_latex;
 use document_renderer::style::MarkdownStyle;
 
 mod aibackend;
+mod setting;
 
 mod history_msg;
 
@@ -474,6 +474,7 @@ HTML字符实体: &copy; &trade; &reg; &euro; &yen; &pound;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
@@ -486,6 +487,10 @@ pub fn run() {
             process_message,
             aibackend::apikey::get_api_key_list_or_create,
             aibackend::apikey::try_save_api_key_list,
+            setting::setting::get_settings,
+            setting::setting::save_settings,
+            setting::setting::get_default_settings,
+            setting::setting::select_save_directory,
         ])
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -504,7 +509,7 @@ pub fn run() {
             } else {
                 eprintln!("Failed to get app_local_data_dir");
             }
-            
+
             if let Ok(app_config_dir) = path.app_config_dir() {
                 println!("app_config_dir: {:?}", app_config_dir);
                 let result = scope.allow_directory(&app_config_dir, false);
@@ -516,7 +521,16 @@ pub fn run() {
                 eprintln!("Failed to get app_config_dir");
             }
 
-            aibackend::apikey::init(app.handle().clone(), checked_app_local_data_dir.unwrap(), checked_app_config_dir.unwrap());
+            aibackend::apikey::init(
+                app.handle().clone(),
+                checked_app_local_data_dir.unwrap(),
+                checked_app_config_dir.clone().unwrap(),
+            );
+
+            setting::setting::init(
+                app.handle().clone(),
+                checked_app_config_dir.unwrap(),
+            );
 
             Ok(())
         })

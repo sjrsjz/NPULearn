@@ -11,6 +11,7 @@
     "http:default",
     "fs:default",
     "clipboard-manager:allow-write-text",
-    "fs:default"
+    "fs:default",
+    "dialog:default"
   ]
 }

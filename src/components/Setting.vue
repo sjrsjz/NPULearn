@@ -33,16 +33,33 @@ const fontSizeOptions = [
     { value: 'large', label: '大' },
 ];
 
-// 模型选项
-const modelOptions = [
-    { value: 'qwen', label: '通义千问' },
-    { value: 'gpt', label: 'GPT' },
-    { value: 'claude', label: 'Claude' },
-];
 
 // 定义 ApiKeyType 枚举
 enum ApiKeyType {
     Gemini = "Gemini"
+}
+
+function get_display_name(key_type: ApiKeyType): string {
+    switch (key_type) {
+        case ApiKeyType.Gemini:
+            return "Gemini";
+        default:
+            return "未知类型";
+    }
+}
+
+// 模型选项
+const modelOptions = ref<{ value: ApiKeyType; label: string; keyType: ApiKeyType }[]>([]);
+
+function loadModelOptions() {
+    // 根据ApiKeyType 枚举动态加载模型选项
+    modelOptions.value = Object.values(ApiKeyType).map((keyType) => {
+        return {
+            value: keyType,
+            label: get_display_name(keyType),
+            keyType: keyType
+        };
+    });
 }
 
 // 定义 ApiKey 接口
@@ -280,6 +297,7 @@ function closeSettings() {
 onMounted(() => {
     loadSettings();
     loadApiKeys();
+    loadModelOptions();
 });
 
 </script>

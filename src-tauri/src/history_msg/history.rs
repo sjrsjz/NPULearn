@@ -1,11 +1,10 @@
+use serde::{de::value::Error, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
-use serde::{de::value::Error, Deserialize, Serialize};
 
 static FILE_PATH: &str = "./resources/chatHistory.json";
 
-#[derive(Clone, Serialize, Deserialize)]
-#[derive(Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub(crate) struct ChatHistory {
     pub(crate) id: u32,
     pub(crate) title: String,
@@ -15,7 +14,10 @@ pub(crate) struct ChatHistory {
 
 #[tauri::command]
 pub fn load_history() -> HashMap<u32, ChatHistory> {
-    println!("Current work path: {}", std::env::current_dir().unwrap().display());
+    println!(
+        "Current work path: {}",
+        std::env::current_dir().unwrap().display()
+    );
 
     // Try to open the file, if it doesn't exist, create a new one
     let file = match File::open(FILE_PATH) {

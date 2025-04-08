@@ -14,9 +14,17 @@ pub fn init(handle: AppHandle, app_data_dir: PathBuf, app_config_dir: PathBuf) {
     let mut app_handle = APP_HANDLE.lock().unwrap();
     *app_handle = Some(handle);
     let mut app_data = APP_DATA_DIR.lock().unwrap();
-    *app_data = Some(app_data_dir);
+    *app_data = Some(app_data_dir.clone());
     let mut app_config = APP_CONFIG_DIR.lock().unwrap();
-    *app_config = Some(app_config_dir);
+    *app_config = Some(app_config_dir.clone());
+    // 检查 app_config_dir 是否存在，如果不存在则创建
+    if !app_config_dir.exists() {
+        std::fs::create_dir_all(&app_config_dir).unwrap();
+    }
+    // 检查 app_data_dir 是否存在，如果不存在则创建
+    if !app_data_dir.exists() {
+        std::fs::create_dir_all(&app_data_dir).unwrap();
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -36,6 +44,10 @@ impl ApiKeyType {
             "Gemini" => Some(ApiKeyType::Gemini),
             _ => None,
         }
+    }
+
+    pub fn get_all_types() -> Vec<ApiKeyType> {
+        vec![ApiKeyType::Gemini]
     }
 }
 
@@ -96,22 +108,46 @@ impl ApiKeyList {
             .as_ref()
             .ok_or_else(|| "App config directory not initialized".to_string())?;
 
-        let mut opt = OpenOptions::new();
-
+        // 确保配置目录存在
         let path_buf = PathBuf::from(app_config_dir);
+        if !path_buf.exists() {
+            std::fs::create_dir_all(&path_buf)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        }
+
+        // 打印路径信息以便调试
+        println!("Loading from path: {:?}", path_buf.join(config_name));
+
+        let mut opt = OpenOptions::new();
         let file_path = FilePath::Path(path_buf.join(config_name));
-        let file = fs.open(file_path, opt.read(true).write(false).create(true).clone());
+
+        // 尝试打开文件
+        let file = fs.open(file_path, opt.read(true).write(false).create(false).clone());
+
         if let std::io::Result::Err(e) = file {
             return Err(format!("Failed to open file: {}", e));
         }
-        let file = file.unwrap();
-        let api_key_list: Result<ApiKeyList, String> =
-            serde_json::from_reader(file).map_err(|e| format!("Failed to read file: {}", e));
 
-        if let Ok(api_key_list) = api_key_list {
-            return Ok(api_key_list);
-        } else {
-            return Err("Failed to parse API key list".to_string());
+        let mut file = file.unwrap();
+
+        // 尝试读取文件内容
+        let mut contents = String::new();
+        if let Err(e) = file.read_to_string(&mut contents) {
+            return Err(format!("Failed to read file content: {}", e));
+        }
+
+        // 如果文件为空，返回空列表
+        if contents.trim().is_empty() {
+            return Ok(ApiKeyList::new());
+        }
+
+        // 否则，尝试解析JSON
+        match serde_json::from_str::<ApiKeyList>(&contents) {
+            Ok(list) => Ok(list),
+            Err(e) => {
+                println!("Failed to parse JSON: {}", e);
+                Err(format!("Failed to parse API key list: {}", e))
+            }
         }
     }
 
@@ -133,7 +169,7 @@ impl ApiKeyList {
         let path_buf = PathBuf::from(app_config_dir);
         let file_path = FilePath::Path(path_buf.join(config_name));
         println!("file_path: {}", file_path);
-        
+
         let file = fs.open(
             file_path,
             opt.read(false)
@@ -178,10 +214,13 @@ impl ApiKeyList {
 
 #[tauri::command]
 pub fn get_api_key_list_or_create(config_name: &str) -> ApiKeyList {
-    let list = ApiKeyList::load_from(config_name);
+    let list: Result<ApiKeyList, String> = ApiKeyList::load_from(config_name);
     match list {
         Ok(list) => list,
-        Err(_) => ApiKeyList::new(),
+        Err(e) => {
+            println!("Error loading API key list: {}", e);
+            ApiKeyList::new()
+        }
     }
 }
 
