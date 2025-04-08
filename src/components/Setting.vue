@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, reactive } from 'vue';
 import { invoke } from "@tauri-apps/api/core";
 // 导入 Vue 的 watch 函数
 import { watch } from 'vue';
@@ -40,6 +40,151 @@ const modelOptions = [
     { value: 'claude', label: 'Claude' },
 ];
 
+// 定义 ApiKeyType 枚举
+enum ApiKeyType {
+    Gemini = "Gemini"
+}
+
+// 定义 ApiKey 接口
+interface ApiKey {
+    key: string;
+    name: string;
+    key_type: ApiKeyType;
+}
+
+
+// 实现 APIKeyList 类
+class APIKeyList {
+    keys: ApiKey[];
+
+    constructor() {
+        this.keys = [];
+    }
+
+    // 添加 API 密钥
+    addKey(key: ApiKey): void {
+        this.keys.push(key);
+    }
+
+    // 移除 API 密钥
+    removeKey(key: ApiKey): void {
+        this.keys = this.keys.filter(k => k.key !== key.key);
+    }
+
+    // 根据类型过滤 API 密钥
+    filterByType(keyType: ApiKeyType): APIKeyList {
+        const result = new APIKeyList();
+        result.keys = this.keys.filter(key => key.key_type === keyType);
+        return result;
+    }
+
+    // 获取随机 API 密钥
+    randomKey(): ApiKey | null {
+        if (this.keys.length === 0) {
+            return null;
+        }
+        const randomIndex = Math.floor(Math.random() * this.keys.length);
+        return this.keys[randomIndex];
+    }
+}
+
+
+// API Key 管理
+const apiKeys = ref<APIKeyList>(new APIKeyList());
+const newApiKey = reactive({
+    key: '',
+    name: '',
+    key_type: ApiKeyType.Gemini
+});
+const isAddingKey = ref(false);
+const apiKeyTypes = Object.values(ApiKeyType);
+const apiKeyConfigFile = 'api_keys.json';
+
+
+
+
+async function getApiKeyListOrCreate(config_name: string): Promise<APIKeyList> {
+    try {
+        const response = await invoke("get_api_key_list_or_create", { configName : config_name });
+        // 将响应转换为 APIKeyList 类的实例
+        const keyList = new APIKeyList();
+        if (response && typeof response === 'object' && 'keys' in response) {
+            const keys = (response as any).keys;
+            if (Array.isArray(keys)) {
+                keys.forEach((key: any) => {
+                    if (key.key && key.name && key.key_type) {
+                        keyList.addKey({
+                            key: key.key,
+                            name: key.name,
+                            key_type: key.key_type as ApiKeyType
+                        });
+                    }
+                });
+            }
+        }
+        return keyList;
+    } catch (error) {
+        console.error("获取 API 密钥列表失败:", error);
+        return new APIKeyList();
+    }
+}
+
+async function saveApiKeyList(config_file: string, apiKeyList: APIKeyList): Promise<void> {
+    try {
+        await invoke("try_save_api_key_list", { configName: config_file, list : apiKeyList });
+        showNotification("API 密钥列表已保存", "success");
+    } catch (error) {
+        console.error("保存 API 密钥列表失败:", error);
+        showNotification("保存 API 密钥列表失败", "error");
+    }
+}
+
+
+// 加载 API Keys
+async function loadApiKeys() {
+    try {
+        const keys = await getApiKeyListOrCreate(apiKeyConfigFile);
+        if (keys) {
+            apiKeys.value = keys;
+        }
+    } catch (error) {
+        console.error("加载 API 密钥失败:", error);
+        showNotification("加载 API 密钥失败", "error");
+    }
+}
+
+// 添加新的 API Key
+async function addApiKey() {
+    if (!newApiKey.key || !newApiKey.name) {
+        showNotification("密钥和名称不能为空", "error");
+        return;
+    }
+
+    const key: ApiKey = {
+        key: newApiKey.key,
+        name: newApiKey.name,
+        key_type: newApiKey.key_type
+    };
+
+    apiKeys.value.addKey(key);
+    await saveApiKeyList(apiKeyConfigFile, apiKeys.value);
+
+    // 重置表单
+    newApiKey.key = '';
+    newApiKey.name = '';
+    isAddingKey.value = false;
+
+    showNotification("API 密钥已添加", "success");
+}
+
+// 删除 API Key
+async function deleteApiKey(key: ApiKey) {
+    if (confirm(`确定要删除 ${key.name} 吗?`)) {
+        apiKeys.value.removeKey(key);
+        await saveApiKeyList(apiKeyConfigFile, apiKeys.value);
+        showNotification("API 密钥已删除", "info");
+    }
+}
 // 保存设置
 async function saveSettings() {
     try {
@@ -134,6 +279,7 @@ function closeSettings() {
 // 组件挂载时加载设置
 onMounted(() => {
     loadSettings();
+    loadApiKeys();
 });
 
 </script>
@@ -267,6 +413,79 @@ onMounted(() => {
                         <input type="number" id="maxTokens" v-model.number="settings.modelConfig.maxTokens" min="512"
                             max="8192" step="512">
                     </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>API 密钥管理</h3>
+                
+                <!-- API Keys 列表 -->
+                <div class="api-keys-list">
+                <div v-if="apiKeys.keys.length === 0" class="empty-state">
+                    暂无 API 密钥，点击下方按钮添加
+                </div>
+                
+                <div v-else class="api-key-items">
+                    <div v-for="(key, index) in apiKeys.keys" :key="index" class="api-key-item">
+                    <div class="api-key-info">
+                        <div class="api-key-name">{{ key.name }}</div>
+                        <div class="api-key-type">{{ key.key_type }}</div>
+                        <div class="api-key-value">{{ key.key.substring(0, 4) + '••••••••' + key.key.substring(key.key.length - 4) }}</div>
+                    </div>
+                    <button class="delete-key-button" @click="deleteApiKey(key)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                        </svg>
+                    </button>
+                    </div>
+                </div>
+                
+                <!-- 添加新 API Key 表单 -->
+                <div v-if="isAddingKey" class="add-key-form">
+                    <div class="form-header">
+                    <h4>添加新密钥</h4>
+                    <button class="close-form" @click="isAddingKey = false">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                    </div>
+                    
+                    <div class="form-group">
+                    <label for="keyName">名称</label>
+                    <input type="text" id="keyName" v-model="newApiKey.name" placeholder="例如: 我的 Gemini API 密钥">
+                    </div>
+                    
+                    <div class="form-group">
+                    <label for="keyType">类型</label>
+                    <select id="keyType" v-model="newApiKey.key_type">
+                        <option v-for="type in apiKeyTypes" :key="type" :value="type">{{ type }}</option>
+                    </select>
+                    </div>
+                    
+                    <div class="form-group">
+                    <label for="apiKeyValue">密钥</label>
+                    <input type="text" id="apiKeyValue" v-model="newApiKey.key" placeholder="输入 API 密钥">
+                    </div>
+                    
+                    <div class="form-actions">
+                    <button class="cancel-button" @click="isAddingKey = false">取消</button>
+                    <button class="add-key-button" @click="addApiKey">添加</button>
+                    </div>
+                </div>
+                
+                <!-- 添加 API Key 按钮 -->
+                <button v-if="!isAddingKey" class="add-api-key" @click="isAddingKey = true">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    添加 API 密钥
+                </button>
                 </div>
             </div>
         </div>
@@ -846,4 +1065,202 @@ select {
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23e2e8f0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
     }
 }
+
+
+/* API Key 管理样式 */
+.api-keys-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.empty-state {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+}
+
+.api-key-items {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.api-key-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+}
+
+.api-key-item:hover {
+    border-color: var(--primary-color);
+}
+
+.api-key-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.api-key-name {
+    font-weight: 500;
+}
+
+.api-key-type {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.api-key-value {
+    font-family: monospace;
+    background-color: rgba(0, 0, 0, 0.03);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.delete-key-button {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    opacity: 0.5;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+}
+
+.delete-key-button:hover {
+    opacity: 1;
+    color: #ef4444;
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+.add-api-key {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--primary-color);
+    cursor: pointer;
+    width: 100%;
+    transition: var(--transition);
+}
+
+.add-api-key:hover {
+    background-color: rgba(79, 70, 229, 0.05);
+}
+
+.add-key-form {
+    padding: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background-color: var(--card-bg);
+}
+
+.form-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.form-header h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.close-form {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: var(--radius-sm);
+    transition: var(--transition);
+}
+
+.close-form:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.form-group {
+    margin-bottom: 12px;
+}
+
+.form-group label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 6px;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.cancel-button,
+.add-key-button {
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.cancel-button {
+    background-color: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+.add-key-button {
+    background-color: var(--primary-color);
+    border: none;
+    color: white;
+}
+
+.cancel-button:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.add-key-button:hover {
+    background-color: var(--primary-hover);
+}
+
+/* 暗黑模式下的适配 */
+@media (prefers-color-scheme: dark) {
+    .api-key-value {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .close-form:hover,
+    .cancel-button:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .api-key-item:hover {
+        border-color: var(--primary-color);
+        background-color: rgba(255, 255, 255, 0.03);
+    }
+}
+
 </style>
