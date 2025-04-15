@@ -1,6 +1,6 @@
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{io::Read, path::PathBuf, sync::Mutex};
+use std::{io::Read, path::PathBuf, rc::Rc, sync::{Arc, Mutex}};
 use tauri::AppHandle;
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 
@@ -189,10 +189,15 @@ pub async fn select_save_directory(app_handle: AppHandle) -> Result<String, Stri
     
     // 非阻塞方式不适合我们的用例，因为我们需要返回结果
     // 使用阻塞式文件夹选择对话框
-    let folder_path = app_handle.dialog().file().blocking_pick_folder();
+    let folder = Arc::new(Mutex::new(Err("".to_string())));
+    let folder_clone = folder.clone();
+    app_handle.dialog().file().pick_file(move |folder_path| {
+        let mut folder_guard = folder_clone.lock().unwrap();
+        match folder_path {
+            Some(path) => *folder_guard = Ok(path.to_string()),
+            None => *folder_guard = Err("No directory selected".to_string()),
+        };
+    });
     
-    match folder_path {
-        Some(path) => Ok(path.to_string()),
-        None => Err("No directory selected".to_string()),
-    }
+    return folder.lock().unwrap().clone();
 }

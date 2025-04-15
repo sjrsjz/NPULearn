@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { writeText, readText } from '@tauri-apps/plugin-clipboard-manager';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.min.css';
 import LoadingLogo from './components/LoadingLogo.vue';
 import Setting from './components/Setting.vue';
 import { refreshGlobalStyles } from './themeUtils.ts';
+import { getMarkdownStyles, MarkdownStyleOptions } from './markdownStyles';
 
 const isAppLoading = ref(true);
 
@@ -192,81 +193,28 @@ function setupExternalLinks() {
   });
 }
 
-// 修改 updateChatContent 函数，添加主题和字体大小支持
+// 修改 updateChatContent 函数，使用新的样式系统
 function updateChatContent(content: string) {
+  console.log("更新聊天内容:", content);
+
+  // 获取当前主题和字体大小
+  const currentTheme = document.documentElement.getAttribute('data-theme') || 'system';
+  const currentFontSize = document.documentElement.getAttribute('data-font-size') || 'medium';
+  // 创建样式配置
+  const styleOptions: MarkdownStyleOptions = {
+    theme: currentTheme === 'system' ? 'auto' : (currentTheme as 'light' | 'dark'),
+    fontSize: currentFontSize as 'small' | 'medium' | 'large'
+  };
+
+  // 获取生成的新样式
+  const newStyleContent = getMarkdownStyles(styleOptions);
+
   // 将内容包装在一个有范围限制的容器中
-  processedChatContent.value = `<div class="scoped-content">${content}</div>`;
+  processedChatContent.value = `<div class="scoped-content">${content}<style>${newStyleContent}</style></div>`;
 
   // 下一个 tick 后处理样式和代码高亮
   nextTick(() => {
-    // 处理样式范围
-    const styleElements = document.querySelectorAll('.chat-messages style');
-    styleElements.forEach(style => {
-      const styleContent = style.textContent || '';
 
-      // 处理 html 和 body 选择器
-      let newStyleContent = styleContent.replace(/html|body/g, '.scoped-content');
-
-      // 获取当前主题和字体大小
-      const currentTheme = document.documentElement.getAttribute('data-theme') || 'system';
-      const currentFontSize = document.documentElement.getAttribute('data-font-size') || 'medium';
-
-      // 根据主题添加相应的样式
-      if (currentTheme === 'dark' || (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-        // 为暗色主题添加样式覆盖
-        newStyleContent += `
-          .scoped-content {
-            color: #f1f5f9 !important;
-            background-color: transparent !important;
-          }
-          .scoped-content a { color: #6366f1 !important; }
-          .scoped-content code { background-color: rgba(71, 85, 105, 0.3) !important; }
-          .scoped-content pre { background-color: #1e293b !important; }
-          .scoped-content blockquote { color: #94a3b8 !important; border-left-color: #475569 !important; }
-          .scoped-content table th { background-color: #1e293b !important; }
-          .scoped-content table td, .scoped-content table th { border-color: #475569 !important; }
-          .scoped-content hr { background-color: #475569 !important; }
-          .scoped-content h1, .scoped-content h2 { border-bottom-color: #475569 !important; }
-          .scoped-content .system { background-color: #2d333b !important; }
-          .scoped-content .user { background-color: #254254 !important; }
-          .scoped-content .message-time { color: #aaa !important; }
-        `;
-      }
-
-      // 根据字体大小添加相应的样式
-      let fontSizeBase, fontSizeSm, fontSizeLg;
-      switch (currentFontSize) {
-        case 'small':
-          fontSizeBase = '14px';
-          fontSizeSm = '12px';
-          fontSizeLg = '16px';
-          break;
-        case 'large':
-          fontSizeBase = '18px';
-          fontSizeSm = '16px';
-          fontSizeLg = '20px';
-          break;
-        default: // medium
-          fontSizeBase = '16px';
-          fontSizeSm = '14px';
-          fontSizeLg = '18px';
-      }
-
-      newStyleContent += `
-        .scoped-content { font-size: ${fontSizeBase} !important; }
-        .scoped-content code, .scoped-content pre { font-size: calc(${fontSizeBase} * 0.85) !important; }
-        .scoped-content h1 { font-size: calc(${fontSizeBase} * 2) !important; }
-        .scoped-content h2 { font-size: calc(${fontSizeBase} * 1.5) !important; }
-        .scoped-content h3 { font-size: calc(${fontSizeBase} * 1.25) !important; }
-        .scoped-content h4 { font-size: ${fontSizeBase} !important; }
-        .scoped-content h5 { font-size: ${fontSizeSm} !important; }
-        .scoped-content h6 { font-size: calc(${fontSizeSm} * 0.95) !important; }
-        .scoped-content .message-time { font-size: ${fontSizeSm} !important; }
-      `;
-
-      style.textContent = newStyleContent;
-    });
-    refreshGlobalStyles();
     // 应用代码高亮
     applyHighlight();
 
@@ -277,6 +225,7 @@ function updateChatContent(content: string) {
     setupExternalLinks();
   });
 }
+
 // 修改现有方法以使用新函数
 async function loadChatContent() {
   isLoading.value = true;
@@ -337,19 +286,14 @@ watch(chatContent, () => {
 
 // 监听主题变化，更新聊天内容
 watch(() => document.documentElement.getAttribute('data-theme'), (newTheme) => {
+  console.log("主题变化:", newTheme);
   // 当主题变化时，重新应用样式
   if (chatContent.value) {
     updateChatContent(chatContent.value);
   }
 });
 
-// 监听字体大小变化，更新聊天内容
-watch(() => document.documentElement.getAttribute('data-font-size'), (newFontSize) => {
-  // 当字体大小变化时，重新应用样式
-  if (chatContent.value) {
-    updateChatContent(chatContent.value);
-  }
-});
+
 
 // 组件加载时初始化对话内容
 onMounted(async () => {
@@ -372,12 +316,31 @@ onMounted(async () => {
   }
 
   window.addEventListener('resize', handleResize);
-});
 
+  // 添加事件监听器以响应主题和字体大小变化
+  window.addEventListener('themeChanged', (e: Event) => {
+    const customEvent = e as CustomEvent;
+    console.log('主题已变更:', customEvent.detail);
+    if (chatContent.value) {
+      updateChatContent(chatContent.value);
+    }
+  });
+
+  window.addEventListener('fontSizeChanged', (e: Event) => {
+    const customEvent = e as CustomEvent;
+    console.log('字体大小已变更:', customEvent.detail);
+    if (chatContent.value) {
+      updateChatContent(chatContent.value);
+    }
+  });
+});
 
 // 组件卸载时清理事件监听
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize);
+  // 清除主题和字体大小变化的事件监听
+  window.removeEventListener('themeChanged', (_: Event) => { });
+  window.removeEventListener('fontSizeChanged', (_: Event) => { });
 });
 </script>
 
@@ -524,6 +487,7 @@ body {
   width: 100%;
 }
 
+
 :root {
   --primary-color: #4f46e5;
   --primary-hover: #4338ca;
@@ -552,6 +516,28 @@ body {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* 字体大小设置 */
+:root[data-font-size="small"] {
+  --font-size-base: 14px;
+  --font-size-sm: 12px;
+  --font-size-lg: 16px;
+  --font-size-heading: 18px;
+}
+
+:root[data-font-size="medium"] {
+  --font-size-base: 16px;
+  --font-size-sm: 14px;
+  --font-size-lg: 18px;
+  --font-size-heading: 20px;
+}
+
+:root[data-font-size="large"] {
+  --font-size-base: 18px;
+  --font-size-sm: 16px;
+  --font-size-lg: 20px;
+  --font-size-heading: 24px;
 }
 
 body {
@@ -620,7 +606,7 @@ body {
 }
 
 .history-header h3 {
-  font-size: 1.125rem;
+  font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--text-color);
   margin: 0;
@@ -664,7 +650,7 @@ body {
   align-items: center;
   justify-content: center;
   transition: var(--transition);
-  font-size: 0.95rem;
+  font-size: var(--font-size-base);
   box-shadow: var(--shadow-sm);
 }
 
@@ -729,15 +715,15 @@ body {
 
 .history-title {
   font-weight: 500;
-  font-size: 0.95rem;
+  font-size: var(--font-size-base);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .history-time {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  color: var (--text-secondary);
   margin-top: 2px;
 }
 
@@ -809,7 +795,7 @@ body {
   align-items: center;
   justify-content: center;
   transition: var(--transition);
-  font-size: 0.95rem;
+  font-size: var(--font-size-base);
   gap: 8px;
 }
 
@@ -882,7 +868,7 @@ body {
 }
 
 .chat-header h1 {
-  font-size: 1.25rem;
+  font-size: var(--font-size-lg);
   font-weight: 600;
   line-height: 1;
   /* 固定行高 */
@@ -1003,7 +989,7 @@ body {
   padding-right: 50px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
-  font-size: 1rem;
+  font-size: var(--font-size-base);
   outline: none;
   transition: var(--transition);
   font-family: inherit;
@@ -1047,7 +1033,7 @@ body {
 
 .chat-messages .mjx-chtml {
   margin: 0.5em 0;
-  font-size: 1.1em;
+  font-size: var(--font-size-lg);
 }
 
 .chat-messages .mjx-math {
@@ -1165,7 +1151,7 @@ body {
 
 .chat-messages a::after {
   content: '📋';
-  font-size: 0.8em;
+  font-size: var(--font-size-sm);
   position: absolute;
   right: 0;
   top: 0;
@@ -1226,7 +1212,7 @@ body {
 /* 小屏幕模式 */
 @media (max-width: 767px) {
   .chat-header h1 {
-    font-size: 1.1rem;
+    font-size: var(--font-size-lg);
   }
 
   .sidebar-open {
@@ -1261,7 +1247,7 @@ body {
 
   .message-input {
     background-color: #1e293b;
-    color: var(--text-color);
+    color: var(--text色);
     border-color: #475569;
   }
 
