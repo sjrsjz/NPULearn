@@ -3,8 +3,7 @@ import { ref, onMounted, reactive } from 'vue';
 import { invoke } from "@tauri-apps/api/core";
 // 导入 Vue 的 watch 函数
 import { watch } from 'vue';
-import { app } from '@tauri-apps/api';
-import { applyTheme } from '../themeUtils';
+import { applyFontSize, applyTheme } from '../themeUtils';
 
 const emit = defineEmits(['close']);
 
@@ -35,6 +34,8 @@ const fontSizeOptions = [
     { value: 'large', label: '大' },
 ];
 
+const theme_before_save = ref('system');
+const font_size_before_save = ref('medium');
 
 // 定义 ApiKeyType 枚举
 enum ApiKeyType {
@@ -124,7 +125,7 @@ const apiKeyConfigFile = 'api_keys.json';
 
 async function getApiKeyListOrCreate(config_name: string): Promise<APIKeyList> {
     try {
-        const response = await invoke("get_api_key_list_or_create", { configName : config_name });
+        const response = await invoke("get_api_key_list_or_create", { configName: config_name });
         // 将响应转换为 APIKeyList 类的实例
         const keyList = new APIKeyList();
         if (response && typeof response === 'object' && 'keys' in response) {
@@ -150,7 +151,7 @@ async function getApiKeyListOrCreate(config_name: string): Promise<APIKeyList> {
 
 async function saveApiKeyList(config_file: string, apiKeyList: APIKeyList): Promise<void> {
     try {
-        await invoke("try_save_api_key_list", { configName: config_file, list : apiKeyList });
+        await invoke("try_save_api_key_list", { configName: config_file, list: apiKeyList });
         showNotification("API 密钥列表已保存", "success");
     } catch (error) {
         console.error("保存 API 密钥列表失败:", error);
@@ -208,6 +209,8 @@ async function deleteApiKey(key: ApiKey) {
 async function saveSettings() {
     try {
         await invoke("save_settings", { settings: settings.value });
+        theme_before_save.value = settings.value.theme as 'system' | 'light' | 'dark';
+        font_size_before_save.value = settings.value.font_size as 'small' | 'medium' | 'large';
         showNotification("设置已保存", "success");
     } catch (error) {
         console.error("保存设置失败:", error);
@@ -272,7 +275,7 @@ watch(
 watch(
     () => settings.value.font_size,
     (newFontSize: string) => {
-        applyTheme(settings.value.theme as 'system' | 'light' | 'dark');
+        applyFontSize(newFontSize as 'small' | 'medium' | 'large');
     }
 );
 
@@ -284,6 +287,9 @@ async function loadSettings() {
         if (savedSettings) {
             settings.value = { ...settings.value, ...savedSettings };
             applyTheme(settings.value.theme as 'system' | 'light' | 'dark');
+            applyFontSize(settings.value.font_size as 'small' | 'medium' | 'large');
+            theme_before_save.value = settings.value.theme as 'system' | 'light' | 'dark';
+            font_size_before_save.value = settings.value.font_size as 'small' | 'medium' | 'large';
         }
     } catch (error) {
         console.error("加载设置失败:", error);
@@ -292,6 +298,8 @@ async function loadSettings() {
 
 // 关闭设置界面
 function closeSettings() {
+    applyTheme(theme_before_save.value as 'system' | 'light' | 'dark');
+    applyFontSize(font_size_before_save.value as 'small' | 'medium' | 'large');
     emit('close');
 }
 
@@ -443,8 +451,8 @@ onMounted(() => {
                 <div class="settings-item">
                     <label for="temperature">温度参数</label>
                     <div class="settings-controls range-slider">
-                        <input type="range" id="temperature" v-model.number="settings.model_config.temperature" min="0.1"
-                            max="1" step="0.1">
+                        <input type="range" id="temperature" v-model.number="settings.model_config.temperature"
+                            min="0.1" max="1" step="0.1">
                         <span class="range-value">{{ settings.model_config.temperature.toFixed(1) }}</span>
                     </div>
                 </div>
@@ -460,74 +468,82 @@ onMounted(() => {
 
             <div class="settings-section">
                 <h3>API 密钥管理</h3>
-                
+
                 <!-- API Keys 列表 -->
                 <div class="api-keys-list">
-                <div v-if="apiKeys.keys.length === 0" class="empty-state">
-                    暂无 API 密钥，点击下方按钮添加
-                </div>
-                
-                <div v-else class="api-key-items">
-                    <div v-for="(key, index) in apiKeys.keys" :key="index" class="api-key-item">
-                    <div class="api-key-info">
-                        <div class="api-key-name">{{ key.name }}</div>
-                        <div class="api-key-type">{{ key.key_type }}</div>
-                        <div class="api-key-value">{{ key.key.substring(0, 4) + '••••••••' + key.key.substring(key.key.length - 4) }}</div>
+                    <div v-if="apiKeys.keys.length === 0" class="empty-state">
+                        暂无 API 密钥，点击下方按钮添加
                     </div>
-                    <button class="delete-key-button" @click="deleteApiKey(key)">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        <line x1="10" y1="11" x2="10" y2="17"></line>
-                        <line x1="14" y1="11" x2="14" y2="17"></line>
+
+                    <div v-else class="api-key-items">
+                        <div v-for="(key, index) in apiKeys.keys" :key="index" class="api-key-item">
+                            <div class="api-key-info">
+                                <div class="api-key-name">{{ key.name }}</div>
+                                <div class="api-key-type">{{ key.key_type }}</div>
+                                <div class="api-key-value">{{ key.key.substring(0, 4) + '••••••••' +
+                                    key.key.substring(key.key.length - 4) }}</div>
+                            </div>
+                            <button class="delete-key-button" @click="deleteApiKey(key)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                    <path
+                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
+                                    </path>
+                                    <line x1="10" y1="11" x2="10" y2="17"></line>
+                                    <line x1="14" y1="11" x2="14" y2="17"></line>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 添加新 API Key 表单 -->
+                    <div v-if="isAddingKey" class="add-key-form">
+                        <div class="form-header">
+                            <h4>添加新密钥</h4>
+                            <button class="close-form" @click="isAddingKey = false">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="keyName">名称</label>
+                            <input type="text" id="keyName" v-model="newApiKey.name" placeholder="例如: 我的 Gemini API 密钥">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="keyType">类型</label>
+                            <select id="keyType" v-model="newApiKey.key_type">
+                                <option v-for="type in apiKeyTypes" :key="type" :value="type">{{ type }}</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="apiKeyValue">密钥</label>
+                            <input type="text" id="apiKeyValue" v-model="newApiKey.key" placeholder="输入 API 密钥">
+                        </div>
+
+                        <div class="form-actions">
+                            <button class="cancel-button" @click="isAddingKey = false">取消</button>
+                            <button class="add-key-button" @click="addApiKey">添加</button>
+                        </div>
+                    </div>
+
+                    <!-- 添加 API Key 按钮 -->
+                    <button v-if="!isAddingKey" class="add-api-key" @click="isAddingKey = true">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
                         </svg>
+                        添加 API 密钥
                     </button>
-                    </div>
-                </div>
-                
-                <!-- 添加新 API Key 表单 -->
-                <div v-if="isAddingKey" class="add-key-form">
-                    <div class="form-header">
-                    <h4>添加新密钥</h4>
-                    <button class="close-form" @click="isAddingKey = false">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                    </button>
-                    </div>
-                    
-                    <div class="form-group">
-                    <label for="keyName">名称</label>
-                    <input type="text" id="keyName" v-model="newApiKey.name" placeholder="例如: 我的 Gemini API 密钥">
-                    </div>
-                    
-                    <div class="form-group">
-                    <label for="keyType">类型</label>
-                    <select id="keyType" v-model="newApiKey.key_type">
-                        <option v-for="type in apiKeyTypes" :key="type" :value="type">{{ type }}</option>
-                    </select>
-                    </div>
-                    
-                    <div class="form-group">
-                    <label for="apiKeyValue">密钥</label>
-                    <input type="text" id="apiKeyValue" v-model="newApiKey.key" placeholder="输入 API 密钥">
-                    </div>
-                    
-                    <div class="form-actions">
-                    <button class="cancel-button" @click="isAddingKey = false">取消</button>
-                    <button class="add-key-button" @click="addApiKey">添加</button>
-                    </div>
-                </div>
-                
-                <!-- 添加 API Key 按钮 -->
-                <button v-if="!isAddingKey" class="add-api-key" @click="isAddingKey = true">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                    添加 API 密钥
-                </button>
                 </div>
             </div>
         </div>
@@ -593,18 +609,21 @@ onMounted(() => {
     --font-size-base: 14px;
     --font-size-sm: 12px;
     --font-size-lg: 16px;
+    --font-size-heading: 18px;
 }
 
 :root[data-font-size="medium"] {
     --font-size-base: 16px;
     --font-size-sm: 14px;
     --font-size-lg: 18px;
+    --font-size-heading: 20px;
 }
 
 :root[data-font-size="large"] {
     --font-size-base: 18px;
     --font-size-sm: 16px;
     --font-size-lg: 20px;
+    --font-size-heading: 24px;
 }
 
 /* 应用字体大小 */
@@ -689,7 +708,7 @@ body {
 }
 
 .settings-header h2 {
-    font-size: 1.5rem;
+    font-size: calc(var(--font-size-heading) * 1.1 * 1.1);
     font-weight: 600;
 }
 
@@ -708,7 +727,7 @@ body {
 }
 
 .settings-section h3 {
-    font-size: 1.1rem;
+    font-size: calc(var(--font-size-heading) * 1.1);
     font-weight: 600;
     margin-bottom: 16px;
     padding-bottom: 8px;
@@ -764,7 +783,7 @@ input[type="number"] {
     border-radius: var(--radius-sm);
     background-color: var(--card-bg);
     color: var(--text-color);
-    font-size: 0.95rem;
+    font-size: var(--font-size-base);
     transition: var(--transition);
 }
 
@@ -1235,7 +1254,7 @@ select {
 }
 
 .api-key-type {
-    font-size: 0.85rem;
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
 }
 
@@ -1244,7 +1263,7 @@ select {
     background-color: rgba(0, 0, 0, 0.03);
     padding: 2px 6px;
     border-radius: 4px;
-    font-size: 0.9rem;
+    font-size: var(--font-size-sm);
 }
 
 .delete-key-button {
@@ -1298,7 +1317,7 @@ select {
 }
 
 .form-header h4 {
-    font-size: 1rem;
+    font-size: calc(var(--font-size-heading));
     font-weight: 600;
     margin: 0;
 }
@@ -1382,5 +1401,4 @@ select {
         background-color: rgba(255, 255, 255, 0.03);
     }
 }
-
 </style>

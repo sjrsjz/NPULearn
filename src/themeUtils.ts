@@ -23,6 +23,7 @@ export function applyTheme(theme: 'system' | 'light' | 'dark'): void {
 
     // 触发自定义事件，通知应用程序主题已更改
     window.dispatchEvent(new CustomEvent('themeChanged', { detail: theme }));
+    
 }
 
 /**
@@ -147,7 +148,7 @@ export function refreshGlobalStyles(): void {
 }
 
 // 监听系统颜色方案变化
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (_) => {
     const theme = document.documentElement.getAttribute('data-theme');
     if (theme === 'system') {
         refreshGlobalStyles();
