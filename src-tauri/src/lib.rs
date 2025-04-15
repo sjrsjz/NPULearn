@@ -2,6 +2,7 @@ use history_msg::history::ChatHistory;
 use history_msg::history::{load_history, save_history};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::arch::x86_64;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -18,16 +19,12 @@ mod setting;
 mod history_msg;
 
 // 定义一个全局状态来存储聊天历史
-static CHAT_HISTORY: Lazy<Mutex<HashMap<u32, ChatHistory>>> = Lazy::new(|| {
-    let mut map = load_history().unwrap_or_else(|_| HashMap::new());
-    // 如果加载失败，返回一个空的 HashMap
-    println!("加载聊天历史: {:?}", map);
-    Mutex::new(map)
-});
+static CHAT_HISTORY: Lazy<Mutex<HashMap<u32, ChatHistory>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 // 定义当前活跃的对话ID
 static CURRENT_CHAT_ID: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(1)); // 默认为对话1
-static NEXT_CHAT_ID: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(4)); // 下一个新建对话的ID
+static NEXT_CHAT_ID: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(2)); // 下一个新建对话的ID
 
 // 聊天历史结构体
 // #[derive(Clone, Serialize, Deserialize)]
@@ -44,6 +41,30 @@ struct ChatHistoryItem {
     id: u32,
     title: String,
     time: String,
+}
+
+fn initialize_history() {
+    match load_history() {
+        Ok(map) => {
+            // println!("load history: {:?}", map);
+            let mut history = CHAT_HISTORY.lock().unwrap();
+
+            // 检查是否需要更新 NEXT_CHAT_ID
+            if !map.is_empty() {
+                let max_id = map.keys().max().unwrap_or(&3);
+                let mut next_id = NEXT_CHAT_ID.lock().unwrap();
+                if *max_id >= *next_id {
+                    *next_id = max_id + 1;
+                }
+            }
+
+            // Move map after we've used it
+            *history = map;
+        }
+        Err(e) => {
+            println!("Failed to load history: {}", e);
+        }
+    }
 }
 
 // 获取聊天历史列表
@@ -200,7 +221,9 @@ fn create_new_chat() -> String {
     // 添加到历史记录
     let mut history = CHAT_HISTORY.lock().unwrap();
     history.insert(new_id, new_chat);
-    save_history(&history.clone());
+    save_history(&history).unwrap_or_else(|e| {
+        println!("Failed to save history: {}", e);
+    });
 
     content
 }
@@ -458,8 +481,13 @@ HTML字符实体: &copy; &trade; &reg; &euro; &yen; &pound;
 
     // 更新当前对话的内容
     let mut history = CHAT_HISTORY.lock().unwrap();
+    let history_clone = history.clone(); // 克隆历史记录以便保存
     if let Some(chat) = history.get_mut(&current_id) {
-        chat.content = html.clone();
+        chat.content += html.clone().as_str();
+        save_history(&history_clone).unwrap_or_else(|e| {
+            println!("Failed to save history: {}", e);
+        });
+        return chat.content.clone();
     } else {
         // 如果当前对话不存在，创建一个新对话
         let new_chat = ChatHistory {
@@ -469,9 +497,12 @@ HTML字符实体: &copy; &trade; &reg; &euro; &yen; &pound;
             content: html.clone(),
         };
         history.insert(current_id, new_chat);
+        // 这里的用法是正确的，因为 history 是 HashMap<u32, ChatHistory>
+        save_history(&history).unwrap_or_else(|e| {
+            println!("Failed to save history: {}", e);
+        });
+        return html;
     }
-    save_history(&history.clone());
-    html
 }
 
 // 确保在 run 函数中注册所有命令
@@ -525,8 +556,15 @@ pub fn run() {
                 eprintln!("Failed to get app_config_dir");
             }
 
-            aibackend::apikey::init(app.handle().clone(), checked_app_local_data_dir.unwrap(), checked_app_config_dir.unwrap());
+            aibackend::apikey::init(
+                app.handle().clone(),
+                checked_app_local_data_dir.unwrap(),
+                checked_app_config_dir.unwrap(),
+            );
 
+            let app_local_data_dir = path.app_local_data_dir();
+            history_msg::history::init(app.handle().clone(), app_local_data_dir.unwrap());
+            initialize_history();
             Ok(())
         })
         .run(tauri::generate_context!())

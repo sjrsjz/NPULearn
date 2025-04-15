@@ -25,6 +25,7 @@ pub fn init(handle: AppHandle, app_data_dir: PathBuf, app_config_dir: PathBuf) {
     if !app_data_dir.exists() {
         std::fs::create_dir_all(&app_data_dir).unwrap();
     }
+    println!("This app_data: {:?}", app_data_dir);
 }
 
 #[derive(Clone, PartialEq, Eq)]

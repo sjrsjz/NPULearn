@@ -26,7 +26,10 @@ pub fn init(handle: AppHandle, app_data_dir: PathBuf) {
     let mut app_handle = APP_HANDLE.lock().unwrap();
     *app_handle = Some(handle);
     let mut app_data = APP_DATA_DIR.lock().unwrap();
-    *app_data = Some(app_data_dir);
+    *app_data = Some(app_data_dir.clone());
+    if !app_data_dir.exists() {
+        std::fs::create_dir_all(&app_data_dir).unwrap();
+    }
 }
 
 // #[tauri::command]
@@ -37,27 +40,45 @@ pub fn load_history() -> Result<HashMap<u32, ChatHistory>, String> {
         .ok_or_else(|| "App handle not initialized".to_string())?;
 
     let fs = app_handle.fs();
-    let app_data_dir = APP_DATA_DIR.lock().unwrap();
-    let app_data_dir = app_data_dir
+
+    let app_data_dir_lock = APP_DATA_DIR.lock().unwrap();
+    let app_data_dir = app_data_dir_lock
         .as_ref()
         .ok_or_else(|| "App data directory not initialized".to_string())?;
-    let mut opt = OpenOptions::new();
-    let path_buf = PathBuf::from(app_data_dir);
-    let file_path = FilePath::Path(path_buf.join(FILE_NAME));
 
-    let file = fs.open(file_path, opt.read(true).write(false).create(true).clone());
+    // 确保配置目录存在
+    let path_buf = PathBuf::from(app_data_dir);
+    if !path_buf.exists() {
+        std::fs::create_dir_all(&path_buf)
+            .map_err(|e| format!("Failed to create data directory: {}", e))?;
+    }
+
+    let mut opt = OpenOptions::new();
+    let file_path = FilePath::Path(path_buf.join(FILE_NAME));
+    println!("file_path: {:?}", file_path);
+
+    let file = fs.open(file_path, opt.read(true).write(false).create(false).clone());
 
     if let std::io::Result::Err(e) = file {
         return Err(format!("Failed to open file: {}", e));
     }
-    let file = file.unwrap();
-    let chat_history: Result<HashMap<u32, ChatHistory>, String> =
-        serde_json::from_reader(file).map_err(|e| format!("Failed to read file: {}", e));
+    let mut file = file.unwrap();
+    let mut contents = String::new();
 
-    if let Ok(chat_history) = chat_history {
-        return Ok(chat_history);
-    } else {
-        return Err("Failed to parse chat history".to_string());
+    if let Err(e) = file.read_to_string(&mut contents) {
+        return Err(format!("Failed to read file content: {}", e));
+    }
+
+    if contents.trim().is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    match serde_json::from_str::<HashMap<u32, ChatHistory>>(&contents) {
+        Ok(chat_history) => Ok(chat_history),
+        Err(e) => {
+            println!("Failed to parse JSON: {}", e);
+            Err(format!("Failed to parse chat history: {}", e))
+        }
     }
 }
 
@@ -69,14 +90,15 @@ pub fn save_history(history: &HashMap<u32, ChatHistory>) -> Result<(), String> {
         .ok_or_else(|| "App handle not initialized".to_string())?;
     let fs = app_handle.fs();
 
-    let app_data_dir = APP_DATA_DIR.lock().unwrap();
-    let app_data_dir = app_data_dir
+    let app_data_dir_lock = APP_DATA_DIR.lock().unwrap();
+    let app_data_dir = app_data_dir_lock
         .as_ref()
         .ok_or_else(|| "App data directory not initialized".to_string())?;
     let mut opt = OpenOptions::new();
 
     let path_buf = PathBuf::from(app_data_dir);
     let file_path = FilePath::Path(path_buf.join(FILE_NAME));
+    println!("file_path: {:?}", file_path);
 
     let file = fs.open(
         file_path,
