@@ -1,11 +1,12 @@
+use history_msg::history::ChatHistory;
+use history_msg::history::{load_history, save_history};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use tauri::Manager;
 
 use tauri_plugin_fs::FsExt;
-
 
 mod document_renderer;
 use document_renderer::renderer::convert_markdown_with_latex;
@@ -17,8 +18,9 @@ mod history_msg;
 
 // 定义一个全局状态来存储聊天历史
 static CHAT_HISTORY: Lazy<Mutex<HashMap<u32, ChatHistory>>> = Lazy::new(|| {
-    let mut map = HashMap::new();
-
+    let mut map = load_history().unwrap_or_else(|_| HashMap::new());
+    // 如果加载失败，返回一个空的 HashMap
+    println!("加载聊天历史: {:?}", map);
     Mutex::new(map)
 });
 
@@ -27,13 +29,13 @@ static CURRENT_CHAT_ID: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(1)); // 默�
 static NEXT_CHAT_ID: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(4)); // 下一个新建对话的ID
 
 // 聊天历史结构体
-#[derive(Clone, Serialize, Deserialize)]
-struct ChatHistory {
-    id: u32,
-    title: String,
-    time: String,
-    content: String,
-}
+// #[derive(Clone, Serialize, Deserialize)]
+// struct ChatHistory {
+//     id: u32,
+//     title: String,
+//     time: String,
+//     content: String,
+// }
 
 // 聊天历史项目（不包含内容，用于列表展示）
 #[derive(Clone, Serialize, Deserialize)]
@@ -197,6 +199,7 @@ fn create_new_chat() -> String {
     // 添加到历史记录
     let mut history = CHAT_HISTORY.lock().unwrap();
     history.insert(new_id, new_chat);
+    save_history(&history.clone());
 
     content
 }
@@ -466,7 +469,7 @@ HTML字符实体: &copy; &trade; &reg; &euro; &yen; &pound;
         };
         history.insert(current_id, new_chat);
     }
-
+    save_history(&history.clone());
     html
 }
 
@@ -504,7 +507,7 @@ pub fn run() {
             } else {
                 eprintln!("Failed to get app_local_data_dir");
             }
-            
+
             if let Ok(app_config_dir) = path.app_config_dir() {
                 println!("app_config_dir: {:?}", app_config_dir);
                 let result = scope.allow_directory(&app_config_dir, false);
@@ -516,7 +519,15 @@ pub fn run() {
                 eprintln!("Failed to get app_config_dir");
             }
 
-            aibackend::apikey::init(app.handle().clone(), checked_app_local_data_dir.unwrap(), checked_app_config_dir.unwrap());
+            aibackend::apikey::init(
+                app.handle().clone(),
+                checked_app_local_data_dir.unwrap(),
+                checked_app_config_dir.unwrap(),
+            );
+            
+            let app_data_dir = app.path().app_data_dir().unwrap();
+
+            history_msg::history::init(app.handle().clone(), app_data_dir);
 
             Ok(())
         })
