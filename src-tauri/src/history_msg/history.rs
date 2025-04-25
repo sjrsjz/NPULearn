@@ -1,28 +1,75 @@
-use serde::de::value::Error;
 use std::collections::HashMap;
-use std::fs::File;
-use std::os::windows::io::HandleOrInvalid;
+use std::sync::Arc;
 use std::{io::Read, path::PathBuf, sync::Mutex};
 
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tauri::{utils::config, AppHandle};
+use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
-static APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| Mutex::new(None));
+
+use crate::document_renderer::renderer::convert_markdown_with_latex;
+static APP_HANDLE: Lazy<Mutex<Option<Arc<Box<AppHandle>>>>> = Lazy::new(|| Mutex::new(None));
 static APP_DATA_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 
-// static FILE_PATH: &str = "./resources/chatHistory.json";
-static FILE_NAME: &str = "chatHistory.json";
+static FILE_NAME: &str = "chat_history.json";
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub(crate) enum ChatMessageType {
+    User,
+    System,
+    Assistant,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub(crate) struct ChatMessage {
+    pub(crate) msgtype: ChatMessageType,
+    pub(crate) time: String,
+    pub(crate) content: String,
+}
+#[allow(dead_code)]
+impl ChatMessage {
+    pub(crate) fn markdown_to_html(&self) -> Self {
+        let html = convert_markdown_with_latex(&self.content);
+        return Self {
+            msgtype: self.msgtype.clone(),
+            time: self.time.clone(),
+            content: html,
+        };
+    }
+    pub(crate) fn markdown_to_html_vec(messages : &Vec<Self>) -> Vec<Self> {
+        let mut html_messages = Vec::new();
+        for message in messages {
+            html_messages.push(message.markdown_to_html());
+        }
+        return html_messages;
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub(crate) struct ChatHistory {
     pub(crate) id: u32,
     pub(crate) title: String,
     pub(crate) time: String,
-    pub(crate) content: String,
+    pub(crate) content: Vec<ChatMessage>,
 }
 
-pub fn init(handle: AppHandle, app_data_dir: PathBuf) {
+#[allow(dead_code)]
+impl ChatHistory {
+    pub(crate) fn markdown_to_html(&self) -> Self {
+        let mut content = self.content.clone();
+        for i in 0..content.len() {
+            content[i] = content[i].markdown_to_html();
+        }
+        return Self {
+            id: self.id,
+            title: self.title.clone(),
+            time: self.time.clone(),
+            content,
+        };
+    }
+}
+
+pub fn init(handle: Arc<Box<AppHandle>>, app_data_dir: PathBuf) {
     let mut app_handle = APP_HANDLE.lock().unwrap();
     *app_handle = Some(handle);
     let mut app_data = APP_DATA_DIR.lock().unwrap();

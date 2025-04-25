@@ -296,6 +296,7 @@ async function loadSettings() {
     }
 }
 
+
 // 关闭设置界面
 function closeSettings() {
     applyTheme(theme_before_save.value as 'system' | 'light' | 'dark');
@@ -323,6 +324,7 @@ async function initAppSettings() {
         console.error("初始化应用设置失败:", error);
     }
 }
+
 
 // 组件挂载时加载设置
 onMounted(() => {

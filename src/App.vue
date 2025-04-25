@@ -2,12 +2,22 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { listen } from '@tauri-apps/api/event';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.min.css';
 import LoadingLogo from './components/LoadingLogo.vue';
 import Setting from './components/Setting.vue';
 import { refreshGlobalStyles } from './themeUtils.ts';
 import { getMarkdownStyles, MarkdownStyleOptions } from './markdownStyles';
+import { useSettingsProvider } from './composables/useSettings';
+import { Window } from '@tauri-apps/api/window';
+
+// 初始化全局设置，在整个应用中提供设置
+const {
+  notification,
+  showNotification,
+  initAppSettings
+} = useSettingsProvider();
 
 const isAppLoading = ref(true);
 
@@ -18,17 +28,33 @@ interface ChatHistoryItem {
   time: string;
 }
 
+// 定义完整的聊天历史结构
+interface ChatHistory {
+  id: number;
+  title: string;
+  time: string;
+  content: ChatMessage[];
+}
+
+// 定义聊天消息的类型
+interface ChatMessage {
+  msgtype: 'User' | 'System' | 'Assistant';
+  time: string;
+  content: string;
+}
+
 // 改为空数组，将从后端加载
 const chatHistory = ref<ChatHistoryItem[]>([]);
 const windowWidth = ref(window.innerWidth);
 const isHistoryOpen = ref(windowWidth.value >= 768);
 const inputMessage = ref("");
-const chatContent = ref("");
+const chatContent = ref<ChatMessage[]>([]);
 const isLoading = ref(false);
 
 const showSettings = ref(false);
 
-
+// 添加流式消息处理需要的状态变量
+const isStreaming = ref(false);
 
 // 切换设置界面的显示
 function toggleSettings() {
@@ -125,16 +151,16 @@ function handleResize() {
   }
 }
 
+
 // 从后端加载聊天历史
 async function loadChatHistory() {
   try {
+    // 从后端API获取聊天历史列表
     chatHistory.value = await invoke("get_chat_history");
+    console.log("已加载聊天历史:", chatHistory.value);
   } catch (error) {
     console.error("加载聊天历史失败:", error);
-    // 如果失败，使用一些默认数据
-    chatHistory.value = [
-      { id: 0, title: "新对话", time: "现在" }
-    ];
+    showNotification("加载聊天历史失败", "error");
   }
   updateChatContent(chatContent.value); // 确保在加载历史后更新内容
 }
@@ -152,25 +178,6 @@ function applyHighlight() {
 }
 
 
-const notification = ref({
-  visible: false,
-  message: '',
-  type: 'success' // 可以是 'success', 'info', 'warning', 'error'
-});
-
-// 显示通知的函数
-function showNotification(message: string, type: string = 'success', duration: number = 2000) {
-  notification.value = {
-    visible: true,
-    message,
-    type
-  };
-
-  // 设置通知自动关闭
-  setTimeout(() => {
-    notification.value.visible = false;
-  }, duration);
-}
 
 // 修改链接处理函数
 function setupExternalLinks() {
@@ -193,13 +200,17 @@ function setupExternalLinks() {
   });
 }
 
-// 修改 updateChatContent 函数，使用新的样式系统
-function updateChatContent(content: string) {
-  console.log("更新聊天内容:", content);
+// 修改 updateChatContent 函数，使其处理ChatMessage数组
+function updateChatContent(messages: ChatMessage[]) {
+  if (!messages || messages.length === 0) {
+    processedChatContent.value = '';
+    return;
+  }
 
   // 获取当前主题和字体大小
   const currentTheme = document.documentElement.getAttribute('data-theme') || 'system';
   const currentFontSize = document.documentElement.getAttribute('data-font-size') || 'medium';
+
   // 创建样式配置
   const styleOptions: MarkdownStyleOptions = {
     theme: currentTheme === 'system' ? 'auto' : (currentTheme as 'light' | 'dark'),
@@ -209,12 +220,166 @@ function updateChatContent(content: string) {
   // 获取生成的新样式
   const newStyleContent = getMarkdownStyles(styleOptions);
 
-  // 将内容包装在一个有范围限制的容器中
-  processedChatContent.value = `<div class="scoped-content">${content}<style>${newStyleContent}</style></div>`;
+  // 生成消息HTML
+  let messagesHtml = '';
+
+
+  for (const msg of messages) {
+    const messageClass = msg.msgtype.toLowerCase();
+    messagesHtml += `
+    <div class="message-wrapper ${messageClass}">
+      <div class="message-avatar">
+        <div class="avatar-icon">
+          ${msg.msgtype === 'User' ?
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>' :
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32"></path></svg>'
+      }
+        </div>
+        <div class="message-time">${msg.time}</div>
+      </div>
+      <div class="message-bubble ${messageClass}">
+        <div class="message-content markdown-body">
+          ${msg.content}
+        </div>
+      </div>
+    </div>
+  `;
+  }
+
+  // 在updateChatContent函数中更新CSS部分
+  processedChatContent.value = `
+  <div class="scoped-content">
+    ${messagesHtml}
+    <style>
+      ${newStyleContent}
+    </style>
+    <style>
+      .message-wrapper {
+        display: flex;
+        margin-bottom: 24px;
+        position: relative;
+        gap: 8px;
+      }
+      
+      .message-wrapper.user {
+        flex-direction: row-reverse;
+      }
+      
+      .message-avatar {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-top: 4px;
+        flex-shrink: 0;
+        width: 42px;
+      }
+      
+      .avatar-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: var(--border-color);
+        color: var(--text-color);
+        overflow: hidden;
+        margin-bottom: 4px;
+      }
+      
+      .message-wrapper.user .avatar-icon {
+        background-color: var(--primary-color);
+        color: white;
+      }
+      
+      .message-wrapper.assistant .avatar-icon,
+      .message-wrapper.system .avatar-icon {
+        background-color: #e2e8f0;
+        color: #475569;
+      }
+      
+      .avatar-icon svg {
+        width: 20px;
+        height: 20px;
+      }
+      
+      .message-time {
+        font-size: 10px;
+        color: var(--text-secondary);
+        text-align: center;
+        white-space: nowrap;
+        margin-top: 2px;
+      }
+      
+      .message-bubble {
+        max-width: calc(85% - 42px);
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        transform: translateY(15px);
+      }
+      
+      .message-content {
+        padding: 12px 16px;
+        border-radius: 18px;
+        overflow-wrap: break-word;
+        overflow: hidden;
+      }
+      
+      .message-wrapper.user .message-content {
+        background-color: var(--primary-color);
+        color: white;
+        border-top-right-radius: 4px;
+      }
+      
+      .message-wrapper.assistant .message-content,
+      .message-wrapper.system .message-content {
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-top-left-radius: 4px;
+      }
+      
+      /* 暗黑模式适配 */
+      @media (prefers-color-scheme: dark) {
+        .message-wrapper.assistant .message-content,
+        .message-wrapper.system .message-content {
+          background-color: #2d3748;
+          border-color: #4a5568;
+        }
+        
+        .message-wrapper.assistant .avatar-icon,
+        .message-wrapper.system .avatar-icon {
+          background-color: #4a5568;
+          color: #e2e8f0;
+        }
+      }
+      
+      /* 移动端优化 */
+      @media (max-width: 767px) {
+        .message-bubble {
+          max-width: calc(90% - 42px);
+        }
+        
+        .message-content {
+          padding: 10px 14px;
+        }
+        
+        .avatar-icon {
+          width: 28px;
+          height: 28px;
+        }
+        
+        .avatar-icon svg {
+          width: 16px;
+          height: 16px;
+        }
+      }
+    </style>
+  </div>
+`;
 
   // 下一个 tick 后处理样式和代码高亮
   nextTick(() => {
-
     // 应用代码高亮
     applyHighlight();
 
@@ -223,54 +388,88 @@ function updateChatContent(content: string) {
 
     // 设置外部链接处理
     setupExternalLinks();
+
+    // 滚动到底部
+    scrollToBottom();
   });
 }
 
-// 修改现有方法以使用新函数
-async function loadChatContent() {
+
+// 流式消息处理相关函数
+async function setupStreamListeners() {
+  // 监听流式消息事件
+  const unlistenStream = await listen('stream-message', (event) => {
+    // 将后端发送的聊天历史更新到前端
+    const chatData = event.payload as ChatHistory;
+    chatContent.value = chatData.content;
+    // 更新聊天内容显示
+    updateChatContent(chatContent.value);
+  });
+
+  // 监听流完成事件
+  const unlistenComplete = await listen('stream-complete', async () => {
+    isStreaming.value = false;
+    isLoading.value = false;
+
+    // 重新加载聊天历史
+    await loadChatHistory();
+  });
+
+  // 在组件卸载时清理事件监听
+  onUnmounted(() => {
+    unlistenStream();
+    unlistenComplete();
+  });
+}
+
+// 流式发送消息
+async function sendStreamMessage() {
+  if (!inputMessage.value.trim()) return;
+
+  isStreaming.value = true;
   isLoading.value = true;
+
   try {
-    const content = await invoke("get_chat_html") as string;
-    chatContent.value = content;
-    updateChatContent(content);
+    // 清空输入框但保存消息内容
+    const message = inputMessage.value;
+    inputMessage.value = "";
+
+    // 调用后端的流式处理函数
+    await invoke("process_message_stream", { message });
+
+    // 处理将在事件监听器中完成
   } catch (error) {
-    console.error("加载聊天内容失败:", error);
-  } finally {
+    console.error("消息发送失败:", error);
+    showNotification("消息发送失败", "error");
+    isStreaming.value = false;
     isLoading.value = false;
   }
 }
 
-// 发送消息
-async function sendMessage() {
-  if (!inputMessage.value.trim()) return;
-
-  isLoading.value = true;
-  try {
-    // 调用 Rust 函数处理用户输入并返回更新的 HTML
-    chatContent.value = await invoke("process_message", { message: inputMessage.value });
-    inputMessage.value = ""; // 清空输入框
-    updateChatContent(chatContent.value);
-
-    // 重新加载聊天历史（如果当前对话是新建的，它可能被添加到历史记录中）
-    await loadChatHistory();
-  } catch (error) {
-    console.error("发送消息失败:", error);
-  } finally {
-    isLoading.value = false;
-  }
+// 自动滚动到底部
+function scrollToBottom() {
+  nextTick(() => {
+    const chatContent = document.querySelector('.chat-content');
+    if (chatContent) {
+      chatContent.scrollTop = chatContent.scrollHeight;
+    }
+  });
 }
 
 // 创建新对话
 async function createNewChat() {
   isLoading.value = true;
   try {
-    // 调用后端创建新对话
+    // 调用后端创建新对话API
     chatContent.value = await invoke("create_new_chat");
+    // 更新聊天内容显示
     updateChatContent(chatContent.value);
-    // 重新加载历史记录
+    // 重新加载历史记录以显示新创建的对话
     await loadChatHistory();
+    showNotification("已创建新对话", "success");
   } catch (error) {
     console.error("创建新对话失败:", error);
+    showNotification("创建新对话失败", "error");
   } finally {
     isLoading.value = false;
   }
@@ -279,6 +478,7 @@ async function createNewChat() {
 // 监听 chatContent 变化，确保 MathJax 重新渲染
 watch(chatContent, () => {
   nextTick(() => {
+    console.log("聊天内容变化:", chatContent.value);
     refreshGlobalStyles();
     renderMathInElement();
   });
@@ -294,21 +494,30 @@ watch(() => document.documentElement.getAttribute('data-theme'), (newTheme) => {
 });
 
 
-
 // 组件加载时初始化对话内容
 onMounted(async () => {
   try {
+    // 初始化应用设置
+    await initAppSettings();
+
     // 加载 MathJax
     await loadMathJax();
 
-    // 先加载历史记录，再加载当前对话内容
+    // 设置流式消息监听器
+    await setupStreamListeners();
+
+    // 加载聊天历史和当前对话内容
     await loadChatHistory();
-    await loadChatContent();
+
+    // 尝试获取当前活跃的聊天内容
+    const content = await invoke("get_chat_html");
+    chatContent.value = content as ChatMessage[];
+    updateChatContent(chatContent.value);
 
     // 所有内容加载完成后，隐藏启动logo
     setTimeout(() => {
       isAppLoading.value = false;
-    }, 5000); // 添加短暂延迟，让过渡更平滑
+    }, 1500); // 添加短暂延迟，让过渡更平滑
   } catch (error) {
     console.error("初始化失败:", error);
     // 即使出错，也需要隐藏加载动画
@@ -333,6 +542,7 @@ onMounted(async () => {
       updateChatContent(chatContent.value);
     }
   });
+
 });
 
 // 组件卸载时清理事件监听
@@ -342,138 +552,290 @@ onUnmounted(() => {
   window.removeEventListener('themeChanged', (_: Event) => { });
   window.removeEventListener('fontSizeChanged', (_: Event) => { });
 });
-</script>
 
+
+const minimizeWindow = () => Window.getCurrent().minimize();
+const toggleMaximize = async () => {
+  const currentWindow = Window.getCurrent();
+  const isMaximized = await currentWindow.isMaximized();
+  isMaximized ? currentWindow.unmaximize() : currentWindow.maximize();
+};
+const closeWindow = () => Window.getCurrent().close();
+</script>
 
 <template>
   <div class="app-container">
-    <LoadingLogo :show="isAppLoading" />
-
-    <div v-if="showSettings" class="settings-modal">
-      <div class="settings-modal-overlay" @click="toggleSettings"></div>
-      <div class="settings-modal-content">
-        <Setting @close="toggleSettings" />
+    <!-- 自定义标题栏 - 移到最外层，作为整个应用的顶部 -->
+    <div class="custom-titlebar" data-tauri-drag-region>
+      <div class="app-icon">
+        <img src="./assets/logo.png" alt="NPULearn" />
       </div>
-    </div>
-
-    <!-- 通知组件 -->
-    <div v-if="notification.visible" class="notification" :class="notification.type">
-      <div class="notification-content">
-        <svg v-if="notification.type === 'success'" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-          stroke-linejoin="round">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-          <polyline points="22 4 12 14.01 9 11.01"></polyline>
-        </svg>
-        <span>{{ notification.message }}</span>
-      </div>
-    </div>
-
-
-    <!-- 遮罩层 - 仅在小屏幕且历史栏打开时显示 -->
-    <div v-if="isHistoryOpen && windowWidth < 768" class="history-overlay" @click="toggleHistory"></div>
-
-    <!-- 左侧历史列表 -->
-    <aside class="history-sidebar" :class="{ 'history-open': isHistoryOpen }">
-      <div class="history-header">
-        <h3>对话历史</h3>
-        <!-- 小屏幕时在历史栏中添加关闭按钮 -->
-        <button class="close-history" @click="toggleHistory">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
+      <div class="title" data-tauri-drag-region>NPULearn</div>
+      <div class="window-controls">
+        <button class="minimize" @click="minimizeWindow">
+          <svg viewBox="0 0 12 12">
+            <rect x="2" y="5.5" width="8" height="1" />
+          </svg>
+        </button>
+        <button class="maximize" @click="toggleMaximize">
+          <svg viewBox="0 0 12 12">
+            <rect x="2" y="2" width="8" height="8" style="fill:none;stroke-width:1" />
+          </svg>
+        </button>
+        <button class="close" @click="closeWindow">
+          <svg viewBox="0 0 12 12">
+            <line x1="2" y1="2" x2="10" y2="10" />
+            <line x1="10" y1="2" x2="2" y2="10" />
           </svg>
         </button>
       </div>
-      <div class="history-actions">
-        <button class="new-chat-button" @click="createNewChat">
-          <svg class="icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          新对话
-        </button>
+    </div>
+
+    <div class="app-content">
+      <LoadingLogo :show="isAppLoading" />
+
+      <div v-if="showSettings" class="settings-modal">
+        <div class="settings-modal-overlay" @click="toggleSettings"></div>
+        <div class="settings-modal-content">
+          <Setting @close="toggleSettings" />
+        </div>
       </div>
-      <div class="history-list">
-        <div v-for="item in chatHistory" :key="item.id" @click="selectHistory(item.id)" class="history-item">
-          <div class="history-item-content">
-            <svg class="history-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+
+      <!-- 通知组件 -->
+      <div v-if="notification.visible" class="notification" :class="notification.type">
+        <div class="notification-content">
+          <svg v-if="notification.type === 'success'" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
+          <span>{{ notification.message }}</span>
+        </div>
+      </div>
+
+      <!-- 遮罩层 - 仅在小屏幕且历史栏打开时显示 -->
+      <div v-if="isHistoryOpen && windowWidth < 768" class="history-overlay" @click="toggleHistory"></div>
+
+      <!-- 左侧历史列表 -->
+      <aside class="history-sidebar" :class="{ 'history-open': isHistoryOpen }">
+        <div class="history-header">
+          <h3>对话历史</h3>
+          <!-- 小屏幕时在历史栏中添加关闭按钮 -->
+          <button class="close-history" @click="toggleHistory">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
-            <div class="history-text">
-              <div class="history-title">{{ item.title }}</div>
-              <div class="history-time">{{ item.time }}</div>
+          </button>
+        </div>
+        <!-- 历史列表其余部分保持不变 -->
+        <div class="history-actions">
+          <button class="new-chat-button" @click="createNewChat">
+            <svg class="icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            新对话
+          </button>
+        </div>
+        <div class="history-list">
+          <div v-for="item in chatHistory" :key="item.id" @click="selectHistory(item.id)" class="history-item">
+            <div class="history-item-content">
+              <svg class="history-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <div class="history-text">
+                <div class="history-title">{{ item.title }}</div>
+                <div class="history-time">{{ item.time }}</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="history-footer">
-        <button @click="toggleSettings" class="settings-button">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path
-              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
-            </path>
-          </svg>
-          设置
-        </button>
-      </div>
-    </aside>
-
-    <!-- 主要聊天区域 -->
-    <main class="chat-container" :class="{ 'sidebar-open': isHistoryOpen }">
-      <!-- 顶部导航栏 -->
-      <header class="chat-header">
-        <button class="toggle-history" @click="toggleHistory">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-          </svg>
-        </button>
-        <h1>NPULearn</h1>
-
-        <!-- <button class="header-settings-button" @click="toggleSettings">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path
-              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
-            </path>
-          </svg>
-        </button> -->
-      </header>
-
-      <!-- 聊天内容区域 -->
-      <div class="chat-content">
-        <div v-if="isLoading" class="loading">
-          <div class="loading-spinner"></div>
-          <div>加载中...</div>
+        <div class="history-footer">
+          <button @click="toggleSettings" class="settings-button">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1-2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+              </path>
+            </svg>
+            设置
+          </button>
         </div>
-        <div v-html="processedChatContent" class="chat-messages"></div>
-      </div>
-      <!-- 底部输入区 -->
-      <div class="chat-input-area">
-        <form @submit.prevent="sendMessage" class="input-form">
-          <input v-model="inputMessage" type="text" placeholder="输入消息..." class="message-input" />
-          <button type="submit" class="send-button">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="send-icon">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+      </aside>
+
+      <!-- 主要聊天区域 -->
+      <main class="chat-container" :class="{ 'sidebar-open': isHistoryOpen }">
+        <!-- 顶部导航栏 -->
+        <header class="chat-header">
+          <button class="toggle-history" @click="toggleHistory">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
             </svg>
           </button>
-        </form>
-      </div>
-    </main>
+          <h1>NPULearn</h1>
+        </header>
+
+        <!-- 聊天内容区域 -->
+        <div class="chat-content">
+          <div v-if="isLoading" class="loading">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">加载中...</div>
+          </div>
+          <div v-else-if="!processedChatContent" class="empty-chat">
+            <div class="empty-chat-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </div>
+            <h3>开始一个新对话</h3>
+            <p>在下方输入框中提问，开始与AI助手交流</p>
+          </div>
+          <div v-html="processedChatContent" class="chat-messages"></div>
+        </div>
+        <!-- 底部输入区 -->
+        <div class="chat-input-area">
+          <form @submit.prevent="sendStreamMessage" class="input-form">
+            <input v-model="inputMessage" type="text" placeholder="输入消息..." class="message-input" />
+            <button type="submit" class="send-button" :disabled="isStreaming">
+              <svg v-if="!isStreaming" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                class="send-icon">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                class="loading-icon">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 6v6l4 2"></path>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </main>
+    </div>
   </div>
 </template>
+
+
+
+<style>
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+  background-color: var(--bg-color);
+  margin: 0;
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.app-content {
+  display: flex;
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.custom-titlebar {
+  height: 32px;
+  background-color: var(--card-bg);
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  user-select: none;
+  width: 100%;
+  z-index: 101;
+  /* 确保标题栏在最上层 */
+}
+
+.close {
+  color: var(--text-color);
+}
+
+.minimize {
+  color: var(--text-color);
+}
+
+.maximize {
+  color: var(--text-color);
+}
+
+.app-icon {
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+}
+
+.app-icon img {
+  width: 16px;
+  height: 16px;
+}
+
+.title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-color);
+}
+
+.window-controls {
+  display: flex;
+}
+
+.window-controls button {
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.window-controls button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.window-controls button.close:hover {
+  background-color: #e81123;
+  color: white;
+}
+
+.window-controls svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 1;
+  fill: none;
+}
+
+/* 暗色模式 */
+@media (prefers-color-scheme: dark) {
+  .window-controls button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+}
+</style>
+
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
@@ -489,28 +851,31 @@ body {
 
 
 :root {
-  --primary-color: #4f46e5;
-  --primary-hover: #4338ca;
+  --primary-color: #3b82f6;
+  /* 更新为蓝色系 */
+  --light-primary-color: #60a5fa;
+  --primary-hover: #2563eb;
   --bg-color: #f9fafb;
-  --dark-bg-color: #111827;
+  --dark-bg-color: #0f172a;
   --text-color: #1f2937;
-  --text-secondary: #6b7280;
+  --text-secondary: #64748b;
   --dark-text-color: #f3f4f6;
   --dark-text-secondary: #9ca3af;
   --border-color: #e5e7eb;
-  --dark-border-color: #374151;
+  --dark-border-color: #334155;
   --card-bg: #ffffff;
-  --dark-card-bg: #1f2937;
+  --dark-card-bg: #1e293b;
   --sidebar-width: 280px;
   --header-height: 64px;
   --input-area-height: 80px;
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --radius-sm: 0.375rem;
-  --radius: 0.5rem;
-  --radius-lg: 0.75rem;
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
   --transition: all 0.2s ease;
 }
+
 
 * {
   box-sizing: border-box;
@@ -544,20 +909,54 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   line-height: 1.5;
   background-color: var(--bg-color);
-  color: var(--text-color);
+  color: var (--text-color);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-.app-container {
+.empty-chat {
   display: flex;
-  height: 100vh;
-  width: 100%;
-  overflow: hidden;
-  position: relative;
-  background-color: var(--bg-color);
-  margin: 0;
-  padding: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 60px 20px;
+  height: 100%;
+  color: var(--text-secondary);
+}
+
+.empty-chat-icon {
+  margin-bottom: 20px;
+  color: var(--text-secondary);
+  background-color: var(--card-bg);
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+}
+
+.empty-chat h3 {
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: var(--font-size-lg);
+  color: var(--text-color);
+}
+
+.empty-chat p {
+  max-width: 320px;
+  font-size: var(--font-size-base);
+}
+
+/* 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .empty-chat-icon {
+    background-color: #1e293b;
+    border-color: #334155;
+  }
 }
 
 /* 遮罩层 */
@@ -574,7 +973,6 @@ body {
   transition: opacity 0.3s ease;
 }
 
-/* 历史侧边栏 */
 .history-sidebar {
   width: var(--sidebar-width);
   background-color: var(--card-bg);
@@ -583,13 +981,44 @@ body {
   flex-direction: column;
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: fixed;
-  top: 0;
+  top: 32px;
+  /* 调整顶部位置，留出标题栏的高度 */
   left: 0;
   bottom: 0;
   z-index: 100;
   transform: translateX(-100%);
   box-shadow: var(--shadow);
 }
+
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  margin-left: 0;
+  min-height: 0;
+  height: calc(100vh - 32px);
+  /* 减去标题栏高度 */
+  overflow: hidden;
+}
+
+/* 响应式设计调整 */
+@media (min-width: 768px) {
+  .history-sidebar {
+    transform: translateX(0);
+    position: relative;
+    box-shadow: none;
+    top: 0;
+    /* 在大屏幕上不需要相对于顶部定位 */
+  }
+
+  .chat-container {
+    margin-left: 0;
+    width: calc(100% - var(--sidebar-width));
+  }
+}
+
 
 .history-open {
   transform: translateX(0);
@@ -598,7 +1027,7 @@ body {
 .history-header {
   height: var(--header-height);
   padding: 0 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 0px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -634,7 +1063,7 @@ body {
 
 .history-actions {
   padding: 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 0px solid var (--border-color);
 }
 
 .new-chat-button {
@@ -714,6 +1143,7 @@ body {
 }
 
 .history-title {
+  color: var(--text-color);
   font-weight: 500;
   font-size: var(--font-size-base);
   white-space: nowrap;
@@ -723,7 +1153,7 @@ body {
 
 .history-time {
   font-size: var(--font-size-sm);
-  color: var (--text-secondary);
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 
@@ -845,7 +1275,6 @@ body {
   transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   margin-left: 0;
   min-height: 0;
-  height: 100vh;
   /* 固定高度为视口高度 */
   overflow: hidden;
   /* 防止整体溢出 */
@@ -868,6 +1297,7 @@ body {
 }
 
 .chat-header h1 {
+  color: var(--text-color);
   font-size: var(--font-size-lg);
   font-weight: 600;
   line-height: 1;
@@ -921,11 +1351,11 @@ body {
   border-radius: 3px;
 }
 
-.chat-content::-webkit-scrollbar-track {
+chat-content::-webkit-scrollbar-track {
   background-color: transparent;
 }
 
-.chat-messages .scoped-content {
+chat-messages .scoped-content {
   all: initial;
   /* 重置所有样式 */
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -949,6 +1379,15 @@ body {
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   margin-bottom: 12px;
+  font-size: var(--font-size-lg);
+  color: var(--text-color);
+
+}
+
+.loading-text {
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 @keyframes spin {
@@ -1027,22 +1466,22 @@ body {
   transform: translateY(-50%) scale(1.05);
 }
 
-.send-icon {
+send-icon {
   stroke-width: 2;
 }
 
-.chat-messages .mjx-chtml {
+chat-messages .mjx-chtml {
   margin: 0.5em 0;
   font-size: var(--font-size-lg);
 }
 
-.chat-messages .mjx-math {
+chat-messages .mjx-math {
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
 }
 
-.chat-messages .mjx-chtml.MJXc-display {
+chat-messages .mjx-chtml.MJXc-display {
   margin: 1em 0;
   padding: 0.5em 0;
   overflow-x: auto;
@@ -1050,17 +1489,17 @@ body {
   text-align: center;
 }
 
-.chat-messages .MJX-TEX {
+chat-messages .MJX-TEX {
   text-align: center;
 }
 
-.chat-messages .mjx-container {
+chat-messages .mjx-container {
   padding: 6px 0;
 }
 
 /* 暗色模式下的 MathJax 样式 */
 @media (prefers-color-scheme: dark) {
-  .chat-messages .mjx-math {
+  chat-messages .mjx-math {
     color: #f1f5f9;
   }
 }
@@ -1072,12 +1511,13 @@ body {
   right: 16px;
   padding: 12px 16px;
   border-radius: var(--radius);
-  background-color: white;
+  background-color: var(--card-bg);
   box-shadow: var(--shadow);
   z-index: 1000;
   max-width: 400px;
   animation: slide-in 0.3s ease forwards;
   border-left: 4px solid;
+  color: var(--text-color);
 }
 
 .notification.success {
@@ -1134,22 +1574,66 @@ body {
 /* 暗色模式下的通知样式 */
 @media (prefers-color-scheme: dark) {
   .notification {
-    background-color: #1e293b;
-    color: #f1f5f9;
+    background-color: var(--dark-card-bg);
+    color: var(--dark-text-color);
+  }
+
+  .notification.success {
+    border-left-color: #10b981;
+    background-color: var(--dark-card-bg);
+  }
+
+  .notification.error {
+    border-left-color: #ef4444;
+    background-color: var(--dark-card-bg);
+  }
+
+  .notification.info {
+    border-left-color: #3b82f6;
+    background-color: var(--dark-card-bg);
+  }
+
+  .notification.warning {
+    border-left-color: #f59e0b;
+    background-color: var(--dark-card-bg);
+  }
+
+  .notification-content svg {
+    color: #34d399;
+    /* 更亮的绿色，增强暗色模式下的对比度 */
+  }
+
+  .notification.error svg {
+    color: #f87171;
+    /* 更亮的红色 */
+  }
+
+  .notification.info svg {
+    color: #60a5fa;
+    /* 更亮的蓝色 */
+  }
+
+  .notification.warning svg {
+    color: #fbbf24;
+    /* 更亮的黄色 */
+  }
+
+  /* 为暗色模式添加更明显的阴影 */
+  .notification {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 }
 
-
-.chat-messages a {
+chat-messages a {
   color: var(--primary-color);
   text-decoration: none;
-  border-bottom: 1px dashed var(--primary-color);
+  border-bottom: 0px dashed var(--primary-color);
   cursor: pointer;
   position: relative;
   padding-right: 16px;
 }
 
-.chat-messages a::after {
+chat-messages a::after {
   content: '📋';
   font-size: var(--font-size-sm);
   position: absolute;
@@ -1158,17 +1642,17 @@ body {
   opacity: 0.7;
 }
 
-.chat-messages a:hover {
+chat-messages a:hover {
   opacity: 0.8;
 }
 
-.chat-messages a:active {
+chat-messages a:active {
   opacity: 0.6;
 }
 
 /* 暗色模式下的链接样式 */
 @media (prefers-color-scheme: dark) {
-  .chat-messages a {
+  chat-messages a {
     color: #6366f1;
     border-bottom-color: #6366f1;
   }
@@ -1272,7 +1756,12 @@ body {
   }
 
   .loading-spinner {
+    color: var(--primary-color);
     border-color: rgba(79, 70, 229, 0.3);
+  }
+
+  .loading-text {
+    color: var(--text-secondary);
   }
 }
 

@@ -107,8 +107,6 @@ export function refreshGlobalStyles(): void {
         .scoped-content table td, .scoped-content table th { border-color: #475569 !important; }
         .scoped-content hr { background-color: #475569 !important; }
         .scoped-content h1, .scoped-content h2 { border-bottom-color: #475569 !important; }
-        .scoped-content .system { background-color: #2d333b !important; }
-        .scoped-content .user { background-color: #254254 !important; }
         .scoped-content .message-time { color: #aaa !important; }
       `;
         }

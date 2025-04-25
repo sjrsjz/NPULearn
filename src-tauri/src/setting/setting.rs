@@ -1,16 +1,20 @@
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{io::Read, path::PathBuf, rc::Rc, sync::{Arc, Mutex}};
+use std::{
+    io::Read,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::AppHandle;
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 
-
 // 为settings模块创建自己的静态变量
-static SETTINGS_APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| Mutex::new(None));
+static SETTINGS_APP_HANDLE: Lazy<Mutex<Option<Arc<Box<AppHandle>>>>> =
+    Lazy::new(|| Mutex::new(None));
 static SETTINGS_CONFIG_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 
 // 初始化settings模块所需的全局变量
-pub fn init(handle: AppHandle, config_dir: PathBuf) {
+pub fn init(handle: Arc<Box<AppHandle>>, config_dir: PathBuf) {
     let mut app_handle = SETTINGS_APP_HANDLE.lock().unwrap();
     *app_handle = Some(handle);
     let mut config_dir_lock = SETTINGS_CONFIG_DIR.lock().unwrap();
@@ -37,7 +41,7 @@ pub struct AppSettings {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ModelConfig {
     pub temperature: f32, // 温度
-    pub max_tokens: i32, // 最大生成令牌数
+    pub max_tokens: i32,  // 最大生成令牌数
 }
 
 impl Default for AppSettings {
@@ -48,7 +52,10 @@ impl Default for AppSettings {
             auto_save: true,
             save_path: "".to_string(),
             api_model: "gemini".to_string(),
-            model_config: ModelConfig { temperature : 0.7, max_tokens: 2048 },
+            model_config: ModelConfig {
+                temperature: 0.7,
+                max_tokens: 2048,
+            },
         }
     }
 }
@@ -186,7 +193,7 @@ pub fn get_default_settings() -> AppSettings {
 #[tauri::command]
 pub async fn select_save_directory(app_handle: AppHandle) -> Result<String, String> {
     use tauri_plugin_dialog::DialogExt;
-    
+
     // 非阻塞方式不适合我们的用例，因为我们需要返回结果
     // 使用阻塞式文件夹选择对话框
     let folder = Arc::new(Mutex::new(Err("".to_string())));
@@ -198,6 +205,6 @@ pub async fn select_save_directory(app_handle: AppHandle) -> Result<String, Stri
             None => *folder_guard = Err("No directory selected".to_string()),
         };
     });
-    
+
     return folder.lock().unwrap().clone();
 }

@@ -1,16 +1,20 @@
-use std::{io::Read, path::PathBuf, sync::Mutex};
+use std::{
+    io::Read,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tauri::{utils::config, AppHandle};
+use tauri::AppHandle;
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 
 // 全局存储 app_handle
-static APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| Mutex::new(None));
+static APP_HANDLE: Lazy<Mutex<Option<Arc<Box<AppHandle>>>>> = Lazy::new(|| Mutex::new(None));
 static APP_DATA_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 static APP_CONFIG_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 // 设置全局 app_handle
-pub fn init(handle: AppHandle, app_data_dir: PathBuf, app_config_dir: PathBuf) {
+pub fn init(handle: Arc<Box<AppHandle>>, app_data_dir: PathBuf, app_config_dir: PathBuf) {
     let mut app_handle = APP_HANDLE.lock().unwrap();
     *app_handle = Some(handle);
     let mut app_data = APP_DATA_DIR.lock().unwrap();
