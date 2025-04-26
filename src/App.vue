@@ -1432,13 +1432,20 @@ function resetTextareaHeight() {
   });
 }
 
-// 流式发送消息
+// 流式发送消息 - 非阻塞版本
 async function sendStreamMessage() {
   if (!inputMessage.value.trim()) return;
 
   // 禁用消息过渡动画
   messageTransition.value = false;
   fadeInMessages.value = true; // 确保内容可见
+  
+  // 保存消息内容并立即清空输入框，提升用户体验
+  const message = inputMessage.value;
+  inputMessage.value = "";
+  
+  // 重置文本区域高度
+  resetTextareaHeight();
   
   // 先设置状态，确保在任何渲染发生前就已标记为流传输
   isReceivingStream.value = true;
@@ -1447,29 +1454,18 @@ async function sendStreamMessage() {
   
   console.log("开始流式传输消息，已禁用UML渲染");
 
-  try {
-    // 清空输入框但保存消息内容
-    const message = inputMessage.value;
-    inputMessage.value = "";
-    // 重置 textarea 高度
-    resetTextareaHeight();
-    // 调用后端的流式处理函数
-    await invoke("process_message_stream", { message });
-
-    // 处理将在事件监听器中完成
-  } catch (error) {
-    console.error("消息发送失败:", error);
-    showNotification("消息发送失败", "error");
-    isStreaming.value = false;
-    isLoading.value = false;
-    isReceivingStream.value = false;
-    // 如果发送失败，也重置高度
-    resetTextareaHeight();
-  } finally {
-    // 不再恢复消息过渡动画
-    messageTransition.value = false;
-    fadeInMessages.value = true; // 确保内容可见
-  }
+  // 使用 Promise 包装后端调用，但不等待它完成
+  invoke("process_message_stream", { message })
+    .catch(error => {
+      console.error("消息发送失败:", error);
+      showNotification("消息发送失败", "error");
+      isStreaming.value = false;
+      isLoading.value = false;
+      isReceivingStream.value = false;
+    });
+    
+  // 由于已经设置了状态并启动了异步处理，函数可以立即返回
+  // 实际的响应处理将由事件监听器完成
 }
 
 // 自动滚动到底部
@@ -2675,6 +2671,7 @@ body {
   /* 确保顶部固定 */
   position: sticky;
   top: 0;
+  box-shadow: var(--shadow);
 }
 
 .chat-header h1 {
@@ -3379,13 +3376,15 @@ chat-messages a:active {
   margin-top: 12px;
   border-top: 1px solid var(--border-color);
   padding-top: 12px;
+  text-align: left;
 }
 
 .preview-header {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   margin-bottom: 8px;
   font-weight: 500;
+  text-align: left;
 }
 
 .preview-code {
@@ -3394,13 +3393,14 @@ chat-messages a:active {
   padding: 8px;
   overflow-x: auto;
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.4;
   max-height: 200px;
   overflow-y: auto;
   white-space: pre;
   color: var(--text-color);
   border: 1px solid var(--border-color);
+  text-align: left;
 }
 
 /* 暗色主题支持 */
