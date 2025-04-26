@@ -327,6 +327,58 @@ $$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\r
     // 主线程立即返回，不会被阻塞
 }
 
+#[tauri::command]
+fn regenerate_message(window: Window, message_index: usize) -> Result<(), String> {
+    // 克隆一份当前对话的内容
+    let current_id = *CURRENT_CHAT_ID.lock().unwrap();
+    let mut history = CHAT_HISTORY.lock().unwrap();
+    
+    let chat_history = match history.get_mut(&current_id) {
+        Some(history) => history,
+        None => return Err("当前对话不存在".to_string()),
+    };
+    
+    // 检查索引是否有效（必须是Assistant消息）
+    if message_index >= chat_history.content.len() {
+        return Err("消息索引无效".to_string());
+    }
+    
+    // 找到指定索引的消息
+    let message = &chat_history.content[message_index];
+    
+    // 只允许重做AI的消息
+    if message.msgtype != ChatMessageType::Assistant {
+        return Err("只能重新生成AI助手的消息".to_string());
+    }
+    
+    // 找到该消息对应的用户消息（通常是上一条）
+    let user_message = if message_index > 0 && chat_history.content[message_index - 1].msgtype == ChatMessageType::User {
+        chat_history.content[message_index - 1].content.clone()
+    } else {
+        // 如果没有找到对应的用户消息，返回错误
+        return Err("未找到对应的用户消息".to_string());
+    };
+    
+    // 移除当前消息以及之后的所有消息
+    chat_history.content.truncate(message_index - 1);
+    
+    // 更新对话时间
+    chat_history.time = chrono::Local::now().format("%H:%M").to_string();
+    
+    // 保存历史记录
+    save_history(&history).unwrap_or_else(|e| {
+        println!("Failed to save history: {}", e);
+    });
+    
+    // 释放锁以便process_message_stream可以获取它
+    drop(history);
+    
+    // 重新处理用户消息
+    process_message_stream(window, user_message);
+    
+    Ok(())
+}
+
 // 确保在 run 函数中注册所有命令
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -342,6 +394,7 @@ pub fn run() {
             get_chat_by_id,
             create_new_chat,
             process_message_stream,
+            regenerate_message,
             aibackend::apikey::get_api_key_list_or_create,
             aibackend::apikey::try_save_api_key_list,
             setting::setting::get_settings,

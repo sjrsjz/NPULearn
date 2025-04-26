@@ -126,6 +126,12 @@ function toggleHistory() {
 
 // 选择历史对话
 async function selectHistory(id: number) {
+  // 如果正在流式输出消息，禁止切换聊天
+  if (isStreaming.value) {
+    showNotification("请等待当前消息输出完成", "error");
+    return;
+  }
+  
   // 调用后端加载特定对话
   console.log(`加载对话 ${id}`);
 
@@ -253,6 +259,21 @@ function updateChatContent(messages: ChatMessage[]) {
       <div class="message-bubble ${messageClass}">
         <div class="message-content markdown-body">
           ${msg.content}
+        </div>
+        <div class="message-actions">
+          <button class="action-button copy-button" data-content="${encodeURIComponent(msg.content)}" title="复制内容">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+          ${!isUserMessage ? 
+            `<button class="action-button regenerate-button" data-message-index="${messages.indexOf(msg)}" title="重新生成">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+              </svg>
+            </button>` : ''
+          }
         </div>
       </div>
     </div>
@@ -731,6 +752,52 @@ function updateChatContent(messages: ChatMessage[]) {
         border-top-left-radius: 18px;
         border-top-right-radius: 4px;
       }
+      
+      .message-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      
+      .action-button {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: var(--radius-sm);
+        transition: var(--transition);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-secondary);
+      }
+      
+      .action-button:hover {
+        background-color: rgba(0, 0, 0, 0.05);
+        color: var(--text-color);
+      }
+      
+      .action-button svg {
+        width: 16px;
+        height: 16px;
+      }
+      
+      .copy-button {
+        color: var(--primary-color);
+      }
+      
+      .copy-button:hover {
+        background-color: rgba(59, 130, 246, 0.1);
+      }
+      
+      .regenerate-button {
+        color: var(--text-secondary);
+      }
+      
+      .regenerate-button:hover {
+        background-color: rgba(0, 0, 0, 0.05);
+        color: var(--text-color);
+      }
     </style>
   </div>
 `;
@@ -751,6 +818,9 @@ function updateChatContent(messages: ChatMessage[]) {
 
     // 设置外部链接处理
     setupExternalLinks();
+
+    // 设置复制按钮和重做按钮的事件监听器
+    setupActionButtons();
 
     // 滚动到底部
     scrollToBottom();
@@ -791,6 +861,59 @@ async function setupStreamListeners() {
   onUnmounted(() => {
     unlistenStream();
     unlistenComplete();
+  });
+}
+
+// 设置复制按钮和重做按钮的事件监听器
+function setupActionButtons() {
+  nextTick(() => {
+    // 设置复制按钮事件监听
+    document.querySelectorAll('.chat-messages .copy-button').forEach(button => {
+      button.addEventListener('click', async () => {
+        const encodedContent = (button as HTMLElement).dataset.content;
+        if (encodedContent) {
+          const content = decodeURIComponent(encodedContent);
+          try {
+            await writeText(content);
+            showNotification("内容已复制到剪贴板", "success");
+          } catch (error) {
+            console.error("复制失败:", error);
+            showNotification("复制失败", "error");
+          }
+        }
+      });
+    });
+
+    // 设置重做按钮事件监听
+    document.querySelectorAll('.chat-messages .regenerate-button').forEach(button => {
+      button.addEventListener('click', async () => {
+        // 如果正在流式传输，禁止重做操作
+        if (isStreaming.value) {
+          showNotification("请等待当前消息输出完成", "error");
+          return;
+        }
+        
+        const messageIndex = Number((button as HTMLElement).dataset.messageIndex);
+        if (!isNaN(messageIndex)) {
+          try {
+            // 显示加载状态
+            isLoading.value = true;
+            isStreaming.value = true;
+            messageTransition.value = false;
+            
+            // 调用后端重新生成消息
+            await invoke("regenerate_message", { messageIndex });
+            
+            // 处理将在事件监听器中完成
+          } catch (error) {
+            console.error("重新生成失败:", error);
+            showNotification("重新生成失败", "error");
+            isStreaming.value = false;
+            isLoading.value = false;
+          }
+        }
+      });
+    });
   });
 }
 
@@ -846,6 +969,12 @@ function scrollToBottom(smooth = false) {
 
 // 创建新对话
 async function createNewChat() {
+  // 如果正在流式输出消息，禁止创建新聊天
+  if (isStreaming.value) {
+    showNotification("请等待当前消息输出完成", "error");
+    return;
+  }
+  
   // 添加淡出效果
   fadeInMessages.value = false;
   
@@ -1035,7 +1164,7 @@ const closeWindow = () => Window.getCurrent().close();
         </div>
         <!-- 历史列表其余部分保持不变 -->
         <div class="history-actions">
-          <button class="new-chat-button" @click="createNewChat">
+          <button class="new-chat-button" @click="createNewChat" :class="{ 'streaming-disabled': isStreaming }">
             <svg class="icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -1045,8 +1174,10 @@ const closeWindow = () => Window.getCurrent().close();
           </button>
         </div>
         <div class="history-list">
-          <div v-for="(item, index) in chatHistory" :key="item.id" @click="selectHistory(item.id)" 
-               class="history-item" :style="{ animationDelay: index * 0.05 + 's' }">
+          <div v-for="(item, index) in chatHistory" :key="item.id" 
+               @click="isStreaming ? showNotification('请等待当前消息输出完成', 'error') : selectHistory(item.id)" 
+               class="history-item" :class="{ 'streaming-disabled': isStreaming }"
+               :style="{ animationDelay: index * 0.05 + 's' }">
             <div class="history-item-content">
               <svg class="history-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1486,7 +1617,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: var(--transition);
+  transition: var (--transition);
   font-size: var(--font-size-base);
   box-shadow: var(--shadow-sm);
 }
@@ -2001,7 +2132,7 @@ chat-messages .mjx-container {
   top: 16px;
   right: 16px;
   padding: 12px 16px;
-  border-radius: var(--radius);
+  border-radius: var (--radius);
   background-color: var(--card-bg);
   box-shadow: var(--shadow);
   z-index: 1000;
@@ -2374,5 +2505,37 @@ chat-messages a:active {
   .history-item:hover {
     transform: translateX(1px);
   }
+}
+
+/* 流式输出时禁用相关样式 */
+.send-button:disabled {
+  background-color: #93c5fd;
+  cursor: not-allowed;
+  transform: translateY(-50%) scale(1);
+  box-shadow: none;
+  opacity: 0.7;
+}
+
+/* 流式输出时禁用的按钮和链接 */
+.streaming-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* 流式输出时的视觉反馈 */
+.new-chat-button.streaming-disabled {
+  background-color: #93c5fd;
+  transform: none;
+  box-shadow: none;
+}
+
+/* 在聊天列表项上添加状态指示 */
+.history-item.streaming-disabled::after {
+  content: "⌛";
+  position: absolute;
+  right: 10px;
+  font-size: 12px;
+  opacity: 0.7;
 }
 </style>

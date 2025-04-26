@@ -13,7 +13,7 @@ static APP_DATA_DIR: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None
 
 static FILE_NAME: &str = "chat_history.json";
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub(crate) enum ChatMessageType {
     User,
     System,
