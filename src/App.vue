@@ -9,6 +9,7 @@ import 'highlight.js/styles/github-dark.min.css'; // 暗色主题
 import LoadingLogo from './components/LoadingLogo.vue';
 import Setting from './components/Setting.vue';
 import { refreshGlobalStyles } from './themeUtils.ts';
+import mermaid from 'mermaid'; // 导入Mermaid.js库
 
 import { useSettingsProvider } from './composables/useSettings';
 import { Window } from '@tauri-apps/api/window';
@@ -67,6 +68,95 @@ function toggleSettings() {
   // 如果在小屏幕上打开了历史栏，同时关闭它
   if (showSettings.value && isHistoryOpen.value && windowWidth.value < 768) {
     isHistoryOpen.value = false;
+  }
+}
+
+// 初始化Mermaid.js配置
+function initMermaid() {
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: document.documentElement.getAttribute('data-theme') === 'dark' || 
+          (document.documentElement.getAttribute('data-theme') === 'system' && 
+           window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'default',
+    securityLevel: 'loose',
+    flowchart: { 
+      htmlLabels: true,
+      useMaxWidth: true,
+    },
+    fontSize: 14
+  });
+}
+
+// 渲染Mermaid图表
+async function renderMermaidDiagrams() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+    (document.documentElement.getAttribute('data-theme') === 'system' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+  // 动态更新主题
+  mermaid.initialize({
+    theme: isDark ? 'dark' : 'default',
+    securityLevel: 'loose',
+    logLevel: 'debug', // 将日志级别改为 debug 以获取更多信息
+    startOnLoad: false
+  });
+
+  try {
+    // 查找所有需要渲染的UML元素
+    const umlElements = document.querySelectorAll('.chat-messages .mermaid-container');
+
+    for (const element of umlElements) {
+      const id = element.getAttribute('data-diagram-id');
+      const encodedContent = element.getAttribute('data-diagram-content');
+
+      if (encodedContent && id) {
+        let content = ''; // 在 try 块外部定义 content
+        try {
+          // 清空现有内容
+          element.innerHTML = '<div class="mermaid-loading">UML图表渲染中...</div>';
+
+          // 正确解码内容
+          content = decodeURIComponent(encodedContent); // 分配解码后的内容
+          console.log(`渲染图表 ID: ${id}`);
+          console.log("Encoded Content:", encodedContent);
+          console.log("Decoded Content for Mermaid:", content); // 记录传递给 Mermaid 的确切内容
+
+          // 使用Mermaid渲染图表
+          // 确保 'content' 是一个非空字符串
+          if (typeof content === 'string' && content.length > 0) {
+            const { svg } = await mermaid.render(id, content);
+            element.innerHTML = svg;
+            // 添加图表加载完成的动画效果
+            element.classList.add('loaded');
+          } else {
+            // 如果解码后的内容无效或为空，则抛出错误
+            throw new Error("解码后的内容为空或无效。");
+          }
+
+        } catch (error) {
+          // 记录更详细的错误信息和失败的内容
+          console.error(`渲染图表 ID ${id} 失败:`, error);
+          console.error("失败的内容 (decoded):", content); // 记录导致失败的解码后内容
+          element.innerHTML = `
+            <div class="mermaid-error">
+              <p>UML图表渲染失败</p>
+              <pre>${error}</pre>
+              <div class="mermaid-source">
+                <details>
+                  <summary>查看原始图表代码</summary>
+                  <pre>${content}</pre> <!-- 在这里显示解码后的内容 -->
+                </details>
+              </div>
+            </div>
+          `;
+        }
+      } else {
+        // 如果容器缺少必要的属性，则发出警告
+        console.warn("发现缺少必要属性（id 或 content）的 Mermaid 容器。", element);
+      }
+    }
+  } catch (error) {
+    console.error("处理Mermaid图表失败:", error);
   }
 }
 
@@ -204,23 +294,87 @@ function applyHighlight() {
 function setupExternalLinks() {
   nextTick(() => {
     document.querySelectorAll('.chat-messages a').forEach(link => {
-      link.addEventListener('click', async (e) => {
-        e.preventDefault();
-        const href = link.getAttribute('href');
-        if (href) {
+      const href = link.getAttribute('href');
+      
+      // 检查是否是button://格式的链接，将其转换为按钮样式
+      if (href && href.startsWith('button://')) {
+        // 创建按钮元素替换链接
+        const buttonElement = document.createElement('button');
+        buttonElement.className = 'markdown-button';
+        buttonElement.textContent = link.textContent || '点击发送';
+        
+        // 从URL中提取消息内容，确保正确处理中文等字符
+        const message = decodeURIComponent(href.substring(9));
+        
+        // 设置点击事件
+        buttonElement.addEventListener('click', async (e) => {
+          e.preventDefault();
+          
+          // 如果正在流式输出消息，禁止发送新消息
+          if (isStreaming.value) {
+            showNotification("请等待当前消息输出完成", "error");
+            return;
+          }
+          
+          if (message.trim()) {
+            // 设置输入框内容
+            inputMessage.value = message;
+            // 发送消息
+            await sendStreamMessage();
+            showNotification("已发送按钮消息", "success");
+          }
+        });
+        
+        // 替换原始链接
+        link.parentNode?.replaceChild(buttonElement, link);
+      } else if (href) {
+        // 普通链接的处理保持不变
+        link.addEventListener('click', async (e) => {
+          e.preventDefault();
           try {
-            await writeText(href); // 将链接复制到剪贴板
+            await writeText(href);
             showNotification(`链接已复制: ${href}`, 'success');
           } catch (error) {
             console.error('复制链接失败:', error);
             showNotification('复制链接失败', 'error');
           }
-        }
-      });
+        });
+      }
     });
   });
 }
+// 处理UML标签
+function processUmlContent(html: string): string {
+  // 查找所有 <uml>...</uml> 标签并替换为 mermaid 容器
+  const umlRegex = /<uml>([\s\S]*?)<\/uml>/g;
+  let counter = 0;
 
+  return html.replace(umlRegex, (match, umlContent) => {
+    const diagramId = `mermaid-diagram-${Date.now()}-${counter++}`;
+
+    // 提取```mermaid和```之间的内容
+    const mermaidMatch = umlContent.match(/```mermaid\s*([\s\S]*?)```/);
+    let rawContent = ""; // 使用不同的变量名以清晰起见
+
+    if (mermaidMatch && mermaidMatch[1]) {
+      // 获取原始内容并去除首尾空格
+      rawContent = mermaidMatch[1].trim();
+    } else {
+      // 如果没有使用```mermaid格式，直接使用内容并去除首尾空格
+      rawContent = umlContent.trim();
+    }
+
+    // 仅对原始、整理过的内容进行一次编码
+    const encodedContent = encodeURIComponent(rawContent);
+    console.log("处理UML内容 (Raw):", rawContent); // 记录编码前的原始内容
+    console.log("处理UML内容 (Encoded):", encodedContent); // 记录编码后的内容
+
+    // 返回一个容器，将在渲染后处理
+    return `<div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
+              <div class="mermaid-loading">UML图表加载中...</div>
+            </div>`;
+  });
+}
 // 修改 updateChatContent 函数，使其处理主题更改
 function updateChatContent(messages: ChatMessage[]) {
   if (!messages || messages.length === 0) {
@@ -245,6 +399,9 @@ function updateChatContent(messages: ChatMessage[]) {
     // 根据消息类型确定布局方式
     const isUserMessage = msg.msgtype === 'User';
     
+    // 处理消息内容中的UML标签
+    const processedContent = processUmlContent(msg.content);
+    
     messagesHtml += `
     <div class="message-wrapper ${messageClass} ${isUserMessage ? 'user-message-right' : ''}">
       <div class="message-avatar">
@@ -258,7 +415,7 @@ function updateChatContent(messages: ChatMessage[]) {
       </div>
       <div class="message-bubble ${messageClass}">
         <div class="message-content markdown-body">
-          ${msg.content}
+          ${processedContent}
         </div>
         <div class="message-actions">
           <button class="action-button copy-button" data-content="${encodeURIComponent(msg.content)}" title="复制内容">
@@ -270,7 +427,7 @@ function updateChatContent(messages: ChatMessage[]) {
           ${!isUserMessage ? 
             `<button class="action-button regenerate-button" data-message-index="${messages.indexOf(msg)}" title="重新生成">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1-18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
               </svg>
             </button>` : ''
           }
@@ -440,11 +597,7 @@ function updateChatContent(messages: ChatMessage[]) {
         transition: transform 0.3s ease, box-shadow 0.3s ease;
       }
       
-      .message-bubble:hover {
-        transform: translateY(12px);
-        box-shadow: 0 4px 12px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.12)'};
-      }
-      
+
       .message-content {
         padding: 14px 18px;
         border-radius: 18px;
@@ -465,6 +618,77 @@ function updateChatContent(messages: ChatMessage[]) {
         border: 1px solid ${isDark ? 'var(--message-border)' : 'var(--border-color)'};
         border-top-left-radius: 4px;
         color: ${isDark ? 'var(--message-color)' : 'var(--text-color)'};
+      }
+      
+      /* Mermaid图表容器样式 */
+      .mermaid-container {
+        background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
+        border-radius: 6px;
+        margin: 16px 0;
+        padding: 16px;
+        overflow: hidden;
+        box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
+        border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
+        position: relative;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        min-height: 100px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+      }
+      
+      .mermaid-container.loaded {
+        animation: diagram-fade-in 0.5s ease forwards;
+      }
+      
+      @keyframes diagram-fade-in {
+        from {
+          opacity: 0.5;
+          transform: scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      
+      .mermaid-container:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px ${isDark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.15)'};
+      }
+      
+      .mermaid-loading {
+        color: var(--text-secondary);
+        font-size: 14px;
+        animation: pulse 1.5s infinite;
+      }
+      
+      @keyframes pulse {
+        0% {
+          opacity: 0.5;
+        }
+        50% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0.5;
+        }
+      }
+      
+      .mermaid-error {
+        color: #e53e3e;
+        padding: 12px;
+        text-align: left;
+      }
+      
+      .mermaid-error pre {
+        margin-top: 8px;
+        background-color: ${isDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.05)'};
+        padding: 8px;
+        border-radius: 4px;
+        overflow-x: auto;
+        font-size: 12px;
       }
       
       /* Markdown 内容样式 - GitHub风格 */
@@ -798,6 +1022,45 @@ function updateChatContent(messages: ChatMessage[]) {
         background-color: rgba(0, 0, 0, 0.05);
         color: var(--text-color);
       }
+      
+      /* 自定义按钮样式 */
+      .markdown-button {
+        display: inline-block;
+        padding: 8px 16px;
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: var(--radius);
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 14px;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        margin: 8px 0;
+        text-align: center;
+      }
+      
+      .markdown-button:hover {
+        background-color: var(--primary-hover);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+      }
+      
+      .markdown-button:active {
+        transform: translateY(0);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+      
+      /* 暗色模式下的按钮样式 */
+      @media (prefers-color-scheme: dark) {
+        .markdown-button {
+          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        }
+        
+        .markdown-button:hover {
+          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+      }
     </style>
   </div>
 `;
@@ -815,6 +1078,9 @@ function updateChatContent(messages: ChatMessage[]) {
 
     // 渲染数学公式
     renderMathInElement();
+    
+    // 渲染Mermaid图表
+    renderMermaidDiagrams();
 
     // 设置外部链接处理
     setupExternalLinks();
@@ -1007,12 +1273,22 @@ watch(chatContent, () => {
     console.log("聊天内容变化:", chatContent.value);
     refreshGlobalStyles();
     renderMathInElement();
+    renderMermaidDiagrams(); // 添加Mermaid图表渲染
   });
 });
 
-// 监听主题变化，更新聊天内容
+// 监听主题变化，更新聊天内容和Mermaid配置
 watch(() => document.documentElement.getAttribute('data-theme'), (newTheme) => {
   console.log("主题变化:", newTheme);
+  
+  // 当主题变化时，更新Mermaid配置
+  const isDark = newTheme === 'dark' || 
+                (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  
+  mermaid.initialize({
+    theme: isDark ? 'dark' : 'default'
+  });
+  
   // 当主题变化时，重新应用样式
   if (chatContent.value) {
     updateChatContent(chatContent.value);
@@ -1025,6 +1301,9 @@ onMounted(async () => {
   try {
     // 初始化应用设置
     await initAppSettings();
+    
+    // 初始化Mermaid
+    initMermaid();
 
     // 加载 MathJax
     await loadMathJax();
@@ -1058,6 +1337,15 @@ onMounted(async () => {
     console.log('主题已变更:', customEvent.detail);
     // 添加延迟以确保主题变更完全应用
     setTimeout(() => {
+      // 更新Mermaid主题
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark' || 
+                  (document.documentElement.getAttribute('data-theme') === 'system' && 
+                   window.matchMedia('(prefers-color-scheme: dark)').matches);
+      
+      mermaid.initialize({
+        theme: isDark ? 'dark' : 'default'
+      });
+      
       if (chatContent.value) {
         updateChatContent(chatContent.value);
       }
@@ -1074,7 +1362,6 @@ onMounted(async () => {
       }
     }, 100);
   });
-
 });
 
 // 组件卸载时清理事件监听
@@ -1448,7 +1735,7 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   line-height: 1.5;
   background-color: var(--bg-color);
-  color: var (--text-color);
+  color: var(--text-color);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -1602,7 +1889,7 @@ body {
 
 .history-actions {
   padding: 16px;
-  border-bottom: 0px solid var (--border-color);
+  border-bottom: 0px solid var(--border-color);
 }
 
 .new-chat-button {
@@ -1617,7 +1904,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: var (--transition);
+  transition: var(--transition);
   font-size: var(--font-size-base);
   box-shadow: var(--shadow-sm);
 }
@@ -1686,7 +1973,7 @@ body {
 }
 
 .history-icon {
-  color: var(--text-secondary);
+  color: var (--text-secondary);
   margin-right: 10px;
   flex-shrink: 0;
 }
@@ -2537,5 +2824,44 @@ chat-messages a:active {
   right: 10px;
   font-size: 12px;
   opacity: 0.7;
+}
+
+/* 自定义按钮样式 */
+.markdown-button {
+  display: inline-block;
+  padding: 8px 16px;
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  margin: 8px 0;
+  text-align: center;
+}
+
+.markdown-button:hover {
+  background-color: var(--primary-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.markdown-button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* 暗色模式下的按钮样式 */
+@media (prefers-color-scheme: dark) {
+  .markdown-button {
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  }
+  
+  .markdown-button:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  }
 }
 </style>

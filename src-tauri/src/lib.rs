@@ -241,6 +241,37 @@ $$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\r
 这是折叠的内容，点击上面的文字可以展开或收起。
 </details>
 
+
++ [点击发送问候消息](button://你好，请问你能帮我做什么?)
++ [点击发送帮助信息](button://我需要一些帮助)
+
+
+<uml>
+graph TD
+    A[开始] --> B{是否需要学习?}
+    B -->|是| C[学习]
+    B -->|否| D[玩耍]
+    C --> E[掌握知识]
+    E --> F[结束]
+    D --> F
+</uml>
+
+
+<uml>
+classDiagram
+    class Student {
+        +String name
+        +int id
+        +study()
+    }
+    class Teacher {
+        +String name
+        +String subject
+        +teach()
+    }
+    Student <-- Teacher
+</uml>
+
 找到具有 1 个许可证类型的类似代码
     "#;
 
