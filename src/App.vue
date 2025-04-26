@@ -10,6 +10,7 @@ import LoadingLogo from './components/LoadingLogo.vue';
 import Setting from './components/Setting.vue';
 import { refreshGlobalStyles } from './themeUtils.ts';
 import mermaid from 'mermaid'; // 导入Mermaid.js库
+import html2canvas from 'html2canvas'; // 导入 html2canvas
 
 import { useSettingsProvider } from './composables/useSettings';
 import { Window } from '@tauri-apps/api/window';
@@ -22,6 +23,7 @@ const {
 } = useSettingsProvider();
 
 const isAppLoading = ref(true);
+const isMobile = ref(false); // 添加移动设备状态
 
 // 定义聊天历史的类型
 interface ChatHistoryItem {
@@ -414,7 +416,7 @@ function updateChatContent(messages: ChatMessage[]) {
         <div class="message-time">${msg.time}</div>
       </div>
       <div class="message-bubble ${messageClass}">
-        <div class="message-content markdown-body">
+        <div class="message-content markdown-body" data-message-index="${messages.indexOf(msg)}">
           ${processedContent}
         </div>
         <div class="message-actions">
@@ -422,6 +424,13 @@ function updateChatContent(messages: ChatMessage[]) {
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+          <button class="action-button render-image-button" data-message-index="${messages.indexOf(msg)}" title="渲染成图片">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
             </svg>
           </button>
           ${!isUserMessage ? 
@@ -437,36 +446,12 @@ function updateChatContent(messages: ChatMessage[]) {
   `;
   }
 
-  // 根据当前主题添加适当的 CSS 变量
-  const lightThemeVars = `
-    --message-bg: var(--card-bg, #ffffff);
-    --message-color: var(--text-color, #1f2937);
-    --message-border: var(--border-color, #e5e7eb);
-    --message-code-bg: rgba(0, 0, 0, 0.05);
-    --message-blockquote-color: #6b7280;
-    --message-blockquote-border: #e5e7eb;
-    --message-table-border: #e5e7eb;
-    --message-table-th-bg: #f9fafb;
-  `;
-
-  const darkThemeVars = `
-    --message-bg: #2d3748;
-    --message-color: #f1f5f9;
-    --message-border: #4a5568;
-    --message-code-bg: rgba(71, 85, 105, 0.3);
-    --message-blockquote-color: #94a3b8;
-    --message-blockquote-border: #475569;
-    --message-table-border: #475569;
-    --message-table-th-bg: #1e293b;
-  `;
-
   // 在updateChatContent函数中更新CSS部分
   processedChatContent.value = `
   <div class="scoped-content ${fadeInMessages.value ? 'fade-in' : ''} ${messageTransition.value ? 'message-transition' : ''}" data-theme="${isDark ? 'dark' : 'light'}">
     ${messagesHtml}
     <style>
       .scoped-content {
-        ${isDark ? darkThemeVars : lightThemeVars}
         opacity: 0;
         transition: opacity 0.5s ease;
       }
@@ -626,7 +611,8 @@ function updateChatContent(messages: ChatMessage[]) {
         border-radius: 6px;
         margin: 16px 0;
         padding: 16px;
-        overflow: hidden;
+        overflow: hidden; /* 保持垂直方向隐藏 */
+        overflow-x: auto; /* 添加水平滚动条 */
         box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
         border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
         position: relative;
@@ -687,7 +673,7 @@ function updateChatContent(messages: ChatMessage[]) {
         background-color: ${isDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.05)'};
         padding: 8px;
         border-radius: 4px;
-        overflow-x: auto;
+        overflow-x: auto; /* 确保错误代码也能滚动 */
         font-size: 12px;
       }
       
@@ -774,7 +760,7 @@ function updateChatContent(messages: ChatMessage[]) {
         border-radius: 6px;
         margin: 16px 0;
         padding: 16px;
-        overflow-x: auto;
+        overflow-x: auto; /* 确保代码块水平滚动 */
         box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
         border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
         position: relative;
@@ -886,8 +872,8 @@ function updateChatContent(messages: ChatMessage[]) {
         border-spacing: 0;
         width: 100%;
         margin: 16px 0;
-        overflow-x: auto;
-        display: block;
+        overflow-x: auto; /* 确保表格水平滚动 */
+        display: block; /* 确保 overflow-x 生效 */
         border-radius: 6px;
         border: 1px solid ${isDark ? '#334155' : '#dfe2e5'};
         box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)'};
@@ -1023,6 +1009,14 @@ function updateChatContent(messages: ChatMessage[]) {
         color: var(--text-color);
       }
       
+      .render-image-button {
+        color: #8b5cf6; /* 紫色图标 */
+      }
+      
+      .render-image-button:hover {
+        background-color: rgba(139, 92, 246, 0.1);
+      }
+      
       /* 自定义按钮样式 */
       .markdown-button {
         display: inline-block;
@@ -1061,6 +1055,24 @@ function updateChatContent(messages: ChatMessage[]) {
           box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
         }
       }
+      
+      .render-image-button {
+        color: #8b5cf6; /* 紫色图标 */
+      }
+      
+      .render-image-button:hover {
+        background-color: rgba(139, 92, 246, 0.1);
+      }
+      
+      /* 暗色模式下的渲染图片按钮样式 */
+      @media (prefers-color-scheme: dark) {
+        .render-image-button {
+          color: #a78bfa; /* 亮紫色 */
+        }
+        .render-image-button:hover {
+          background-color: rgba(167, 139, 250, 0.15);
+        }
+      }
     </style>
   </div>
 `;
@@ -1078,9 +1090,6 @@ function updateChatContent(messages: ChatMessage[]) {
 
     // 渲染数学公式
     renderMathInElement();
-    
-    // 渲染Mermaid图表
-    renderMermaidDiagrams();
 
     // 设置外部链接处理
     setupExternalLinks();
@@ -1090,9 +1099,15 @@ function updateChatContent(messages: ChatMessage[]) {
 
     // 滚动到底部
     scrollToBottom();
-    
+
     // 刷新全局样式，确保主题一致性
     refreshGlobalStyles();
+
+    // 添加短暂延迟后渲染 Mermaid 图表
+    setTimeout(() => {
+      renderMermaidDiagrams();
+    }, 250); // 延迟 250 毫秒，可以根据需要调整
+
   });
 }
 
@@ -1177,6 +1192,69 @@ function setupActionButtons() {
             isStreaming.value = false;
             isLoading.value = false;
           }
+        }
+      });
+    });
+
+    // 设置渲染图片按钮事件监听
+    document.querySelectorAll('.chat-messages .render-image-button').forEach(button => {
+      button.addEventListener('click', async () => {
+        const messageIndex = Number((button as HTMLElement).dataset.messageIndex);
+        if (isNaN(messageIndex)) return;
+
+        const messageContentElement = document.querySelector(`.chat-messages .message-content[data-message-index="${messageIndex}"]`) as HTMLElement;
+
+        if (messageContentElement) {
+          showNotification("正在渲染图片...", "info");
+          try {
+            // 获取当前主题，以便在渲染时应用正确的背景色
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+              (document.documentElement.getAttribute('data-theme') === 'system' &&
+                window.matchMedia('(prefers-color-scheme: dark)').matches);
+            const backgroundColor = isDark ? '#1e293b' : '#ffffff'; // 根据主题设置背景色
+
+            const canvas = await html2canvas(messageContentElement, {
+              useCORS: true, // 允许加载跨域图片（如果需要）
+              scale: 2, // 提高分辨率
+              backgroundColor: backgroundColor, // 设置背景色
+              logging: true, // 开启日志以便调试
+              onclone: (clonedDoc) => {
+                // 确保克隆的文档中 Mermaid 图表已渲染为 SVG
+                const originalMermaidContainers = messageContentElement.querySelectorAll('.mermaid-container');
+                const clonedMermaidContainers = clonedDoc.querySelectorAll('.mermaid-container');
+                originalMermaidContainers.forEach((originalContainer, index) => {
+                  if (clonedMermaidContainers[index]) {
+                    // 尝试直接复制 SVG 内容
+                    const svgElement = originalContainer.querySelector('svg');
+                    if (svgElement) {
+                      clonedMermaidContainers[index].innerHTML = svgElement.outerHTML;
+                    } else {
+                      // 如果没有 SVG，保留加载或错误状态
+                      clonedMermaidContainers[index].innerHTML = originalContainer.innerHTML;
+                    }
+                  }
+                });
+                // 确保克隆的文档中 MathJax 公式已渲染
+                // MathJax 的渲染可能比较复杂，html2canvas 可能无法完美捕获动态生成的 SVG
+                // 这里可以尝试强制重新渲染，但这可能不可靠
+                // if (window.MathJax && window.MathJax.typesetPromise) {
+                //   window.MathJax.typesetPromise([clonedDoc.body]);
+                // }
+              }
+            });
+
+            // 创建下载链接
+            const link = document.createElement('a');
+            link.download = `NPULearn-message-${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            showNotification("图片已保存", "success");
+          } catch (error) {
+            console.error("渲染图片失败:", error);
+            showNotification("渲染图片失败", "error");
+          }
+        } else {
+          showNotification("找不到要渲染的消息内容", "error");
         }
       });
     });
@@ -1278,31 +1356,40 @@ watch(chatContent, () => {
 });
 
 // 监听主题变化，更新聊天内容和Mermaid配置
-watch(() => document.documentElement.getAttribute('data-theme'), (newTheme) => {
-  console.log("主题变化:", newTheme);
-  
-  // 当主题变化时，更新Mermaid配置
-  const isDark = newTheme === 'dark' || 
-                (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  
-  mermaid.initialize({
-    theme: isDark ? 'dark' : 'default'
-  });
-  
-  // 当主题变化时，重新应用样式
-  if (chatContent.value) {
-    updateChatContent(chatContent.value);
+watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldTheme) => {
+  // 增加判断，仅在主题实际变化时执行
+  if (newTheme !== oldTheme) {
+    console.log("主题变化:", newTheme);
+
+    // 当主题变化时，更新Mermaid配置
+    const isDark = newTheme === 'dark' ||
+                  (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+    mermaid.initialize({
+      theme: isDark ? 'dark' : 'default'
+    });
+
+    // 当主题变化时，重新应用样式
+    // 延迟执行，确保全局样式已应用
+    setTimeout(() => {
+      if (chatContent.value) {
+        updateChatContent(chatContent.value);
+      }
+    }, 50); // 短暂延迟
   }
 });
 
 
 // 组件加载时初始化对话内容
 onMounted(async () => {
+  // 检测是否为移动设备
+  isMobile.value = false;// /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   try {
-    // 初始化应用设置
+    // 初始化应用设置 (这会调用 refreshGlobalStyles)
     await initAppSettings();
-    
-    // 初始化Mermaid
+
+    // 初始化Mermaid (主题应基于 initAppSettings 后的全局设置)
     initMermaid();
 
     // 加载 MathJax
@@ -1317,6 +1404,7 @@ onMounted(async () => {
     // 尝试获取当前活跃的聊天内容
     const content = await invoke("get_chat_html");
     chatContent.value = content as ChatMessage[];
+    // 确保初始加载时使用正确的全局主题
     updateChatContent(chatContent.value);
 
     // 所有内容加载完成后，隐藏启动logo
@@ -1338,18 +1426,18 @@ onMounted(async () => {
     // 添加延迟以确保主题变更完全应用
     setTimeout(() => {
       // 更新Mermaid主题
-      const isDark = document.documentElement.getAttribute('data-theme') === 'dark' || 
-                  (document.documentElement.getAttribute('data-theme') === 'system' && 
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+                  (document.documentElement.getAttribute('data-theme') === 'system' &&
                    window.matchMedia('(prefers-color-scheme: dark)').matches);
-      
+
       mermaid.initialize({
         theme: isDark ? 'dark' : 'default'
       });
-      
+
       if (chatContent.value) {
         updateChatContent(chatContent.value);
       }
-    }, 100);
+    }, 100); // 保持延迟
   });
 
   window.addEventListener('fontSizeChanged', (e: Event) => {
@@ -1360,7 +1448,7 @@ onMounted(async () => {
       if (chatContent.value) {
         updateChatContent(chatContent.value);
       }
-    }, 100);
+    }, 100); // 保持延迟
   });
 });
 
@@ -1384,31 +1472,31 @@ const closeWindow = () => Window.getCurrent().close();
 
 <template>
   <div class="app-container">
-    <!-- 自定义标题栏 - 移到最外层，作为整个应用的顶部 -->
-    <div class="custom-titlebar" data-tauri-drag-region>
-      <div class="app-icon">
-        <img src="./assets/logo.png" alt="NPULearn" />
+    <!-- 自定义标题栏 - 仅在非移动设备上显示 -->
+''      <div class="custom-titlebar" data-tauri-drag-region>
+        <div class="app-icon">
+          <img src="./assets/logo.png" alt="NPULearn" />
+        </div>
+        <div class="title" data-tauri-drag-region>NPULearn</div>
+        <div class="window-controls">
+          <button class="minimize" @click="minimizeWindow">
+            <svg viewBox="0 0 12 12">
+              <rect x="2" y="5.5" width="8" height="1" />
+            </svg>
+          </button>
+          <button class="maximize" @click="toggleMaximize">
+            <svg viewBox="0 0 12 12">
+              <rect x="2" y="2" width="8" height="8" style="fill:none;stroke-width:1" />
+            </svg>
+          </button>
+          <button class="close" @click="closeWindow">
+            <svg viewBox="0 0 12 12">
+              <line x1="2" y1="2" x2="10" y2="10" />
+              <line x1="10" y1="2" x2="2" y2="10" />
+            </svg>
+          </button>
+        </div>
       </div>
-      <div class="title" data-tauri-drag-region>NPULearn</div>
-      <div class="window-controls">
-        <button class="minimize" @click="minimizeWindow">
-          <svg viewBox="0 0 12 12">
-            <rect x="2" y="5.5" width="8" height="1" />
-          </svg>
-        </button>
-        <button class="maximize" @click="toggleMaximize">
-          <svg viewBox="0 0 12 12">
-            <rect x="2" y="2" width="8" height="8" style="fill:none;stroke-width:1" />
-          </svg>
-        </button>
-        <button class="close" @click="closeWindow">
-          <svg viewBox="0 0 12 12">
-            <line x1="2" y1="2" x2="10" y2="10" />
-            <line x1="10" y1="2" x2="2" y2="10" />
-          </svg>
-        </button>
-      </div>
-    </div>
 
     <div class="app-content">
       <LoadingLogo :show="isAppLoading" />
@@ -1444,7 +1532,7 @@ const closeWindow = () => Window.getCurrent().close();
           <button class="close-history" @click="toggleHistory">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y="6" x2="6" y2="18"></line>
+              <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
           </button>
@@ -1807,8 +1895,7 @@ body {
   flex-direction: column;
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: fixed;
-  top: 32px;
-  /* 调整顶部位置，留出标题栏的高度 */
+  top: 32px; /* 默认留出标题栏高度 */
   left: 0;
   bottom: 0;
   z-index: 100;
@@ -1824,8 +1911,7 @@ body {
   transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   margin-left: 0;
   min-height: 0;
-  height: calc(100vh - 32px);
-  /* 减去标题栏高度 */
+  height: calc(100vh - 32px); /* 默认减去标题栏高度 */
   overflow: hidden;
 }
 
@@ -1835,16 +1921,17 @@ body {
     transform: translateX(0);
     position: relative;
     box-shadow: none;
-    top: 0;
-    /* 在大屏幕上不需要相对于顶部定位 */
+    top: 0; /* 在大屏幕上始终从顶部开始 */
   }
 
   .chat-container {
     margin-left: 0;
     width: calc(100% - var(--sidebar-width));
+    /* 大屏幕非移动设备下，如果标题栏存在，需要减去其高度 */
+    height: calc(100vh - 32px);
   }
-}
 
+}
 
 .history-open {
   transform: translateX(0);
@@ -1973,7 +2060,7 @@ body {
 }
 
 .history-icon {
-  color: var (--text-secondary);
+  color: var(--text-secondary);
   margin-right: 10px;
   flex-shrink: 0;
 }
@@ -2383,19 +2470,33 @@ chat-messages .mjx-chtml {
   margin: 0.5em 0;
   font-size: var(--font-size-lg);
 }
-
 chat-messages .mjx-math {
   max-width: 100%;
+  /* 确保不超过容器宽度 */
   overflow-x: auto;
+  /* 水平溢出时显示滚动条 */
   overflow-y: hidden;
+  /* 隐藏垂直滚动条 */
+  display: block;
+  /* 确保 max-width 生效 */
+  padding-bottom: 4px;
+  /* 为滚动条留出一点空间 */
 }
 
 chat-messages .mjx-chtml.MJXc-display {
   margin: 1em 0;
   padding: 0.5em 0;
   overflow-x: auto;
+  /* 水平溢出时显示滚动条 */
   overflow-y: hidden;
+  /* 隐藏垂直滚动条 */
   text-align: center;
+  display: block;
+  /* 确保 overflow 生效 */
+  max-width: 100%;
+  /* 确保不超过容器宽度 */
+  padding-bottom: 4px;
+  /* 为滚动条留出一点空间 */
 }
 
 chat-messages .MJX-TEX {
@@ -2404,6 +2505,15 @@ chat-messages .MJX-TEX {
 
 chat-messages .mjx-container {
   padding: 6px 0;
+  max-width: 100%;
+  /* 确保容器不超过父元素 */
+  overflow-x: auto;
+  /* 为容器本身也添加滚动条 */
+  overflow-y: hidden;
+  display: block;
+  /* 确保 overflow 生效 */
+  padding-bottom: 4px;
+  /* 为滚动条留出一点空间 */
 }
 
 /* 暗色模式下的 MathJax 样式 */
@@ -2419,7 +2529,7 @@ chat-messages .mjx-container {
   top: 16px;
   right: 16px;
   padding: 12px 16px;
-  border-radius: var (--radius);
+  border-radius: var(--radius);
   background-color: var(--card-bg);
   box-shadow: var(--shadow);
   z-index: 1000;
@@ -2862,6 +2972,24 @@ chat-messages a:active {
   
   .markdown-button:hover {
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  }
+}
+
+.render-image-button {
+  color: #8b5cf6; /* 紫色图标 */
+}
+
+.render-image-button:hover {
+  background-color: rgba(139, 92, 246, 0.1);
+}
+
+/* 暗色模式下的渲染图片按钮样式 */
+@media (prefers-color-scheme: dark) {
+  .render-image-button {
+    color: #a78bfa; /* 亮紫色 */
+  }
+  .render-image-button:hover {
+    background-color: rgba(167, 139, 250, 0.15);
   }
 }
 </style>
