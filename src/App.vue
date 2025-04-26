@@ -5,10 +5,11 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { listen } from '@tauri-apps/api/event';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.min.css';
+import 'highlight.js/styles/github-dark.min.css'; // 暗色主题
 import LoadingLogo from './components/LoadingLogo.vue';
 import Setting from './components/Setting.vue';
 import { refreshGlobalStyles } from './themeUtils.ts';
-import { getMarkdownStyles, MarkdownStyleOptions } from './markdownStyles';
+
 import { useSettingsProvider } from './composables/useSettings';
 import { Window } from '@tauri-apps/api/window';
 
@@ -55,6 +56,10 @@ const showSettings = ref(false);
 
 // 添加流式消息处理需要的状态变量
 const isStreaming = ref(false);
+
+// 添加新的动画状态控制变量
+const fadeInMessages = ref(true);
+const messageTransition = ref(true);
 
 // 切换设置界面的显示
 function toggleSettings() {
@@ -124,21 +129,31 @@ async function selectHistory(id: number) {
   // 调用后端加载特定对话
   console.log(`加载对话 ${id}`);
 
-  isLoading.value = true;
-  try {
-    // 调用 Rust 函数加载特定对话内容
-    chatContent.value = await invoke("get_chat_by_id", { id });
-  } catch (error) {
-    console.error("加载对话失败:", error);
-  } finally {
-    isLoading.value = false;
-    // 在移动设备上选择后自动关闭侧边栏
-    if (windowWidth.value < 768) {
-      isHistoryOpen.value = false;
+  // 添加淡出效果但确保立即恢复可见性
+  fadeInMessages.value = false;
+  
+  // 短暂延迟后开始加载
+  setTimeout(async () => {
+    isLoading.value = true;
+    try {
+      // 调用 Rust 函数加载特定对话内容
+      chatContent.value = await invoke("get_chat_by_id", { id });
+    } catch (error) {
+      console.error("加载对话失败:", error);
+    } finally {
+      isLoading.value = false;
+      // 更新聊天内容，确保样式隔离
+      updateChatContent(chatContent.value);
+      
+      // 强制立即显示内容
+      fadeInMessages.value = true;
+      
+      // 在移动设备上选择后自动关闭侧边栏
+      if (windowWidth.value < 768) {
+        isHistoryOpen.value = false;
+      }
     }
-  }
-  // 更新聊天内容，确保样式隔离
-  updateChatContent(chatContent.value);
+  }, 300);
 }
 
 // 处理窗口大小变化
@@ -200,7 +215,7 @@ function setupExternalLinks() {
   });
 }
 
-// 修改 updateChatContent 函数，使其处理ChatMessage数组
+// 修改 updateChatContent 函数，使其处理主题更改
 function updateChatContent(messages: ChatMessage[]) {
   if (!messages || messages.length === 0) {
     processedChatContent.value = '';
@@ -210,29 +225,27 @@ function updateChatContent(messages: ChatMessage[]) {
   // 获取当前主题和字体大小
   const currentTheme = document.documentElement.getAttribute('data-theme') || 'system';
   const currentFontSize = document.documentElement.getAttribute('data-font-size') || 'medium';
+  const isDark = currentTheme === 'dark' || 
+                (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-  // 创建样式配置
-  const styleOptions: MarkdownStyleOptions = {
-    theme: currentTheme === 'system' ? 'auto' : (currentTheme as 'light' | 'dark'),
-    fontSize: currentFontSize as 'small' | 'medium' | 'large'
-  };
-
-  // 获取生成的新样式
-  const newStyleContent = getMarkdownStyles(styleOptions);
+  console.log(`更新聊天内容，主题: ${currentTheme}, 字体大小: ${currentFontSize}, 是否暗色: ${isDark}`);
 
   // 生成消息HTML
   let messagesHtml = '';
 
-
   for (const msg of messages) {
     const messageClass = msg.msgtype.toLowerCase();
+    
+    // 根据消息类型确定布局方式
+    const isUserMessage = msg.msgtype === 'User';
+    
     messagesHtml += `
-    <div class="message-wrapper ${messageClass}">
+    <div class="message-wrapper ${messageClass} ${isUserMessage ? 'user-message-right' : ''}">
       <div class="message-avatar">
         <div class="avatar-icon">
-          ${msg.msgtype === 'User' ?
+          ${isUserMessage ?
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>' :
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.93-6.63-.82-8.94 0-2.58.92-5.01 2.86-7.44 6.32"></path></svg>'
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M9 9h6"></path><path d="M9 13h6"></path></svg>'
       }
         </div>
         <div class="message-time">${msg.time}</div>
@@ -246,24 +259,84 @@ function updateChatContent(messages: ChatMessage[]) {
   `;
   }
 
+  // 根据当前主题添加适当的 CSS 变量
+  const lightThemeVars = `
+    --message-bg: var(--card-bg, #ffffff);
+    --message-color: var(--text-color, #1f2937);
+    --message-border: var(--border-color, #e5e7eb);
+    --message-code-bg: rgba(0, 0, 0, 0.05);
+    --message-blockquote-color: #6b7280;
+    --message-blockquote-border: #e5e7eb;
+    --message-table-border: #e5e7eb;
+    --message-table-th-bg: #f9fafb;
+  `;
+
+  const darkThemeVars = `
+    --message-bg: #2d3748;
+    --message-color: #f1f5f9;
+    --message-border: #4a5568;
+    --message-code-bg: rgba(71, 85, 105, 0.3);
+    --message-blockquote-color: #94a3b8;
+    --message-blockquote-border: #475569;
+    --message-table-border: #475569;
+    --message-table-th-bg: #1e293b;
+  `;
+
   // 在updateChatContent函数中更新CSS部分
   processedChatContent.value = `
-  <div class="scoped-content">
+  <div class="scoped-content ${fadeInMessages.value ? 'fade-in' : ''} ${messageTransition.value ? 'message-transition' : ''}" data-theme="${isDark ? 'dark' : 'light'}">
     ${messagesHtml}
     <style>
-      ${newStyleContent}
-    </style>
-    <style>
-      .message-wrapper {
-        display: flex;
-        margin-bottom: 24px;
-        position: relative;
-        gap: 8px;
+      .scoped-content {
+        ${isDark ? darkThemeVars : lightThemeVars}
+        opacity: 0;
+        transition: opacity 0.5s ease;
       }
       
-      .message-wrapper.user {
-        flex-direction: row-reverse;
+      .scoped-content.fade-in {
+        opacity: 1;
       }
+      
+      .message-wrapper {
+        display: flex;
+        margin-bottom: 28px;
+        position: relative;
+        gap: 12px;
+        /* 移除初始透明度设置，保证内容始终可见 */
+        opacity: 1;
+        transform: translateY(0);
+        transition: transform 0.4s ease, opacity 0.4s ease;
+      }
+      
+      /* 仅当启用消息过渡时应用进入动画 */
+      .message-transition .message-wrapper {
+        animation: message-appear 0.4s ease forwards;
+      }
+      
+      @keyframes message-appear {
+        from {
+          transform: translateY(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      
+      /* 确保在动画完成后保持可见 */
+      .message-transition .message-wrapper {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      
+      /* 每个消息延迟出现 */
+      .message-transition .message-wrapper:nth-child(1) { animation-delay: 0.1s; }
+      .message-transition .message-wrapper:nth-child(2) { animation-delay: 0.15s; }
+      .message-transition .message-wrapper:nth-child(3) { animation-delay: 0.2s; }
+      .message-transition .message-wrapper:nth-child(4) { animation-delay: 0.25s; }
+      .message-transition .message-wrapper:nth-child(5) { animation-delay: 0.3s; }
+      .message-transition .message-wrapper:nth-child(n+6) { animation-delay: 0.35s; }
       
       .message-avatar {
         display: flex;
@@ -272,11 +345,35 @@ function updateChatContent(messages: ChatMessage[]) {
         margin-top: 4px;
         flex-shrink: 0;
         width: 42px;
+        /* 移除初始透明度设置，确保内容始终可见 */
+        transform: scale(1);
+        opacity: 1;
+      }
+      
+      /* 仅在启用动画时应用头像弹跳效果 */
+      .message-transition .message-avatar {
+        animation: avatar-bounce 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        animation-delay: 0.3s;
+      }
+      
+      @keyframes avatar-bounce {
+        0% {
+          transform: scale(0.8);
+          opacity: 0.5;
+        }
+        60% {
+          transform: scale(1.1);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
       }
       
       .avatar-icon {
-        width: 32px;
-        height: 32px;
+        width: 36px;
+        height: 36px;
         border-radius: 50%;
         display: flex;
         align-items: center;
@@ -284,7 +381,8 @@ function updateChatContent(messages: ChatMessage[]) {
         background-color: var(--border-color);
         color: var(--text-color);
         overflow: hidden;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
+        box-shadow: 0 2px 4px ${isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.1)'};
       }
       
       .message-wrapper.user .avatar-icon {
@@ -294,17 +392,17 @@ function updateChatContent(messages: ChatMessage[]) {
       
       .message-wrapper.assistant .avatar-icon,
       .message-wrapper.system .avatar-icon {
-        background-color: #e2e8f0;
-        color: #475569;
+        background-color: ${isDark ? '#4a5568' : '#e2e8f0'};
+        color: ${isDark ? '#e2e8f0' : '#475569'};
       }
       
       .avatar-icon svg {
-        width: 20px;
-        height: 20px;
+        width: 22px;
+        height: 22px;
       }
       
       .message-time {
-        font-size: 10px;
+        font-size: 11px;
         color: var(--text-secondary);
         text-align: center;
         white-space: nowrap;
@@ -317,13 +415,21 @@ function updateChatContent(messages: ChatMessage[]) {
         flex-direction: column;
         position: relative;
         transform: translateY(15px);
+        /* 添加气泡过渡效果 */
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+      
+      .message-bubble:hover {
+        transform: translateY(12px);
+        box-shadow: 0 4px 12px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.12)'};
       }
       
       .message-content {
-        padding: 12px 16px;
+        padding: 14px 18px;
         border-radius: 18px;
         overflow-wrap: break-word;
         overflow: hidden;
+        box-shadow: 0 2px 8px ${isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.08)'};
       }
       
       .message-wrapper.user .message-content {
@@ -334,24 +440,253 @@ function updateChatContent(messages: ChatMessage[]) {
       
       .message-wrapper.assistant .message-content,
       .message-wrapper.system .message-content {
-        background-color: var(--card-bg);
-        border: 1px solid var(--border-color);
+        background-color: ${isDark ? 'var(--message-bg)' : 'var(--card-bg)'};
+        border: 1px solid ${isDark ? 'var(--message-border)' : 'var(--border-color)'};
         border-top-left-radius: 4px;
+        color: ${isDark ? 'var(--message-color)' : 'var(--text-color)'};
       }
       
-      /* 暗黑模式适配 */
-      @media (prefers-color-scheme: dark) {
-        .message-wrapper.assistant .message-content,
-        .message-wrapper.system .message-content {
-          background-color: #2d3748;
-          border-color: #4a5568;
+      /* Markdown 内容样式 - GitHub风格 */
+      .markdown-body {
+        color: inherit;
+        font-size: var(--font-size-base);
+        line-height: 1.6;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+      }
+      
+      .markdown-body h1,
+      .markdown-body h2,
+      .markdown-body h3,
+      .markdown-body h4,
+      .markdown-body h5,
+      .markdown-body h6 {
+        margin-top: 24px;
+        margin-bottom: 16px;
+        font-weight: 600;
+        line-height: 1.25;
+        color: ${isDark ? '#f1f5f9' : '#111827'};
+      }
+      
+      .markdown-body h1 {
+        font-size: 2em;
+        border-bottom: 1px solid ${isDark ? '#334155' : '#eaecef'};
+        padding-bottom: 0.3em;
+      }
+      
+      .markdown-body h2 {
+        font-size: 1.5em;
+        border-bottom: 1px solid ${isDark ? '#334155' : '#eaecef'};
+        padding-bottom: 0.3em;
+      }
+      
+      .markdown-body h3 {
+        font-size: 1.25em;
+      }
+      
+      .markdown-body h4 {
+        font-size: 1em;
+      }
+ 
+      
+      .markdown-body a {
+        color: ${isDark ? '#58a6ff' : '#0366d6'};
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+      
+      .markdown-body a:hover {
+        text-decoration: underline;
+      }
+      
+      .markdown-body img {
+        max-width: 100%;
+        display: block;
+        margin: 16px auto;
+        border-radius: 6px;
+        box-shadow: 0 4px 8px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.1)'};
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        animation: img-fade-in 0.5s ease forwards;
+      }
+      
+      .markdown-body img:hover {
+        transform: scale(1.01);
+        box-shadow: 0 6px 16px ${isDark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.15)'};
+      }
+      
+      @keyframes img-fade-in {
+        from {
+          opacity: 0;
+          filter: blur(5px);
         }
-        
-        .message-wrapper.assistant .avatar-icon,
-        .message-wrapper.system .avatar-icon {
-          background-color: #4a5568;
-          color: #e2e8f0;
+        to {
+          opacity: 1;
+          filter: blur(0);
         }
+      }
+      
+      .markdown-body pre {
+        background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
+        border-radius: 6px;
+        margin: 16px 0;
+        padding: 16px;
+        overflow-x: auto;
+        box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
+        border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
+        position: relative;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+      
+      .markdown-body pre:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px ${isDark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.15)'};
+      }
+      
+      .markdown-body code {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        background-color: ${isDark ? 'rgba(71, 85, 105, 0.4)' : 'rgba(27, 31, 35, 0.05)'};
+        border-radius: 3px;
+        padding: 0.2em 0.4em;
+        font-size: 85%;
+        color: ${isDark ? '#f1f5f9' : '#24292e'};
+      }
+      
+      .markdown-body pre code {
+        background-color: transparent;
+        padding: 0;
+        border-radius: 0;
+        color: inherit;
+        font-size: 85%;
+        line-height: 1.45;
+        display: block;
+      }
+      
+      .markdown-body pre code .hljs-keyword {
+        color: ${isDark ? '#c792ea' : '#d73a49'};
+        font-weight: ${isDark ? 'normal' : 'bold'};
+      }
+      
+      .markdown-body pre code .hljs-string {
+        color: ${isDark ? '#c3e88d' : '#032f62'};
+      }
+      
+      .markdown-body pre code .hljs-comment {
+        color: ${isDark ? '#676e95' : '#6a737d'};
+        font-style: italic;
+      }
+      
+      .markdown-body pre code .hljs-function {
+        color: ${isDark ? '#82AAFF' : '#6f42c1'};
+      }
+      
+      .markdown-body pre code .hljs-number {
+        color: ${isDark ? '#F78C6C' : '#005cc5'};
+      }
+      
+      .markdown-body pre code .hljs-title {
+        color: ${isDark ? '#f07178' : '#6f42c1'};
+      }
+      
+      .markdown-body pre code .hljs-attr {
+        color: ${isDark ? '#FFCB6B' : '#005cc5'};
+      }
+      
+      .markdown-body pre code .hljs-selector-class {
+        color: ${isDark ? '#FFCB6B' : '#6f42c1'};
+      }
+      
+      .markdown-body blockquote {
+        color: ${isDark ? '#9ca3af' : '#6a737d'};
+        border-left: 4px solid ${isDark ? '#3b82f6' : '#dfe2e5'};
+        padding: 0 16px;
+        margin: 16px 0;
+        background-color: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(246, 248, 250, 0.5)'};
+        border-radius: 0 6px 6px 0;
+      }
+      
+      .markdown-body blockquote p {
+        margin: 0.8em 0;
+      }
+      
+      .markdown-body ul,
+      .markdown-body ol {
+        padding-left: 2em;
+        margin: 16px 0;
+      }
+      
+      .markdown-body li + li {
+        margin-top: 0.25em;
+      }
+      
+      .markdown-body ul li {
+        list-style-type: disc;
+      }
+      
+      .markdown-body ol li {
+        list-style-type: decimal;
+      }
+      
+      .markdown-body ul ul,
+      .markdown-body ul ol,
+      .markdown-body ol ul,
+      .markdown-body ol ol {
+        margin: 8px 0 0;
+      }
+      
+      .markdown-body li > p {
+        margin-top: 16px;
+      }
+      
+      .markdown-body table {
+        border-collapse: separate;
+        border-spacing: 0;
+        width: 100%;
+        margin: 16px 0;
+        overflow-x: auto;
+        display: block;
+        border-radius: 6px;
+        border: 1px solid ${isDark ? '#334155' : '#dfe2e5'};
+        box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)'};
+      }
+      
+      .markdown-body table th,
+      .markdown-body table td {
+        border: 1px solid ${isDark ? '#334155' : '#dfe2e5'};
+        padding: 8px 13px;
+        text-align: left;
+      }
+      
+      .markdown-body table th {
+        background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
+        font-weight: 600;
+        color: ${isDark ? '#f1f5f9' : '#24292e'};
+      }
+      
+      .markdown-body table tr:nth-child(2n) {
+        background-color: ${isDark ? 'rgba(71, 85, 105, 0.1)' : 'rgba(246, 248, 250, 0.7)'};
+      }
+      
+      .markdown-body hr {
+        height: 1px;
+        padding: 0;
+        margin: 24px 0;
+        background-color: ${isDark ? '#334155' : '#e1e4e8'};
+        border: 0;
+      }
+      
+      .markdown-body .task-list-item {
+        list-style-type: none;
+        margin-left: -1.5em;
+      }
+      
+      .markdown-body .task-list-item input {
+        margin-right: 0.5em;
+      }
+      
+      /* 移除代码块的装饰效果 */
+      .markdown-body pre:before,
+      .markdown-body pre:after {
+        display: none;
+        content: none;
       }
       
       /* 移动端优化 */
@@ -361,25 +696,53 @@ function updateChatContent(messages: ChatMessage[]) {
         }
         
         .message-content {
-          padding: 10px 14px;
+          padding: 12px 16px;
         }
         
         .avatar-icon {
-          width: 28px;
-          height: 28px;
+          width: 32px;
+          height: 32px;
         }
         
         .avatar-icon svg {
-          width: 16px;
-          height: 16px;
+          width: 18px;
+          height: 18px;
         }
+        
+        .markdown-body pre {
+          padding: 16px 12px;
+        }
+        
+        .markdown-body {
+          font-size: calc(var(--font-size-base) - 1px);
+        }
+      }
+      
+      .message-wrapper.user-message-right {
+        flex-direction: row-reverse;
+      }
+      
+      .message-wrapper.user-message-right .message-bubble {
+        max-width: calc(85% - 42px);
+        margin-right: 12px;
+      }
+      
+      .message-wrapper.user-message-right .message-content {
+        border-top-left-radius: 18px;
+        border-top-right-radius: 4px;
       }
     </style>
   </div>
 `;
 
-  // 下一个 tick 后处理样式和代码高亮
+  // 确保内容立即可见，而不是等待动画
   nextTick(() => {
+    // 强制使内容可见
+    const chatMessages = document.querySelector('.chat-messages');
+    if (chatMessages) {
+      chatMessages.querySelector('.scoped-content')?.classList.add('fade-in');
+    }
+    
     // 应用代码高亮
     applyHighlight();
 
@@ -391,6 +754,9 @@ function updateChatContent(messages: ChatMessage[]) {
 
     // 滚动到底部
     scrollToBottom();
+    
+    // 刷新全局样式，确保主题一致性
+    refreshGlobalStyles();
   });
 }
 
@@ -404,6 +770,9 @@ async function setupStreamListeners() {
     chatContent.value = chatData.content;
     // 更新聊天内容显示
     updateChatContent(chatContent.value);
+    
+    // 滚动到底部，添加平滑效果
+    scrollToBottom(true);
   });
 
   // 监听流完成事件
@@ -413,6 +782,9 @@ async function setupStreamListeners() {
 
     // 重新加载聊天历史
     await loadChatHistory();
+    
+    // 重新启用消息过渡动画
+    messageTransition.value = true;
   });
 
   // 在组件卸载时清理事件监听
@@ -426,6 +798,9 @@ async function setupStreamListeners() {
 async function sendStreamMessage() {
   if (!inputMessage.value.trim()) return;
 
+  // 禁用消息过渡动画，因为流式响应会自动处理
+  messageTransition.value = false;
+  fadeInMessages.value = true; // 确保内容可见
   isStreaming.value = true;
   isLoading.value = true;
 
@@ -443,36 +818,58 @@ async function sendStreamMessage() {
     showNotification("消息发送失败", "error");
     isStreaming.value = false;
     isLoading.value = false;
+  } finally {
+    // 恢复消息过渡动画
+    setTimeout(() => {
+      messageTransition.value = true;
+      fadeInMessages.value = true; // 确保内容可见
+    }, 1000);
   }
 }
 
 // 自动滚动到底部
-function scrollToBottom() {
+function scrollToBottom(smooth = false) {
   nextTick(() => {
     const chatContent = document.querySelector('.chat-content');
     if (chatContent) {
-      chatContent.scrollTop = chatContent.scrollHeight;
+      if (smooth) {
+        chatContent.scrollTo({
+          top: chatContent.scrollHeight,
+          behavior: 'smooth'
+        });
+      } else {
+        chatContent.scrollTop = chatContent.scrollHeight;
+      }
     }
   });
 }
 
 // 创建新对话
 async function createNewChat() {
-  isLoading.value = true;
-  try {
-    // 调用后端创建新对话API
-    chatContent.value = await invoke("create_new_chat");
-    // 更新聊天内容显示
-    updateChatContent(chatContent.value);
-    // 重新加载历史记录以显示新创建的对话
-    await loadChatHistory();
-    showNotification("已创建新对话", "success");
-  } catch (error) {
-    console.error("创建新对话失败:", error);
-    showNotification("创建新对话失败", "error");
-  } finally {
-    isLoading.value = false;
-  }
+  // 添加淡出效果
+  fadeInMessages.value = false;
+  
+  setTimeout(async () => {
+    isLoading.value = true;
+    try {
+      // 调用后端创建新对话API
+      chatContent.value = await invoke("create_new_chat");
+      // 更新聊天内容显示
+      updateChatContent(chatContent.value);
+      // 重新加载历史记录以显示新创建的对话
+      await loadChatHistory();
+      showNotification("已创建新对话", "success");
+    } catch (error) {
+      console.error("创建新对话失败:", error);
+      showNotification("创建新对话失败", "error");
+    } finally {
+      isLoading.value = false;
+      // 短暂延迟后淡入新消息
+      setTimeout(() => {
+        fadeInMessages.value = true;
+      }, 100);
+    }
+  }, 300);
 }
 
 // 监听 chatContent 变化，确保 MathJax 重新渲染
@@ -526,21 +923,27 @@ onMounted(async () => {
 
   window.addEventListener('resize', handleResize);
 
-  // 添加事件监听器以响应主题和字体大小变化
+  // 修改事件监听器以响应主题和字体大小变化，确保延迟处理
   window.addEventListener('themeChanged', (e: Event) => {
     const customEvent = e as CustomEvent;
     console.log('主题已变更:', customEvent.detail);
-    if (chatContent.value) {
-      updateChatContent(chatContent.value);
-    }
+    // 添加延迟以确保主题变更完全应用
+    setTimeout(() => {
+      if (chatContent.value) {
+        updateChatContent(chatContent.value);
+      }
+    }, 100);
   });
 
   window.addEventListener('fontSizeChanged', (e: Event) => {
     const customEvent = e as CustomEvent;
     console.log('字体大小已变更:', customEvent.detail);
-    if (chatContent.value) {
-      updateChatContent(chatContent.value);
-    }
+    // 添加延迟以确保字体大小变更完全应用
+    setTimeout(() => {
+      if (chatContent.value) {
+        updateChatContent(chatContent.value);
+      }
+    }, 100);
   });
 
 });
@@ -596,13 +999,13 @@ const closeWindow = () => Window.getCurrent().close();
 
       <div v-if="showSettings" class="settings-modal">
         <div class="settings-modal-overlay" @click="toggleSettings"></div>
-        <div class="settings-modal-content">
+        <div class="settings-modal-content animate-in">
           <Setting @close="toggleSettings" />
         </div>
       </div>
 
       <!-- 通知组件 -->
-      <div v-if="notification.visible" class="notification" :class="notification.type">
+      <div v-if="notification.visible" class="notification animated-notification" :class="notification.type">
         <div class="notification-content">
           <svg v-if="notification.type === 'success'" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
@@ -618,14 +1021,14 @@ const closeWindow = () => Window.getCurrent().close();
       <div v-if="isHistoryOpen && windowWidth < 768" class="history-overlay" @click="toggleHistory"></div>
 
       <!-- 左侧历史列表 -->
-      <aside class="history-sidebar" :class="{ 'history-open': isHistoryOpen }">
+      <aside class="history-sidebar animated-sidebar" :class="{ 'history-open': isHistoryOpen }">
         <div class="history-header">
           <h3>对话历史</h3>
           <!-- 小屏幕时在历史栏中添加关闭按钮 -->
           <button class="close-history" @click="toggleHistory">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="18" y="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
           </button>
@@ -642,7 +1045,8 @@ const closeWindow = () => Window.getCurrent().close();
           </button>
         </div>
         <div class="history-list">
-          <div v-for="item in chatHistory" :key="item.id" @click="selectHistory(item.id)" class="history-item">
+          <div v-for="(item, index) in chatHistory" :key="item.id" @click="selectHistory(item.id)" 
+               class="history-item" :style="{ animationDelay: index * 0.05 + 's' }">
             <div class="history-item-content">
               <svg class="history-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -688,10 +1092,10 @@ const closeWindow = () => Window.getCurrent().close();
         <!-- 聊天内容区域 -->
         <div class="chat-content">
           <div v-if="isLoading" class="loading">
-            <div class="loading-spinner"></div>
+            <div class="loading-spinner enhanced"></div>
             <div class="loading-text">加载中...</div>
           </div>
-          <div v-else-if="!processedChatContent" class="empty-chat">
+          <div v-else-if="!processedChatContent" class="empty-chat animated-empty">
             <div class="empty-chat-icon">
               <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -706,8 +1110,9 @@ const closeWindow = () => Window.getCurrent().close();
         <!-- 底部输入区 -->
         <div class="chat-input-area">
           <form @submit.prevent="sendStreamMessage" class="input-form">
-            <input v-model="inputMessage" type="text" placeholder="输入消息..." class="message-input" />
-            <button type="submit" class="send-button" :disabled="isStreaming">
+            <input v-model="inputMessage" type="text" placeholder="输入消息..." class="message-input animated-input" />
+            <button type="submit" class="send-button animated-button" :disabled="isStreaming" 
+                    :class="{ 'streaming': isStreaming }">
               <svg v-if="!isStreaming" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
                 class="send-icon">
@@ -716,7 +1121,7 @@ const closeWindow = () => Window.getCurrent().close();
               </svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                class="loading-icon">
+                class="loading-icon rotating">
                 <circle cx="12" cy="12" r="10"></circle>
                 <path d="M12 6v6l4 2"></path>
               </svg>
@@ -832,6 +1237,9 @@ const closeWindow = () => Window.getCurrent().close();
 @media (prefers-color-scheme: dark) {
   .window-controls button:hover {
     background-color: rgba(255, 255, 255, 0.1);
+  }
+  .title {
+    color: var(--dark-text-color);
   }
 }
 </style>
@@ -1119,11 +1527,26 @@ body {
   margin-bottom: 4px;
   transition: var(--transition);
   border: 1px solid transparent;
+  animation: item-slide-in 0.5s ease forwards;
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+@keyframes item-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .history-item:hover {
   background-color: rgba(0, 0, 0, 0.03);
   border-color: var(--border-color);
+  transform: translateX(3px);
 }
 
 .history-item-content {
@@ -1196,12 +1619,11 @@ body {
 @keyframes modal-in {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.95) translateY(10px);
   }
-
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1) translateY(0);
   }
 }
 
@@ -1384,6 +1806,29 @@ chat-messages .scoped-content {
 
 }
 
+.loading-spinner.enhanced {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(79, 70, 229, 0.2);
+  border-top: 3px solid var(--primary-color);
+  border-radius: 50%;
+  animation: enhanced-spin 1.2s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
+  margin-bottom: 12px;
+  box-shadow: 0 0 15px rgba(79, 70, 229, 0.2);
+}
+
+@keyframes enhanced-spin {
+  0% {
+    transform: rotate(0deg) scale(0.9);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.1);
+  }
+  100% {
+    transform: rotate(360deg) scale(0.9);
+  }
+}
+
 .loading-text {
   font-size: var(--font-size-base);
   color: var(--text-secondary);
@@ -1440,6 +1885,7 @@ chat-messages .scoped-content {
 .message-input:focus {
   border-color: var(--primary-color);
   box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+  transform: scale(1.01);
 }
 
 .send-button {
@@ -1463,11 +1909,56 @@ chat-messages .scoped-content {
 
 .send-button:hover {
   background-color: var(--primary-hover);
-  transform: translateY(-50%) scale(1.05);
+  transform: translateY(-50%) scale(1.08);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.send-button.streaming {
+  background-color: #2563eb;
 }
 
 send-icon {
   stroke-width: 2;
+}
+
+.loading-icon.rotating {
+  animation: rotate 2s linear infinite;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 代码高亮 - 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+
+  /* 隐藏亮色主题 */
+  .hljs-github {
+    display: none 
+  }
+
+  /* 显示暗色主题 */
+  .hljs-github-dark {
+    display: block 
+  }
+}
+
+@media (prefers-color-scheme: light) {
+
+  /* 显示亮色主题 */
+  .hljs-github {
+    display: block 
+  }
+
+  /* 隐藏暗色主题 */
+  .hljs-github-dark {
+    display: none 
+  }
 }
 
 chat-messages .mjx-chtml {
@@ -1515,7 +2006,7 @@ chat-messages .mjx-container {
   box-shadow: var(--shadow);
   z-index: 1000;
   max-width: 400px;
-  animation: slide-in 0.3s ease forwards;
+  animation: notification-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   border-left: 4px solid;
   color: var(--text-color);
 }
@@ -1559,12 +2050,15 @@ chat-messages .mjx-container {
   color: #f59e0b;
 }
 
-@keyframes slide-in {
+@keyframes notification-slide-in {
   from {
     transform: translateX(100%);
     opacity: 0;
   }
-
+  50% {
+    transform: translateX(-10px);
+    opacity: 1;
+  }
   to {
     transform: translateX(0);
     opacity: 1;
@@ -1782,5 +2276,103 @@ chat-messages a:active {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
+}
+
+/* 添加新的动效样式 */
+.animated-notification {
+  animation: notification-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animated-sidebar {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animated-empty {
+  animation: fade-in 0.8s ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-in {
+  animation: modal-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animated-input {
+  transition: all 0.3s ease;
+}
+
+.animated-button {
+  transition: all 0.3s ease;
+}
+
+.animated-button:not(:disabled):hover {
+  transform: translateY(-50%) scale(1.08);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.new-chat-button {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.new-chat-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(59, 130, 246, 0.3);
+}
+
+.new-chat-button:active {
+  transform: translateY(0);
+}
+
+.settings-button {
+  transition: all 0.3s ease;
+}
+
+.settings-button:hover {
+  transform: translateY(-2px);
+}
+
+.settings-button:active {
+  transform: translateY(0);
+}
+
+/* 自定义标题栏按钮动效 */
+.window-controls button {
+  transition: all 0.2s ease;
+}
+
+.window-controls button:hover {
+  transform: scale(1.1);
+}
+
+.window-controls button.close:hover {
+  background-color: #e81123;
+  color: white;
+  transform: scale(1.1);
+}
+
+/* 修改 modal-in 动画更平滑 */
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 移动端优化 */
+@media (max-width: 767px) {
+  .history-item:hover {
+    transform: translateX(1px);
+  }
 }
 </style>

@@ -141,23 +141,85 @@ fn create_new_chat() -> Vec<ChatMessage> {
 
 // 以流式方式处理用户消息
 #[tauri::command]
-fn process_message_stream(window: Window, message: &str) {
-    // 模拟AI响应
-    // 在实际应用中，这里应该是从AI API获取的流式响应
-    let test_markdown = r#"
-# 流式传输测试
+fn process_message_stream(window: Window, message: String) {
+    // 克隆窗口以便在新线程中使用
+    let window_clone = window.clone();
+    
+    // 创建一个新线程处理消息
+    std::thread::spawn(move || {
+        // 模拟AI响应
+        // 在实际应用中，这里应该是从AI API获取的流式响应
+        let test_markdown = r#"
+# Markdown 示例文档
 
-这是一个测试流式传输功能的响应。
+## 基础格式
 
-## 段落1
+这是一个段落文本。Markdown 支持**粗体**、*斜体*和 ***粗斜体*** 文本格式。
 
-这是第一段内容，用于测试流式传输。文本将逐步显示在界面上。
+你也可以使用~~删除线~~来表示已删除的内容。
 
-## 段落2
+## 标题
 
-这是第二段内容，包含一些*格式化*的**文本**。
+Markdown 支持多级标题：
 
-## 数学公式测试
+# 一级标题
+## 二级标题
+### 三级标题
+#### 四级标题
+##### 五级标题
+###### 六级标题
+
+## 列表
+
+### 无序列表
+* 苹果
+* 香蕉
+* 橙子
+  * 脐橙
+  * 血橙
+
+### 有序列表
+1. 第一步
+2. 第二步
+3. 第三步
+
+## 引用
+
+> 这是一个引用文本。
+> 
+> 多行引用会被一起显示。
+>> 还可以嵌套引用。
+
+## 代码
+
+行内代码：`print("Hello World")`
+
+代码块：
+```python
+def hello_world():
+    print("你好，世界！")
+    return True
+```
+
+## 表格
+
+| 姓名 | 年龄 | 职业 |
+|------|------|------|
+| 张三 | 25 | 工程师 |
+| 李四 | 30 | 设计师 |
+| 王五 | 28 | 教师 |
+
+## 水平线
+
+---
+
+## 任务列表
+
+- [x] 已完成任务
+- [ ] 未完成任务
+- [ ] 另一个未完成任务
+
+## 数学公式
 
 行内公式: $E=mc^2$
 
@@ -165,93 +227,104 @@ fn process_message_stream(window: Window, message: &str) {
 
 $$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\right)^2}$$
 
-## 代码示例
+## 脚注
 
-```python
-def hello_world():
-    print("Hello, streaming world!")
-```
+这是一个带有脚注的文本[^1]。
+
+[^1]: 这是脚注的内容。
+
+## 折叠内容
+
+<details>
+<summary>点击展开</summary>
+
+这是折叠的内容，点击上面的文字可以展开或收起。
+</details>
+
+找到具有 1 个许可证类型的类似代码
     "#;
 
-    // 在前端累积构建的HTML内容
-    let mut accumulated_markdown = String::new();
+        // 在前端累积构建的HTML内容
+        let mut accumulated_markdown = String::new();
 
-    // 将markdown分成有意义的块，模拟流式传输
-    // 这里用段落或小节作为分隔点，而不是简单按行分割
-    let sections = test_markdown.split("\n").collect::<Vec<&str>>();
+        // 将markdown分成有意义的块，模拟流式传输
+        // 这里用段落或小节作为分隔点，而不是简单按行分割
+        let sections = test_markdown.split("\n").collect::<Vec<&str>>();
 
-    let current_chat_context = {
-        let history = CHAT_HISTORY.lock().unwrap();
-        if let Some(chat) = history.get(&CURRENT_CHAT_ID.lock().unwrap()) {
-            chat.clone()
-        } else {
-            ChatHistory {
-                id: 0,
-                title: String::new(),
-                time: String::new(),
-                content: vec![],
+        let current_chat_context = {
+            let history = CHAT_HISTORY.lock().unwrap();
+            if let Some(chat) = history.get(&CURRENT_CHAT_ID.lock().unwrap()) {
+                chat.clone()
+            } else {
+                ChatHistory {
+                    id: 0,
+                    title: String::new(),
+                    time: String::new(),
+                    content: vec![],
+                }
             }
+        };
+
+        for section in sections {
+            // 累积构建Markdown
+            accumulated_markdown.push_str(section);
+            accumulated_markdown.push_str("\n");
+
+            // 转换累积的Markdown为HTML
+            let mut cloned_context = current_chat_context.clone();
+
+            cloned_context.content.push(ChatMessage {
+                msgtype: ChatMessageType::User,
+                time: chrono::Local::now().format("%H:%M").to_string(),
+                content: message.clone(),
+            });
+
+            cloned_context.content.push(ChatMessage {
+                msgtype: ChatMessageType::Assistant,
+                time: chrono::Local::now().format("%H:%M").to_string(),
+                content: accumulated_markdown.clone(),
+            });
+
+            let content: &ChatHistory = &ChatHistory::markdown_to_html(&ChatHistory {
+                id: current_chat_context.id,
+                title: current_chat_context.title.clone(),
+                time: current_chat_context.time.clone(),
+                content: cloned_context.content.clone(),
+            });
+
+            // 向前端发送完整的HTML内容（而不是增量部分）
+            let _ = window_clone.emit("stream-message", content);
+
+            // 模拟网络延迟
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
-    };
 
-    for section in sections {
-        // 累积构建Markdown
-        accumulated_markdown.push_str(section);
-        accumulated_markdown.push_str("\n");
+        // 储存当前对话的内容
+        let current_id = *CURRENT_CHAT_ID.lock().unwrap();
+        let mut history = CHAT_HISTORY.lock().unwrap();
+        if let Some(chat) = history.get_mut(&current_id) {
+            chat.content.push(ChatMessage {
+                msgtype: ChatMessageType::User,
+                time: chrono::Local::now().format("%H:%M").to_string(),
+                content: message.clone(),
+            });
+            chat.content.push(ChatMessage {
+                msgtype: ChatMessageType::Assistant,
+                time: chrono::Local::now().format("%H:%M").to_string(),
+                content: accumulated_markdown.clone(),
+            });
+            chat.time = chrono::Local::now().format("%H:%M").to_string();
+            // 保存
+            save_history(&history).unwrap_or_else(|e| {
+                println!("Failed to save history: {}", e);
+            });
+        }
 
-        // 转换累积的Markdown为HTML
-
-        let mut cloned_context = current_chat_context.clone();
-
-        cloned_context.content.push(ChatMessage {
-            msgtype: ChatMessageType::User,
-            time: chrono::Local::now().format("%H:%M").to_string(),
-            content: message.to_string(),
-        });
-
-        cloned_context.content.push(ChatMessage {
-            msgtype: ChatMessageType::Assistant,
-            time: chrono::Local::now().format("%H:%M").to_string(),
-            content: accumulated_markdown.clone(),
-        });
-
-        let content: &ChatHistory = &ChatHistory::markdown_to_html(&ChatHistory {
-            id: current_chat_context.id,
-            title: current_chat_context.title.clone(),
-            time: current_chat_context.time.clone(),
-            content: cloned_context.content.clone(),
-        });
-
-        // 向前端发送完整的HTML内容（而不是增量部分）
-        let _ = window.emit("stream-message", content);
-
-        // 模拟网络延迟
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-
-    // 储存当前对话的内容
-    let current_id = *CURRENT_CHAT_ID.lock().unwrap();
-    let mut history = CHAT_HISTORY.lock().unwrap();
-    if let Some(chat) = history.get_mut(&current_id) {
-        chat.content.push(ChatMessage {
-            msgtype: ChatMessageType::User,
-            time: chrono::Local::now().format("%H:%M").to_string(),
-            content: message.to_string(),
-        });
-        chat.content.push(ChatMessage {
-            msgtype: ChatMessageType::Assistant,
-            time: chrono::Local::now().format("%H:%M").to_string(),
-            content: accumulated_markdown.clone(),
-        });
-        chat.time = chrono::Local::now().format("%H:%M").to_string();
-        // 保存
-        save_history(&history).unwrap_or_else(|e| {
-            println!("Failed to save history: {}", e);
-        });
-    }
-
-    // 通知前端流式传输完成
-    let _ = window.emit("stream-complete", "");
+        // 通知前端流式传输完成
+        let _ = window_clone.emit("stream-complete", "");
+    });
+    
+    // 主线程立即返回，不会被阻塞
 }
 
 // 确保在 run 函数中注册所有命令
