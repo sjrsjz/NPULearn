@@ -250,7 +250,7 @@ $$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\r
 ## 更多UML图表示例
 
 ### 流程图
-<uml>
+```mermaid
 graph TD
     A[开始] --> B{是否需要学习?}
     B -->|是| C[学习]
@@ -258,10 +258,10 @@ graph TD
     C --> E[掌握知识]
     E --> F[结束]
     D --> F
-</uml>
+```
 
 ### 类图
-<uml>
+```mermaid
 classDiagram
     class Student {
         +String name
@@ -274,10 +274,10 @@ classDiagram
         +teach()
     }
     Student <-- Teacher
-</uml>
+```
 
 ### 时序图
-<uml>
+```mermaid
 sequenceDiagram
     participant 用户
     participant 系统
@@ -287,10 +287,10 @@ sequenceDiagram
     系统->>数据库: 验证用户凭证
     数据库-->>系统: 返回验证结果
     系统-->>用户: 登录成功/失败
-</uml>
+```
 
 ### 状态图
-<uml>
+```mermaid
 stateDiagram-v2
     [*] --> 待处理
     待处理 --> 处理中: 开始处理
@@ -298,10 +298,10 @@ stateDiagram-v2
     处理中 --> 失败: 出现错误
     失败 --> 待处理: 重试
     已完成 --> [*]
-</uml>
+```
 
 ### 甘特图
-<uml>
+```mermaid
 gantt
     title 项目计划
     dateFormat  YYYY-MM-DD
@@ -311,7 +311,126 @@ gantt
     section 阶段2
     开发         :a3, after a2, 20d
     测试         :a4, after a3, 10d
-</uml>
+```
+
+
+### 思维导图 (Mind Map)
+```mermaid
+mindmap
+  root((软件项目全生命周期))
+    项目启动
+      项目章程
+      可行性分析
+        技术可行性
+        经济可行性
+        法律可行性
+      风险评估
+    需求阶段
+      ::icon(fa fa-list-check)
+      需求收集
+        用户访谈
+        问卷调查
+        竞品分析
+      需求分析
+      需求文档
+        用户故事
+        用例图
+        功能规格
+      需求验证
+    设计阶段
+      ::icon(fa fa-paintbrush)
+      架构设计
+        系统架构
+          单体架构
+          微服务架构
+          serverless
+        技术选型
+          前端框架
+            Vue
+            React
+            Angular
+          后端技术
+            Node.js
+            Rust
+            Java
+            Go
+          数据库
+            关系型
+              MySQL
+              PostgreSQL
+            非关系型
+              MongoDB
+              Redis
+      UI/UX设计
+        原型设计
+        交互设计
+        视觉设计
+      详细设计
+        类图
+        时序图
+        状态图
+    开发阶段
+      ::icon(fa fa-code)
+      环境搭建
+        开发环境
+        测试环境
+        生产环境
+      编码实现
+        前端开发
+        后端开发
+        数据库开发
+      代码审查
+      单元测试
+    测试阶段
+      ::icon(fa fa-vial)
+      测试计划
+      测试用例
+      测试类型
+        功能测试
+        性能测试
+        安全测试
+        兼容性测试
+        用户接受测试
+      缺陷管理
+        缺陷报告
+        缺陷修复
+        回归测试
+    部署阶段
+      ::icon(fa fa-rocket)
+      部署策略
+        蓝绿部署
+        金丝雀发布
+        滚动更新
+      基础设施
+        服务器配置
+        负载均衡
+        CDN配置
+      CI/CD
+        持续集成
+        持续交付
+        持续部署
+      监控告警
+        日志监控
+        性能监控
+        异常告警
+    运维阶段
+      ::icon(fa fa-gears)
+      系统运行维护
+      性能优化
+      安全更新
+      版本迭代
+    项目管理
+      ::icon(fa fa-tasks)
+      范围管理
+      进度管理
+      成本管理
+      质量管理
+      团队管理
+      沟通管理
+      风险管理
+      采购管理
+      干系人管理
+```
 
 ## 高级代码示例
 
@@ -461,7 +580,7 @@ fn main() {
             let _ = window_clone.emit("stream-message", content);
 
             // 模拟网络延迟
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
         // 储存当前对话的内容

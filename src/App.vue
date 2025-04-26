@@ -443,13 +443,70 @@ async function loadChatHistory() {
 
 // 处理聊天内容，隔离样式
 const processedChatContent = ref("");
-
 function applyHighlight() {
   nextTick(() => {
     // 查找所有代码块并应用高亮
     document.querySelectorAll('.chat-messages pre code').forEach((el) => {
       hljs.highlightElement(el as HTMLElement);
+
+      // 检测是否为 mermaid 代码块
+      if (el.classList.contains('language-mermaid')) {
+        const preElement = el.parentElement;
+        if (!preElement) return;
+
+        // 获取 mermaid 代码内容
+        const mermaidContent = el.textContent?.trim() || '';
+
+        if (!mermaidContent) return;
+
+        // 创建唯一的图表ID
+        const diagramId = `mermaid-diagram-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+        // 编码内容，以便在属性中安全存储
+        const encodedContent = encodeURIComponent(mermaidContent);
+
+        // 创建 mermaid 容器 - 根据流式传输状态显示不同内容
+        const mermaidContainer = document.createElement('div');
+        mermaidContainer.className = 'mermaid-container';
+        mermaidContainer.setAttribute('data-diagram-id', diagramId);
+        mermaidContainer.setAttribute('data-diagram-content', encodedContent);
+
+        // 根据是否在流式传输中显示不同的内容
+        if (isReceivingStream.value) {
+          mermaidContainer.innerHTML = `
+            <div class="mermaid-loading">
+              <div class="placeholder-box">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path>
+                  <path d="M10 2c1 .5 2 2 2 5"></path>
+                </svg>
+                <div>UML图表将在消息完整接收后渲染</div>
+              </div>
+              <div class="mermaid-preview">
+                <div class="preview-header">代码预览：</div>
+                <pre class="preview-code">${mermaidContent}</pre>
+              </div>
+            </div>`;
+          console.log(`流式传输中: 为 mermaid 代码块创建带预览的占位符容器 ${diagramId}`);
+        } else {
+          mermaidContainer.innerHTML = `<div class="mermaid-loading">UML图表加载中...</div>`;
+          console.log(`已将 language-mermaid 代码块转换为 mermaid 渲染容器: ${diagramId}`);
+        }
+
+        // 替换原始的 pre 元素
+        preElement.parentNode?.replaceChild(mermaidContainer, preElement);
+      }
     });
+
+    // 代码高亮和mermaid处理完成后，触发图表渲染
+    // 但仅在非流式传输状态下进行
+    if (!isReceivingStream.value) {
+      setTimeout(() => {
+        renderMermaidDiagrams();
+      }, 300);
+    } else {
+      console.log("流式传输中，跳过Mermaid图表渲染");
+    }
   });
 }
 
@@ -1334,6 +1391,17 @@ function setupActionButtons() {
   });
 }
 
+// 重置 Textarea 高度到初始状态
+function resetTextareaHeight() {
+  nextTick(() => {
+    const textarea = document.querySelector('.message-input') as HTMLTextAreaElement;
+    if (textarea) {
+      textarea.style.height = 'auto'; // 先重置
+      textarea.style.height = '48px'; // 设置为初始的 min-height
+    }
+  });
+}
+
 // 流式发送消息
 async function sendStreamMessage() {
   if (!inputMessage.value.trim()) return;
@@ -1353,7 +1421,8 @@ async function sendStreamMessage() {
     // 清空输入框但保存消息内容
     const message = inputMessage.value;
     inputMessage.value = "";
-
+    // 重置 textarea 高度
+    resetTextareaHeight();
     // 调用后端的流式处理函数
     await invoke("process_message_stream", { message });
 
@@ -1364,6 +1433,8 @@ async function sendStreamMessage() {
     isStreaming.value = false;
     isLoading.value = false;
     isReceivingStream.value = false;
+    // 如果发送失败，也重置高度
+    resetTextareaHeight();
   } finally {
     // 不再恢复消息过渡动画
     messageTransition.value = false;
@@ -1386,6 +1457,15 @@ function scrollToBottom(smooth = false) {
       }
     }
   });
+}
+
+// 处理输入框按键事件
+function handleInputKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter' && event.ctrlKey) {
+    event.preventDefault(); // 阻止默认的 Enter 行为（如果 textarea 在 form 内）
+    sendStreamMessage();
+  }
+  // 允许 Shift+Enter 换行，textarea 默认支持
 }
 
 // 创建新对话
@@ -1550,6 +1630,17 @@ const toggleMaximize = async () => {
   isMaximized ? currentWindow.unmaximize() : currentWindow.maximize();
 };
 const closeWindow = () => Window.getCurrent().close();
+
+// 自动调整 textarea 高度
+function autoResizeTextarea(event: Event) {
+  const textarea = event.target as HTMLTextAreaElement;
+  textarea.style.height = 'auto'; // 重置高度以获取正确的 scrollHeight
+  // 设置最小高度为单行高度，最大高度为 5 行左右
+  const minHeight = 48; // 初始高度
+  const maxHeight = minHeight * 5; // 约5行
+  const newHeight = Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight));
+  textarea.style.height = `${newHeight}px`;
+}
 </script>
 
 <template>
@@ -1699,7 +1790,15 @@ const closeWindow = () => Window.getCurrent().close();
         <!-- 底部输入区 -->
         <div class="chat-input-area">
           <form @submit.prevent="sendStreamMessage" class="input-form">
-            <input v-model="inputMessage" type="text" placeholder="输入消息..." class="message-input animated-input" />
+            <textarea
+              v-model="inputMessage"
+              placeholder="输入消息... (Ctrl+Enter 发送)"
+              class="message-input animated-input"
+              rows="1"
+              @keydown="handleInputKeydown"
+              @input="autoResizeTextarea"
+            ></textarea>
+            <!-- 将按钮移到 textarea 外部 -->
             <button type="submit" class="send-button animated-button" :disabled="isStreaming"
               :class="{ 'streaming': isStreaming }">
               <svg v-if="!isStreaming" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
@@ -2045,7 +2144,7 @@ body {
 
 .history-actions {
   padding: 16px;
-  border-bottom: 0px solid var (--border-color);
+  border-bottom: 0px solid var(--border-color);
 }
 
 .new-chat-button {
@@ -2130,7 +2229,7 @@ body {
 }
 
 .history-icon {
-  color: var (--text-secondary);
+  color: var(--text-secondary);
   margin-right: 10px;
   flex-shrink: 0;
 }
@@ -2415,29 +2514,25 @@ chat-messages .scoped-content {
 .chat-input-area {
   grid-row: 3;
   border-top: 1px solid var(--border-color);
-  padding: 12px 16px;
+  padding: 12px 16px; /* 内边距决定了容器和内容的间距 */
   background-color: var(--card-bg);
   z-index: 10;
-  /* 绝对固定高度，防止挤压 */
-  height: var(--input-area-height);
-  min-height: var(--input-area-height);
-  /* 确保底部固定 */
   position: sticky;
   bottom: 0;
 }
 
 .input-form {
   display: flex;
-  height: 100%;
+  align-items: flex-end; /* 底部对齐 textarea 和 button */
+  gap: 8px; /* 设置 textarea 和 button 之间的间距 */
+  width: 100%; /* 确保表单宽度正确 */
   max-width: 900px;
   margin: 0 auto;
-  position: relative;
 }
 
 .message-input {
   flex: 1;
-  padding: 12px 16px;
-  padding-right: 50px;
+  padding: 12px 16px; /* 恢复标准 padding */
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   font-size: var(--font-size-base);
@@ -2447,21 +2542,23 @@ chat-messages .scoped-content {
   box-shadow: var(--shadow-sm);
   background-color: var(--card-bg);
   color: var(--text-color);
+  resize: none; /* 禁止用户手动调整大小 */
+  overflow-y: auto; /* 内容超出时显示滚动条 */
+  line-height: 1.5; /* 确保行高一致 */
+  min-height: 48px; /* 保证至少有输入框的高度 */
+  max-height: 150px; /* 限制最大高度，例如约5行 */
+  height: 48px; /* 初始高度设为 min-height */
 }
 
 .message-input:focus {
   border-color: var(--primary-color);
   box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
-  transform: scale(1.01);
 }
 
 .send-button {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
   width: 40px;
   height: 40px;
+  transform:translateY(-4px);
   background-color: var(--primary-color);
   color: white;
   border: none;
@@ -2472,11 +2569,12 @@ chat-messages .scoped-content {
   align-items: center;
   justify-content: center;
   transition: var(--transition);
+  flex-shrink: 0; /* 防止按钮被压缩 */
 }
 
-.send-button:hover {
+.send-button:hover:not(:disabled) { /* 仅在非禁用状态下应用 hover 效果 */
   background-color: var(--primary-hover);
-  transform: translateY(-50%) scale(1.08);
+  transform: scale(1.08);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
@@ -2758,7 +2856,7 @@ chat-messages a:active {
 }
 
 .animated-button:not(:disabled):hover {
-  transform: translateY(-50%) scale(1.08);
+  transform: scale(1.08);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
@@ -2826,7 +2924,7 @@ chat-messages a:active {
 .send-button:disabled {
   background-color: #93c5fd;
   cursor: not-allowed;
-  transform: translateY(-50%) scale(1);
+  transform: scale(1);
   box-shadow: none;
   opacity: 0.7;
 }
@@ -2979,6 +3077,41 @@ chat-messages a:active {
 .history-list {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+
+.mermaid-preview {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
+}
+
+.preview-header {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.preview-code {
+  background-color: rgba(0, 0, 0, 0.03);
+  border-radius: 4px;
+  padding: 8px;
+  overflow-x: auto;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre;
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+}
+
+/* 暗色主题支持 */
+:root[data-theme="dark"] .preview-code,
+:root[data-theme="system"] .preview-code {
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 </style>
