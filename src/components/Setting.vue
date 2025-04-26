@@ -593,19 +593,6 @@ onMounted(() => {
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
 }
 
-/* 系统主题跟随 */
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme]) {
-        --bg-color: #1a202c;
-        --text-color: #f1f5f9;
-        --text-secondary: #94a3b8;
-        --card-bg: #2d3748;
-        --border-color: #4a5568;
-        --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
-        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
-    }
-}
-
 /* 字体大小设置 */
 :root[data-font-size="small"] {
     --font-size-base: 14px;
@@ -691,14 +678,6 @@ body {
     border-radius: 3px;
 }
 
-/* 暗黑模式下的滚动条适配 */
-@media (prefers-color-scheme: dark) {
-
-    .settings-container::-webkit-scrollbar-thumb,
-    .settings-content::-webkit-scrollbar-thumb {
-        background-color: rgba(255, 255, 255, 0.2);
-    }
-}
 
 .settings-header {
     display: flex;
@@ -1065,22 +1044,6 @@ input:checked+.slider:before {
     }
 }
 
-/* 暗黑模式适配 */
-@media (prefers-color-scheme: dark) {
-    .reset-button:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-    }
-
-    .directory-button:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-    }
-
-    .notification {
-        background-color: #1e293b;
-        color: #f1f5f9;
-    }
-}
-
 
 .settings-actions {
     display: flex;
@@ -1109,16 +1072,7 @@ input:checked+.slider:before {
     background-color: rgba(0, 0, 0, 0.05);
 }
 
-/* 暗色模式适配 */
-@media (prefers-color-scheme: dark) {
-    .close-settings:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-    }
 
-    .cancel-button:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-    }
-}
 
 select {
     /* 保留必要的自定义样式 */
@@ -1200,12 +1154,6 @@ select {
     }
 }
 
-/* 暗黑模式下的选择框箭头颜色 */
-@media (prefers-color-scheme: dark) {
-    select {
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23e2e8f0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    }
-}
 
 
 /* API Key 管理样式 */
@@ -1387,20 +1335,5 @@ select {
     background-color: var(--primary-hover);
 }
 
-/* 暗黑模式下的适配 */
-@media (prefers-color-scheme: dark) {
-    .api-key-value {
-        background-color: rgba(255, 255, 255, 0.05);
-    }
 
-    .close-form:hover,
-    .cancel-button:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-    }
-
-    .api-key-item:hover {
-        border-color: var(--primary-color);
-        background-color: rgba(255, 255, 255, 0.03);
-    }
-}
 </style>

@@ -77,11 +77,11 @@ function toggleSettings() {
 function initMermaid() {
   mermaid.initialize({
     startOnLoad: false,
-    theme: document.documentElement.getAttribute('data-theme') === 'dark' || 
-          (document.documentElement.getAttribute('data-theme') === 'system' && 
-           window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'default',
+    theme: document.documentElement.getAttribute('data-theme') === 'dark' ||
+      (document.documentElement.getAttribute('data-theme') === 'system' &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'default',
     securityLevel: 'loose',
-    flowchart: { 
+    flowchart: {
       htmlLabels: true,
       useMaxWidth: true,
     },
@@ -89,8 +89,8 @@ function initMermaid() {
   });
 }
 
-// 渲染Mermaid图表
-async function renderMermaidDiagrams() {
+// 修改渲染Mermaid图表函数，添加重试机制
+async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3) {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
     (document.documentElement.getAttribute('data-theme') === 'system' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -105,7 +105,24 @@ async function renderMermaidDiagrams() {
 
   try {
     // 查找所有需要渲染的UML元素
-    const umlElements = document.querySelectorAll('.chat-messages .mermaid-container');
+    const umlElements = document.querySelectorAll('.chat-messages .mermaid-container:not(.loaded)');
+    console.log(`尝试渲染 ${umlElements.length} 个UML图表，当前重试次数: ${retryCount}`);
+
+    if (umlElements.length === 0 && retryCount === 0) {
+      // 第一次调用且没有找到未加载的图表，也查找所有图表进行重新渲染
+      const allUmlElements = document.querySelectorAll('.chat-messages .mermaid-container');
+      console.log(`未找到未加载的图表，将尝试重新渲染所有 ${allUmlElements.length} 个图表`);
+
+      // 如果有图表，移除loaded类，准备重新渲染
+      if (allUmlElements.length > 0) {
+        allUmlElements.forEach(el => el.classList.remove('loaded'));
+        // 延迟后重新尝试渲染
+        setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 300);
+        return;
+      }
+    }
+
+    let renderPromises = [];
 
     for (const element of umlElements) {
       const id = element.getAttribute('data-diagram-id');
@@ -120,21 +137,41 @@ async function renderMermaidDiagrams() {
           // 正确解码内容
           content = decodeURIComponent(encodedContent); // 分配解码后的内容
           console.log(`渲染图表 ID: ${id}`);
-          console.log("Encoded Content:", encodedContent);
-          console.log("Decoded Content for Mermaid:", content); // 记录传递给 Mermaid 的确切内容
 
-          // 使用Mermaid渲染图表
-          // 确保 'content' 是一个非空字符串
-          if (typeof content === 'string' && content.length > 0) {
-            const { svg } = await mermaid.render(id, content);
-            element.innerHTML = svg;
-            // 添加图表加载完成的动画效果
-            element.classList.add('loaded');
-          } else {
-            // 如果解码后的内容无效或为空，则抛出错误
-            throw new Error("解码后的内容为空或无效。");
-          }
-
+          // 使用Promise.resolve()包装渲染过程，以便收集所有渲染任务
+          renderPromises.push(
+            Promise.resolve().then(async () => {
+              if (typeof content === 'string' && content.length > 0) {
+                try {
+                  const { svg } = await mermaid.render(id, content);
+                  element.innerHTML = svg;
+                  // 添加图表加载完成的动画效果
+                  element.classList.add('loaded');
+                  return true;
+                } catch (renderError) {
+                  console.error(`单个图表渲染失败 ID ${id}:`, renderError);
+                  element.innerHTML = `
+                    <div class="mermaid-error">
+                      <p>UML图表渲染失败</p>
+                      <pre>${renderError}</pre>
+                      <div class="mermaid-source">
+                        <details>
+                          <summary>查看原始图表代码</summary>
+                          <pre>${content}</pre>
+                        </details>
+                      </div>
+                      <button class="retry-render-button" data-diagram-id="${id}">
+                        重试渲染
+                      </button>
+                    </div>
+                  `;
+                  return false;
+                }
+              } else {
+                throw new Error("解码后的内容为空或无效。");
+              }
+            })
+          );
         } catch (error) {
           // 记录更详细的错误信息和失败的内容
           console.error(`渲染图表 ID ${id} 失败:`, error);
@@ -146,9 +183,12 @@ async function renderMermaidDiagrams() {
               <div class="mermaid-source">
                 <details>
                   <summary>查看原始图表代码</summary>
-                  <pre>${content}</pre> <!-- 在这里显示解码后的内容 -->
+                  <pre>${content}</pre>
                 </details>
               </div>
+              <button class="retry-render-button" data-diagram-id="${id}">
+                重试渲染
+              </button>
             </div>
           `;
         }
@@ -157,9 +197,104 @@ async function renderMermaidDiagrams() {
         console.warn("发现缺少必要属性（id 或 content）的 Mermaid 容器。", element);
       }
     }
+
+    // 等待所有渲染完成
+    if (renderPromises.length > 0) {
+      const results = await Promise.all(renderPromises);
+      const failedCount = results.filter(success => !success).length;
+
+      // 如果有失败的图表，且未超过最大重试次数，则重试
+      if (failedCount > 0 && retryCount < maxRetries) {
+        console.log(`${failedCount}个图表渲染失败，将在1秒后重试 (${retryCount + 1}/${maxRetries})`);
+        setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1000);
+      } else if (failedCount > 0) {
+        console.log(`渲染完成，但有${failedCount}个图表渲染失败，已达到最大重试次数`);
+        // 为失败的图表添加重试按钮事件监听
+        setupRetryButtons();
+      } else {
+        console.log('所有图表渲染成功');
+      }
+    } else if (retryCount < maxRetries && umlElements.length > 0) {
+      // 如果没有渲染承诺但有UML元素，稍后再次尝试
+      console.log(`没有渲染任务但找到了UML元素，1秒后重试 (${retryCount + 1}/${maxRetries})`);
+      setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1000);
+    }
   } catch (error) {
     console.error("处理Mermaid图表失败:", error);
+    if (retryCount < maxRetries) {
+      console.log(`整体处理失败，将在1秒后重试 (${retryCount + 1}/${maxRetries})`);
+      setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1000);
+    }
   }
+}
+
+// 设置图表渲染失败后的重试按钮事件
+function setupRetryButtons() {
+  nextTick(() => {
+    document.querySelectorAll('.chat-messages .retry-render-button').forEach(button => {
+      button.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const targetButton = e.target as HTMLElement;
+        const diagramId = targetButton.getAttribute('data-diagram-id');
+        const container = document.querySelector(`.mermaid-container[data-diagram-id="${diagramId}"]`);
+
+        if (container) {
+          // 移除loaded类以便重新渲染
+          container.classList.remove('loaded');
+          showNotification("正在重新渲染图表...", "info");
+
+          // 特别处理这个容器
+          await renderMermaidDiagrams(0, 3);
+        }
+      });
+    });
+  });
+}
+
+// 添加手动刷新图表的功能
+function setupMermaidRefresh() {
+  nextTick(() => {
+    // 为所有图表容器添加刷新按钮
+    document.querySelectorAll('.chat-messages .mermaid-container').forEach(container => {
+      // 检查容器是否已经有刷新按钮
+      if (!container.querySelector('.refresh-diagram-button')) {
+        const refreshButton = document.createElement('button');
+        refreshButton.className = 'refresh-diagram-button';
+        refreshButton.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 4v6h-6"></path>
+            <path d="M1 20v-6h6"></path>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+            <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
+          </svg>
+        `;
+        refreshButton.title = "刷新图表";
+
+        refreshButton.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const targetButton = e.currentTarget as HTMLElement;
+          const container = targetButton.closest('.mermaid-container');
+
+          if (container) {
+            // 移除loaded类以便重新渲染
+            container.classList.remove('loaded');
+            targetButton.classList.add('refreshing');
+            showNotification("正在刷新图表...", "info");
+
+            // 延迟后渲染以确保UI更新
+            setTimeout(async () => {
+              await renderMermaidDiagrams(0, 3);
+              targetButton.classList.remove('refreshing');
+            }, 100);
+          }
+        });
+
+        // 将按钮添加到容器中
+        container.appendChild(refreshButton);
+      }
+    });
+  });
 }
 
 // 加载 MathJax
@@ -223,13 +358,13 @@ async function selectHistory(id: number) {
     showNotification("请等待当前消息输出完成", "error");
     return;
   }
-  
+
   // 调用后端加载特定对话
   console.log(`加载对话 ${id}`);
 
   // 添加淡出效果但确保立即恢复可见性
   fadeInMessages.value = false;
-  
+
   // 短暂延迟后开始加载
   setTimeout(async () => {
     isLoading.value = true;
@@ -242,10 +377,10 @@ async function selectHistory(id: number) {
       isLoading.value = false;
       // 更新聊天内容，确保样式隔离
       updateChatContent(chatContent.value);
-      
+
       // 强制立即显示内容
       fadeInMessages.value = true;
-      
+
       // 在移动设备上选择后自动关闭侧边栏
       if (windowWidth.value < 768) {
         isHistoryOpen.value = false;
@@ -297,27 +432,27 @@ function setupExternalLinks() {
   nextTick(() => {
     document.querySelectorAll('.chat-messages a').forEach(link => {
       const href = link.getAttribute('href');
-      
+
       // 检查是否是button://格式的链接，将其转换为按钮样式
       if (href && href.startsWith('button://')) {
         // 创建按钮元素替换链接
         const buttonElement = document.createElement('button');
         buttonElement.className = 'markdown-button';
         buttonElement.textContent = link.textContent || '点击发送';
-        
+
         // 从URL中提取消息内容，确保正确处理中文等字符
         const message = decodeURIComponent(href.substring(9));
-        
+
         // 设置点击事件
         buttonElement.addEventListener('click', async (e) => {
           e.preventDefault();
-          
+
           // 如果正在流式输出消息，禁止发送新消息
           if (isStreaming.value) {
             showNotification("请等待当前消息输出完成", "error");
             return;
           }
-          
+
           if (message.trim()) {
             // 设置输入框内容
             inputMessage.value = message;
@@ -326,7 +461,7 @@ function setupExternalLinks() {
             showNotification("已发送按钮消息", "success");
           }
         });
-        
+
         // 替换原始链接
         link.parentNode?.replaceChild(buttonElement, link);
       } else if (href) {
@@ -351,7 +486,7 @@ function processUmlContent(html: string): string {
   const umlRegex = /<uml>([\s\S]*?)<\/uml>/g;
   let counter = 0;
 
-  return html.replace(umlRegex, (match, umlContent) => {
+  return html.replace(umlRegex, (_, umlContent) => {
     const diagramId = `mermaid-diagram-${Date.now()}-${counter++}`;
 
     // 提取```mermaid和```之间的内容
@@ -387,8 +522,8 @@ function updateChatContent(messages: ChatMessage[]) {
   // 获取当前主题和字体大小
   const currentTheme = document.documentElement.getAttribute('data-theme') || 'system';
   const currentFontSize = document.documentElement.getAttribute('data-font-size') || 'medium';
-  const isDark = currentTheme === 'dark' || 
-                (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark = currentTheme === 'dark' ||
+    (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   console.log(`更新聊天内容，主题: ${currentTheme}, 字体大小: ${currentFontSize}, 是否暗色: ${isDark}`);
 
@@ -397,13 +532,13 @@ function updateChatContent(messages: ChatMessage[]) {
 
   for (const msg of messages) {
     const messageClass = msg.msgtype.toLowerCase();
-    
+
     // 根据消息类型确定布局方式
     const isUserMessage = msg.msgtype === 'User';
-    
+
     // 处理消息内容中的UML标签
     const processedContent = processUmlContent(msg.content);
-    
+
     messagesHtml += `
     <div class="message-wrapper ${messageClass} ${isUserMessage ? 'user-message-right' : ''}">
       <div class="message-avatar">
@@ -433,13 +568,16 @@ function updateChatContent(messages: ChatMessage[]) {
               <polyline points="21 15 16 10 5 21"></polyline>
             </svg>
           </button>
-          ${!isUserMessage ? 
+          ${!isUserMessage ?
             `<button class="action-button regenerate-button" data-message-index="${messages.indexOf(msg)}" title="重新生成">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1-18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                <path d="M23 4v6h-6"></path>
+                <path d="M1 20v-6h6"></path>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+                <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
               </svg>
             </button>` : ''
-          }
+      }
         </div>
       </div>
     </div>
@@ -955,7 +1093,6 @@ function updateChatContent(messages: ChatMessage[]) {
       
       .message-wrapper.user-message-right .message-bubble {
         max-width: calc(85% - 42px);
-        margin-right: 12px;
       }
       
       .message-wrapper.user-message-right .message-content {
@@ -1045,16 +1182,6 @@ function updateChatContent(messages: ChatMessage[]) {
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
       }
       
-      /* 暗色模式下的按钮样式 */
-      @media (prefers-color-scheme: dark) {
-        .markdown-button {
-          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
-        }
-        
-        .markdown-button:hover {
-          box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-        }
-      }
       
       .render-image-button {
         color: #8b5cf6; /* 紫色图标 */
@@ -1064,15 +1191,7 @@ function updateChatContent(messages: ChatMessage[]) {
         background-color: rgba(139, 92, 246, 0.1);
       }
       
-      /* 暗色模式下的渲染图片按钮样式 */
-      @media (prefers-color-scheme: dark) {
-        .render-image-button {
-          color: #a78bfa; /* 亮紫色 */
-        }
-        .render-image-button:hover {
-          background-color: rgba(167, 139, 250, 0.15);
-        }
-      }
+
     </style>
   </div>
 `;
@@ -1084,7 +1203,7 @@ function updateChatContent(messages: ChatMessage[]) {
     if (chatMessages) {
       chatMessages.querySelector('.scoped-content')?.classList.add('fade-in');
     }
-    
+
     // 应用代码高亮
     applyHighlight();
 
@@ -1121,7 +1240,7 @@ async function setupStreamListeners() {
     chatContent.value = chatData.content;
     // 更新聊天内容显示
     updateChatContent(chatContent.value);
-    
+
     // 滚动到底部，添加平滑效果
     scrollToBottom(true);
   });
@@ -1133,7 +1252,7 @@ async function setupStreamListeners() {
 
     // 重新加载聊天历史
     await loadChatHistory();
-    
+
     // 重新启用消息过渡动画
     messageTransition.value = true;
   });
@@ -1173,7 +1292,7 @@ function setupActionButtons() {
           showNotification("请等待当前消息输出完成", "error");
           return;
         }
-        
+
         const messageIndex = Number((button as HTMLElement).dataset.messageIndex);
         if (!isNaN(messageIndex)) {
           try {
@@ -1181,10 +1300,10 @@ function setupActionButtons() {
             isLoading.value = true;
             isStreaming.value = true;
             messageTransition.value = false;
-            
+
             // 调用后端重新生成消息
             await invoke("regenerate_message", { messageIndex });
-            
+
             // 处理将在事件监听器中完成
           } catch (error) {
             console.error("重新生成失败:", error);
@@ -1318,10 +1437,10 @@ async function createNewChat() {
     showNotification("请等待当前消息输出完成", "error");
     return;
   }
-  
+
   // 添加淡出效果
   fadeInMessages.value = false;
-  
+
   setTimeout(async () => {
     isLoading.value = true;
     try {
@@ -1363,7 +1482,7 @@ watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldT
 
     // 当主题变化时，更新Mermaid配置
     const isDark = newTheme === 'dark' ||
-                  (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
     mermaid.initialize({
       theme: isDark ? 'dark' : 'default'
@@ -1383,7 +1502,7 @@ watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldT
 // 组件加载时初始化对话内容
 onMounted(async () => {
   // 检测是否为移动设备
-  isMobile.value = false;// /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  isMobile.value = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   try {
     // 初始化应用设置 (这会调用 refreshGlobalStyles)
@@ -1427,8 +1546,8 @@ onMounted(async () => {
     setTimeout(() => {
       // 更新Mermaid主题
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-                  (document.documentElement.getAttribute('data-theme') === 'system' &&
-                   window.matchMedia('(prefers-color-scheme: dark)').matches);
+        (document.documentElement.getAttribute('data-theme') === 'system' &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches);
 
       mermaid.initialize({
         theme: isDark ? 'dark' : 'default'
@@ -1473,7 +1592,8 @@ const closeWindow = () => Window.getCurrent().close();
 <template>
   <div class="app-container">
     <!-- 自定义标题栏 - 仅在非移动设备上显示 -->
-''      <div class="custom-titlebar" data-tauri-drag-region>
+    <div v-if="!isMobile" class="custom-titlebar" data-tauri-drag-region>
+      <div class="custom-titlebar" data-tauri-drag-region>
         <div class="app-icon">
           <img src="./assets/logo.png" alt="NPULearn" />
         </div>
@@ -1497,7 +1617,7 @@ const closeWindow = () => Window.getCurrent().close();
           </button>
         </div>
       </div>
-
+    </div>
     <div class="app-content">
       <LoadingLogo :show="isAppLoading" />
 
@@ -1549,10 +1669,10 @@ const closeWindow = () => Window.getCurrent().close();
           </button>
         </div>
         <div class="history-list">
-          <div v-for="(item, index) in chatHistory" :key="item.id" 
-               @click="isStreaming ? showNotification('请等待当前消息输出完成', 'error') : selectHistory(item.id)" 
-               class="history-item" :class="{ 'streaming-disabled': isStreaming }"
-               :style="{ animationDelay: index * 0.05 + 's' }">
+          <div v-for="(item, index) in chatHistory" :key="item.id"
+            @click="isStreaming ? showNotification('请等待当前消息输出完成', 'error') : selectHistory(item.id)"
+            class="history-item" :class="{ 'streaming-disabled': isStreaming }"
+            :style="{ animationDelay: index * 0.05 + 's' }">
             <div class="history-item-content">
               <svg class="history-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1617,8 +1737,8 @@ const closeWindow = () => Window.getCurrent().close();
         <div class="chat-input-area">
           <form @submit.prevent="sendStreamMessage" class="input-form">
             <input v-model="inputMessage" type="text" placeholder="输入消息..." class="message-input animated-input" />
-            <button type="submit" class="send-button animated-button" :disabled="isStreaming" 
-                    :class="{ 'streaming': isStreaming }">
+            <button type="submit" class="send-button animated-button" :disabled="isStreaming"
+              :class="{ 'streaming': isStreaming }">
               <svg v-if="!isStreaming" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
                 class="send-icon">
@@ -1738,16 +1858,6 @@ const closeWindow = () => Window.getCurrent().close();
   stroke-width: 1;
   fill: none;
 }
-
-/* 暗色模式 */
-@media (prefers-color-scheme: dark) {
-  .window-controls button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-  }
-  .title {
-    color: var(--dark-text-color);
-  }
-}
 </style>
 
 
@@ -1865,13 +1975,6 @@ body {
   font-size: var(--font-size-base);
 }
 
-/* 暗色模式适配 */
-@media (prefers-color-scheme: dark) {
-  .empty-chat-icon {
-    background-color: #1e293b;
-    border-color: #334155;
-  }
-}
 
 /* 遮罩层 */
 .history-overlay {
@@ -1895,7 +1998,8 @@ body {
   flex-direction: column;
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: fixed;
-  top: 32px; /* 默认留出标题栏高度 */
+  top: 32px;
+  /* 默认留出标题栏高度 */
   left: 0;
   bottom: 0;
   z-index: 100;
@@ -1911,7 +2015,8 @@ body {
   transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   margin-left: 0;
   min-height: 0;
-  height: calc(100vh - 32px); /* 默认减去标题栏高度 */
+  height: calc(100vh - 32px);
+  /* 默认减去标题栏高度 */
   overflow: hidden;
 }
 
@@ -1921,7 +2026,8 @@ body {
     transform: translateX(0);
     position: relative;
     box-shadow: none;
-    top: 0; /* 在大屏幕上始终从顶部开始 */
+    top: 0;
+    /* 在大屏幕上始终从顶部开始 */
   }
 
   .chat-container {
@@ -2042,6 +2148,7 @@ body {
     opacity: 0;
     transform: translateX(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -2060,7 +2167,7 @@ body {
 }
 
 .history-icon {
-  color: var(--text-secondary);
+  color: var (--text-secondary);
   margin-right: 10px;
   flex-shrink: 0;
 }
@@ -2126,6 +2233,7 @@ body {
     opacity: 0;
     transform: scale(0.95) translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -2181,17 +2289,6 @@ body {
   background-color: rgba(0, 0, 0, 0.05);
 }
 
-/* 暗色模式下的设置按钮样式 */
-@media (prefers-color-scheme: dark) {
-  .settings-button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-color: var(--text-color);
-  }
-
-  .header-settings-button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-  }
-}
 
 /* 聊天区域 */
 .chat-container {
@@ -2326,9 +2423,11 @@ chat-messages .scoped-content {
   0% {
     transform: rotate(0deg) scale(0.9);
   }
+
   50% {
     transform: rotate(180deg) scale(1.1);
   }
+
   100% {
     transform: rotate(360deg) scale(0.9);
   }
@@ -2434,35 +2533,9 @@ send-icon {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
-  }
-}
-
-/* 代码高亮 - 暗色模式适配 */
-@media (prefers-color-scheme: dark) {
-
-  /* 隐藏亮色主题 */
-  .hljs-github {
-    display: none 
-  }
-
-  /* 显示暗色主题 */
-  .hljs-github-dark {
-    display: block 
-  }
-}
-
-@media (prefers-color-scheme: light) {
-
-  /* 显示亮色主题 */
-  .hljs-github {
-    display: block 
-  }
-
-  /* 隐藏暗色主题 */
-  .hljs-github-dark {
-    display: none 
   }
 }
 
@@ -2470,6 +2543,7 @@ chat-messages .mjx-chtml {
   margin: 0.5em 0;
   font-size: var(--font-size-lg);
 }
+
 chat-messages .mjx-math {
   max-width: 100%;
   /* 确保不超过容器宽度 */
@@ -2516,12 +2590,6 @@ chat-messages .mjx-container {
   /* 为滚动条留出一点空间 */
 }
 
-/* 暗色模式下的 MathJax 样式 */
-@media (prefers-color-scheme: dark) {
-  chat-messages .mjx-math {
-    color: #f1f5f9;
-  }
-}
 
 /* 通知样式 */
 .notification {
@@ -2583,66 +2651,15 @@ chat-messages .mjx-container {
     transform: translateX(100%);
     opacity: 0;
   }
+
   50% {
     transform: translateX(-10px);
     opacity: 1;
   }
+
   to {
     transform: translateX(0);
     opacity: 1;
-  }
-}
-
-/* 暗色模式下的通知样式 */
-@media (prefers-color-scheme: dark) {
-  .notification {
-    background-color: var(--dark-card-bg);
-    color: var(--dark-text-color);
-  }
-
-  .notification.success {
-    border-left-color: #10b981;
-    background-color: var(--dark-card-bg);
-  }
-
-  .notification.error {
-    border-left-color: #ef4444;
-    background-color: var(--dark-card-bg);
-  }
-
-  .notification.info {
-    border-left-color: #3b82f6;
-    background-color: var(--dark-card-bg);
-  }
-
-  .notification.warning {
-    border-left-color: #f59e0b;
-    background-color: var(--dark-card-bg);
-  }
-
-  .notification-content svg {
-    color: #34d399;
-    /* 更亮的绿色，增强暗色模式下的对比度 */
-  }
-
-  .notification.error svg {
-    color: #f87171;
-    /* 更亮的红色 */
-  }
-
-  .notification.info svg {
-    color: #60a5fa;
-    /* 更亮的蓝色 */
-  }
-
-  .notification.warning svg {
-    color: #fbbf24;
-    /* 更亮的黄色 */
-  }
-
-  /* 为暗色模式添加更明显的阴影 */
-  .notification {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -2670,14 +2687,6 @@ chat-messages a:hover {
 
 chat-messages a:active {
   opacity: 0.6;
-}
-
-/* 暗色模式下的链接样式 */
-@media (prefers-color-scheme: dark) {
-  chat-messages a {
-    color: #6366f1;
-    border-bottom-color: #6366f1;
-  }
 }
 
 /* 响应式设计 */
@@ -2730,62 +2739,6 @@ chat-messages a:active {
   }
 }
 
-/* 暗色模式 */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-color: #0f172a;
-    --text-color: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --border-color: #334155;
-  }
-
-  body {
-    background-color: var(--bg-color);
-    color: var(--text-color);
-  }
-
-  .history-sidebar,
-  .chat-header,
-  .chat-input-area {
-    background-color: #1e293b;
-    color: var(--text-color);
-  }
-
-  .message-input {
-    background-color: #1e293b;
-    color: var(--text色);
-    border-color: #475569;
-  }
-
-  .message-input:focus {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
-  }
-
-  .history-item:hover {
-    background-color: rgba(255, 255, 255, 0.05);
-    border-color: #475569;
-  }
-
-  .close-history:hover,
-  .toggle-history:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-  }
-
-  .history-list::-webkit-scrollbar-thumb,
-  .chat-content::-webkit-scrollbar-thumb {
-    background-color: #475569;
-  }
-
-  .loading-spinner {
-    color: var(--primary-color);
-    border-color: rgba(79, 70, 229, 0.3);
-  }
-
-  .loading-text {
-    color: var(--text-secondary);
-  }
-}
 
 /* 自定义滚动条样式 */
 ::-webkit-scrollbar {
@@ -2823,6 +2776,7 @@ chat-messages a:active {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -2891,6 +2845,7 @@ chat-messages a:active {
     opacity: 0;
     transform: scale(0.95) translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -2964,32 +2919,13 @@ chat-messages a:active {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-/* 暗色模式下的按钮样式 */
-@media (prefers-color-scheme: dark) {
-  .markdown-button {
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
-  }
-  
-  .markdown-button:hover {
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-  }
-}
 
 .render-image-button {
-  color: #8b5cf6; /* 紫色图标 */
+  color: #8b5cf6;
+  /* 紫色图标 */
 }
 
 .render-image-button:hover {
   background-color: rgba(139, 92, 246, 0.1);
-}
-
-/* 暗色模式下的渲染图片按钮样式 */
-@media (prefers-color-scheme: dark) {
-  .render-image-button {
-    color: #a78bfa; /* 亮紫色 */
-  }
-  .render-image-button:hover {
-    background-color: rgba(167, 139, 250, 0.15);
-  }
 }
 </style>

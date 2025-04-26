@@ -572,13 +572,4 @@ onUnmounted(() => {
     opacity: 0;
 }
 
-@media (prefers-color-scheme: dark) {
-    .loading-logo-container {
-        background-color: var(--dark-bg-color, #0f172a);
-    }
-
-    .app-title {
-        color: var(--dark-text-color, #f1f5f9);
-    }
-}
 </style>

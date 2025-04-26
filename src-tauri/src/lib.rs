@@ -144,11 +144,12 @@ fn create_new_chat() -> Vec<ChatMessage> {
 fn process_message_stream(window: Window, message: String) {
     // 克隆窗口以便在新线程中使用
     let window_clone = window.clone();
-    
+
     // 创建一个新线程处理消息
     std::thread::spawn(move || {
         // 模拟AI响应
         // 在实际应用中，这里应该是从AI API获取的流式响应
+
         let test_markdown = r#"
 # Markdown 示例文档
 
@@ -241,11 +242,14 @@ $$f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{1}{2}\left(\frac{x-\mu}{\sigma}\r
 这是折叠的内容，点击上面的文字可以展开或收起。
 </details>
 
+## 其他功能按钮
 
 + [点击发送问候消息](button://你好，请问你能帮我做什么?)
 + [点击发送帮助信息](button://我需要一些帮助)
 
+## 更多UML图表示例
 
+### 流程图
 <uml>
 graph TD
     A[开始] --> B{是否需要学习?}
@@ -256,7 +260,7 @@ graph TD
     D --> F
 </uml>
 
-
+### 类图
 <uml>
 classDiagram
     class Student {
@@ -271,6 +275,136 @@ classDiagram
     }
     Student <-- Teacher
 </uml>
+
+### 时序图
+<uml>
+sequenceDiagram
+    participant 用户
+    participant 系统
+    participant 数据库
+    
+    用户->>系统: 登录请求
+    系统->>数据库: 验证用户凭证
+    数据库-->>系统: 返回验证结果
+    系统-->>用户: 登录成功/失败
+</uml>
+
+### 状态图
+<uml>
+stateDiagram-v2
+    [*] --> 待处理
+    待处理 --> 处理中: 开始处理
+    处理中 --> 已完成: 处理完成
+    处理中 --> 失败: 出现错误
+    失败 --> 待处理: 重试
+    已完成 --> [*]
+</uml>
+
+### 甘特图
+<uml>
+gantt
+    title 项目计划
+    dateFormat  YYYY-MM-DD
+    section 阶段1
+    需求分析     :a1, 2023-01-01, 10d
+    设计         :a2, after a1, 15d
+    section 阶段2
+    开发         :a3, after a2, 20d
+    测试         :a4, after a3, 10d
+</uml>
+
+## 高级代码示例
+
+### JavaScript代码
+```javascript
+// 异步函数示例
+async function fetchData() {
+  try {
+    const response = await fetch('https://api.example.com/data');
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('获取数据失败:', error);
+    return null;
+  }
+}
+
+// ES6类示例
+class Person {
+  constructor(name, age) {
+    this.name = name;
+    this.age = age;
+  }
+  
+  greet() {
+    return `你好，我是${this.name}，今年${this.age}岁。`;
+  }
+}
+```
+
+### Rust代码
+```rust
+use std::collections::HashMap;
+
+// 结构体定义
+struct User {
+    username: String,
+    email: String,
+    sign_in_count: u64,
+    active: bool,
+}
+
+// 实现方法
+impl User {
+    fn new(username: String, email: String) -> Self {
+        Self {
+            username,
+            email,
+            sign_in_count: 1,
+            active: true,
+        }
+    }
+    
+    fn toggle_active(&mut self) {
+        self.active = !self.active;
+    }
+}
+
+fn main() {
+    // 创建哈希表
+    let mut scores = HashMap::new();
+    scores.insert(String::from("蓝队"), 10);
+    scores.insert(String::from("红队"), 50);
+    
+    // 使用结构体
+    let mut user = User::new(
+        String::from("张三"),
+        String::from("zhangsan@example.com")
+    );
+    
+    user.toggle_active();
+    println!("用户状态: {}", user.active);
+}
+```
+
+## 嵌套列表
+1. 主要任务
+   * 子任务A
+   * 子任务B
+     1. 细分任务1
+     2. 细分任务2
+   * 子任务C
+2. 次要任务
+   * 备用计划
+
+## 定义列表
+<dl>
+  <dt>Markdown</dt>
+  <dd>一种轻量级标记语言，创建格式化文本的工具。</dd>
+  
+  <dt>HTML</dt>
+  <dd>超文本标记语言，用于创建网页的标准标记语言。</dd>
+</dl>
 
 找到具有 1 个许可证类型的类似代码
     "#;
@@ -354,7 +488,7 @@ classDiagram
         // 通知前端流式传输完成
         let _ = window_clone.emit("stream-complete", "");
     });
-    
+
     // 主线程立即返回，不会被阻塞
 }
 
@@ -363,50 +497,52 @@ fn regenerate_message(window: Window, message_index: usize) -> Result<(), String
     // 克隆一份当前对话的内容
     let current_id = *CURRENT_CHAT_ID.lock().unwrap();
     let mut history = CHAT_HISTORY.lock().unwrap();
-    
+
     let chat_history = match history.get_mut(&current_id) {
         Some(history) => history,
         None => return Err("当前对话不存在".to_string()),
     };
-    
+
     // 检查索引是否有效（必须是Assistant消息）
     if message_index >= chat_history.content.len() {
         return Err("消息索引无效".to_string());
     }
-    
+
     // 找到指定索引的消息
     let message = &chat_history.content[message_index];
-    
+
     // 只允许重做AI的消息
     if message.msgtype != ChatMessageType::Assistant {
         return Err("只能重新生成AI助手的消息".to_string());
     }
-    
+
     // 找到该消息对应的用户消息（通常是上一条）
-    let user_message = if message_index > 0 && chat_history.content[message_index - 1].msgtype == ChatMessageType::User {
+    let user_message = if message_index > 0
+        && chat_history.content[message_index - 1].msgtype == ChatMessageType::User
+    {
         chat_history.content[message_index - 1].content.clone()
     } else {
         // 如果没有找到对应的用户消息，返回错误
         return Err("未找到对应的用户消息".to_string());
     };
-    
+
     // 移除当前消息以及之后的所有消息
     chat_history.content.truncate(message_index - 1);
-    
+
     // 更新对话时间
     chat_history.time = chrono::Local::now().format("%H:%M").to_string();
-    
+
     // 保存历史记录
     save_history(&history).unwrap_or_else(|e| {
         println!("Failed to save history: {}", e);
     });
-    
+
     // 释放锁以便process_message_stream可以获取它
     drop(history);
-    
+
     // 重新处理用户消息
     process_message_stream(window, user_message);
-    
+
     Ok(())
 }
 
