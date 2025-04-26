@@ -658,20 +658,20 @@ function updateChatContent(messages: ChatMessage[]) {
 
     messagesHtml += `
     <div class="message-wrapper ${messageClass} ${isUserMessage ? 'user-message-right' : ''}">
-      <div class="message-avatar">
+      <div class="message-avatar ${messageClass}">
         <div class="avatar-icon">
           ${isUserMessage ?
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>' :
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M9 9h6"></path><path d="M9 13h6"></path></svg>'
       }
         </div>
-        <div class="message-time">${msg.time}</div>
+        <div class="message-time ${messageClass}">${msg.time}</div>
       </div>
       <div class="message-bubble ${messageClass}">
         <div class="message-content markdown-body" data-message-index="${messages.indexOf(msg)}">
           ${processedContent}
         </div>
-        <div class="message-actions">
+        <div class="message-actions ${messageClass}">
           <button class="action-button copy-button" data-content="${encodeURIComponent(msg.content)}" title="复制内容">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -781,6 +781,7 @@ function updateChatContent(messages: ChatMessage[]) {
         display: flex;
         flex-direction: column;
         position: relative;
+        transform: translateY(16px);
       }
       
       .message-content {
@@ -1068,44 +1069,17 @@ function updateChatContent(messages: ChatMessage[]) {
         content: none;
       }
       
-      /* 移动端优化 */
-      @media (max-width: 767px) {
-        .message-bubble {
-          max-width: calc(90% - 42px);
-        }
-        
-        .message-content {
-          padding: 12px 16px;
-        }
-        
-        .avatar-icon {
-          width: 32px;
-          height: 32px;
-        }
-        
-        .avatar-icon svg {
-          width: 18px;
-          height: 18px;
-        }
-        
-        .markdown-body pre {
-          padding: 16px 12px;
-        }
-        
-        .markdown-body {
-          font-size: calc(var(--font-size-base) - 1px);
-        }
-      }
+
       
       .message-wrapper.user-message-right {
         flex-direction: row-reverse;
       }
       
-      .message-wrapper.user-message-right .message-bubble {
+      .message-wrapper.user-message-right.message-bubble {
         max-width: calc(85% - 42px);
       }
       
-      .message-wrapper.user-message-right .message-content {
+      .message-wrapper.user-message-right.message-content {
         border-top-left-radius: 18px;
         border-top-right-radius: 4px;
       }
@@ -1114,6 +1088,11 @@ function updateChatContent(messages: ChatMessage[]) {
         display: flex;
         gap: 8px;
         margin-top: 8px;
+        justify-content: flex-start;
+      }
+
+      .message-actions.user {
+        justify-content: flex-end;
       }
       
       .action-button {
@@ -1201,7 +1180,103 @@ function updateChatContent(messages: ChatMessage[]) {
         background-color: rgba(139, 92, 246, 0.1);
       }
       
-
+      /* 移动端优化 */
+      @media (max-width: 767px) {
+        .message-bubble {
+          max-width: calc(90% - 42px);
+          transform: translateY(0);
+        }
+        
+        .message-content {
+          padding: 12px 16px;
+        }
+        
+        .avatar-icon {
+          width: 32px;
+          height: 32px;
+          display: none;
+        }
+        
+        .avatar-icon svg {
+          width: 18px;
+          height: 18px;
+        }
+        
+        .markdown-body pre {
+          padding: 16px 12px;
+        }
+        
+        .markdown-body {
+          font-size: calc(var(--font-size-base) - 1px);
+        }
+        
+        /* 在移动端调整消息和头像的布局 */
+        .message-wrapper {
+          flex-direction: column;
+          margin-bottom: 32px;
+        }
+        
+        .message-wrapper.user-message-right {
+          flex-direction: column;
+          align-items: flex-end;
+        }
+        
+        .message-avatar {
+          margin-top: 0;
+          margin-bottom: 8px;
+          flex-direction: row;
+          width: auto;
+          align-self: flex-start;
+        }
+        
+        .message-avatar.user {
+          align-self: flex-end;
+        }
+        
+        .avatar-icon {
+          margin-bottom: 0;
+          margin-right: 8px;
+        }
+        
+        .message-bubble {
+          max-width: 100%;
+        }
+        
+        /* 修复用户消息在移动端的布局 */
+        .message-wrapper.user-message-right {
+          flex-direction: column;
+          align-items: flex-end;
+        }
+        
+        /* 修复时间显示位置 - 对用户消息特殊处理 */
+        .message-wrapper.user-message-right .message-avatar {
+          align-self: flex-end;
+          flex-direction: row; /* 不使用反向排列，让时间保持在右侧 */
+        }
+        
+        .message-wrapper.user-message-right .message-time {
+          order: -1; /* 使时间元素显示在最左侧 */
+          margin-right: 8px; /* 给时间和头像之间添加间距 */
+          margin-left: 0;
+        }
+        
+        /* 确保头像和时间垂直对齐 */
+        .message-avatar {
+          display: flex;
+          align-items: center;
+        }
+        
+        /* 为确保用户头像和助手头像的样式一致 */
+        .message-wrapper.user-message-right .message-avatar .avatar-icon {
+          margin-right: 0;
+          margin-left: 0; /* 移除左侧间距 */
+        }
+        
+        /* 所有消息的气泡宽度保持一致 */
+        .message-bubble {
+          max-width: 100%;
+        }
+      }
     </style>
   </div>
 `;
@@ -2351,7 +2426,9 @@ body {
   flex-direction: column;
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: fixed;
-  top: 32px;
+  /* 检测是否有标题栏， 有就设置top为32px*/
+  --titlebar-height: v-bind("isMobile ? '0px' : '32px'");
+  top: var(--titlebar-height);
   /* 默认留出标题栏高度 */
   left: 0;
   bottom: 0;
@@ -2368,7 +2445,8 @@ body {
   transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   margin-left: 0;
   min-height: 0;
-  height: calc(100vh - 32px);
+  --titlebar-height: v-bind("isMobile ? '0px' : '32px'"); /* Define CSS variable */
+  height: calc(100vh - var(--titlebar-height));
   /* 默认减去标题栏高度 */
   overflow: hidden;
 }
@@ -2540,7 +2618,7 @@ body {
 }
 
 .history-time {
-  font-size: var (--font-size-sm);
+  font-size: var(--font-size-sm);
   color: var (--text-secondary);
   margin-top: 2px;
 }
@@ -3217,6 +3295,7 @@ chat-messages a:active {
   background-color: #93c5fd;
   cursor: not-allowed;
   transform: scale(1);
+  transform: translateY(-4px);
   box-shadow: none;
   opacity: 0.7;
 }
