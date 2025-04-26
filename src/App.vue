@@ -60,9 +60,16 @@ const showSettings = ref(false);
 // 添加流式消息处理需要的状态变量
 const isStreaming = ref(false);
 
-// 添加新的动画状态控制变量
-const fadeInMessages = ref(true);
-const messageTransition = ref(true);
+// 移除动画状态控制变量，改为固定显示
+const fadeInMessages = ref(true); // 保留但始终为true，以确保内容始终可见
+const messageTransition = ref(false); // 禁用消息过渡动画
+
+// 添加用于防抖渲染的变量
+const pendingMermaidRender = ref(false);
+const mermaidRenderTimer = ref<number | null>(null);
+
+// 添加变量标记是否正在接收流式消息
+const isReceivingStream = ref(false);
 
 // 切换设置界面的显示
 function toggleSettings() {
@@ -89,143 +96,162 @@ function initMermaid() {
   });
 }
 
-// 修改渲染Mermaid图表函数，添加重试机制
+// 修改渲染Mermaid图表函数，添加防抖机制
 async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3) {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-    (document.documentElement.getAttribute('data-theme') === 'system' &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches);
+  // 如果已有渲染计划，不重复触发
+  if (pendingMermaidRender.value) {
+    console.log('已有渲染计划，忽略当前渲染请求');
+    return;
+  }
+  
+  pendingMermaidRender.value = true;
+  
+  // 清除之前的计时器（如果有）
+  if (mermaidRenderTimer.value !== null) {
+    clearTimeout(mermaidRenderTimer.value);
+  }
+  
+  // 设置防抖延迟，避免频繁渲染
+  mermaidRenderTimer.value = setTimeout(async () => {
+    pendingMermaidRender.value = false;
+    mermaidRenderTimer.value = null;
+    
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+      (document.documentElement.getAttribute('data-theme') === 'system' &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-  // 动态更新主题
-  mermaid.initialize({
-    theme: isDark ? 'dark' : 'default',
-    securityLevel: 'loose',
-    logLevel: 'debug', // 将日志级别改为 debug 以获取更多信息
-    startOnLoad: false
-  });
+    // 动态更新主题
+    mermaid.initialize({
+      theme: isDark ? 'dark' : 'default',
+      securityLevel: 'loose',
+      logLevel: 'debug', 
+      startOnLoad: false
+    });
 
-  try {
-    // 查找所有需要渲染的UML元素
-    const umlElements = document.querySelectorAll('.chat-messages .mermaid-container:not(.loaded)');
-    console.log(`尝试渲染 ${umlElements.length} 个UML图表，当前重试次数: ${retryCount}`);
+    try {
+      // 查找所有需要渲染的UML元素
+      const umlElements = document.querySelectorAll('.chat-messages .mermaid-container:not(.loaded)');
+      console.log(`尝试渲染 ${umlElements.length} 个UML图表，当前重试次数: ${retryCount}`);
 
-    if (umlElements.length === 0 && retryCount === 0) {
-      // 第一次调用且没有找到未加载的图表，也查找所有图表进行重新渲染
-      const allUmlElements = document.querySelectorAll('.chat-messages .mermaid-container');
-      console.log(`未找到未加载的图表，将尝试重新渲染所有 ${allUmlElements.length} 个图表`);
-
-      // 如果有图表，移除loaded类，准备重新渲染
-      if (allUmlElements.length > 0) {
-        allUmlElements.forEach(el => el.classList.remove('loaded'));
-        // 延迟后重新尝试渲染
-        setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 300);
+      if (umlElements.length === 0 && retryCount === 0) {
+        // 第一次调用且没有找到未加载的图表，检查是否需要全局重新渲染
+        const allUmlElements = document.querySelectorAll('.chat-messages .mermaid-container');
+        if (allUmlElements.length > 0) {
+          // 不再自动重新渲染所有图表，避免性能问题
+          console.log(`未找到未加载的图表，存在 ${allUmlElements.length} 个已加载图表`);
+        }
         return;
       }
-    }
 
-    let renderPromises = [];
+      let renderPromises = [];
 
-    for (const element of umlElements) {
-      const id = element.getAttribute('data-diagram-id');
-      const encodedContent = element.getAttribute('data-diagram-content');
+      for (const element of umlElements) {
+        const id = element.getAttribute('data-diagram-id');
+        const encodedContent = element.getAttribute('data-diagram-content');
+        const lastRenderedContent = element.getAttribute('data-last-rendered');
 
-      if (encodedContent && id) {
-        let content = ''; // 在 try 块外部定义 content
-        try {
-          // 清空现有内容
-          element.innerHTML = '<div class="mermaid-loading">UML图表渲染中...</div>';
-
-          // 正确解码内容
-          content = decodeURIComponent(encodedContent); // 分配解码后的内容
-          console.log(`渲染图表 ID: ${id}`);
-
-          // 使用Promise.resolve()包装渲染过程，以便收集所有渲染任务
-          renderPromises.push(
-            Promise.resolve().then(async () => {
-              if (typeof content === 'string' && content.length > 0) {
-                try {
-                  const { svg } = await mermaid.render(id, content);
-                  element.innerHTML = svg;
-                  // 添加图表加载完成的动画效果
-                  element.classList.add('loaded');
-                  return true;
-                } catch (renderError) {
-                  console.error(`单个图表渲染失败 ID ${id}:`, renderError);
-                  element.innerHTML = `
-                    <div class="mermaid-error">
-                      <p>UML图表渲染失败</p>
-                      <pre>${renderError}</pre>
-                      <div class="mermaid-source">
-                        <details>
-                          <summary>查看原始图表代码</summary>
-                          <pre>${content}</pre>
-                        </details>
-                      </div>
-                      <button class="retry-render-button" data-diagram-id="${id}">
-                        重试渲染
-                      </button>
-                    </div>
-                  `;
-                  return false;
-                }
-              } else {
-                throw new Error("解码后的内容为空或无效。");
-              }
-            })
-          );
-        } catch (error) {
-          // 记录更详细的错误信息和失败的内容
-          console.error(`渲染图表 ID ${id} 失败:`, error);
-          console.error("失败的内容 (decoded):", content); // 记录导致失败的解码后内容
-          element.innerHTML = `
-            <div class="mermaid-error">
-              <p>UML图表渲染失败</p>
-              <pre>${error}</pre>
-              <div class="mermaid-source">
-                <details>
-                  <summary>查看原始图表代码</summary>
-                  <pre>${content}</pre>
-                </details>
-              </div>
-              <button class="retry-render-button" data-diagram-id="${id}">
-                重试渲染
-              </button>
-            </div>
-          `;
+        // 跳过内容未变化的图表渲染，避免重复工作
+        if (encodedContent && lastRenderedContent && encodedContent === lastRenderedContent) {
+          console.log(`跳过图表 ID: ${id} 的渲染，内容未变化`);
+          continue;
         }
-      } else {
-        // 如果容器缺少必要的属性，则发出警告
-        console.warn("发现缺少必要属性（id 或 content）的 Mermaid 容器。", element);
+
+        if (encodedContent && id) {
+          let content = ''; 
+          try {
+            // 清空现有内容
+            element.innerHTML = '<div class="mermaid-loading">UML图表渲染中...</div>';
+
+            // 正确解码内容
+            content = decodeURIComponent(encodedContent);
+            
+            // 使用Promise.resolve()包装渲染过程，以便收集所有渲染任务
+            renderPromises.push(
+              Promise.resolve().then(async () => {
+                if (typeof content === 'string' && content.length > 0) {
+                  try {
+                    const { svg } = await mermaid.render(id, content);
+                    element.innerHTML = svg;
+                    // 添加图表加载完成的标记
+                    element.classList.add('loaded');
+                    // 记录已渲染的内容，用于后续比较避免重复渲染
+                    element.setAttribute('data-last-rendered', encodedContent);
+                    return true;
+                  } catch (renderError) {
+                    console.error(`单个图表渲染失败 ID ${id}:`, renderError);
+                    element.innerHTML = `
+                      <div class="mermaid-error">
+                        <p>UML图表渲染失败</p>
+                        <pre>${renderError}</pre>
+                        <div class="mermaid-source">
+                          <details>
+                            <summary>查看原始图表代码</summary>
+                            <pre>${content}</pre>
+                          </details>
+                        </div>
+                        <button class="retry-render-button" data-diagram-id="${id}">
+                          重试渲染
+                        </button>
+                      </div>
+                    `;
+                    return false;
+                  }
+                } else {
+                  throw new Error("解码后的内容为空或无效。");
+                }
+              })
+            );
+          } catch (error) {
+            // 记录更详细的错误信息和失败的内容
+            console.error(`渲染图表 ID ${id} 失败:`, error);
+            console.error("失败的内容 (decoded):", content); // 记录导致失败的解码后内容
+            element.innerHTML = `
+              <div class="mermaid-error">
+                <p>UML图表渲染失败</p>
+                <pre>${error}</pre>
+                <div class="mermaid-source">
+                  <details>
+                    <summary>查看原始图表代码</summary>
+                    <pre>${content}</pre>
+                  </details>
+                </div>
+                <button class="retry-render-button" data-diagram-id="${id}">
+                  重试渲染
+                </button>
+              </div>
+            `;
+          }
+        } else {
+          // 如果容器缺少必要的属性，则发出警告
+          console.warn("发现缺少必要属性（id 或 content）的 Mermaid 容器。", element);
+        }
+      }
+
+      // 等待所有渲染完成
+      if (renderPromises.length > 0) {
+        const results = await Promise.all(renderPromises);
+        const failedCount = results.filter(success => !success).length;
+
+        // 如果有失败的图表，且未超过最大重试次数，则重试
+        if (failedCount > 0 && retryCount < maxRetries) {
+          console.log(`${failedCount}个图表渲染失败，将在1.5秒后重试 (${retryCount + 1}/${maxRetries})`);
+          setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1500);
+        } else if (failedCount > 0) {
+          console.log(`渲染完成，但有${failedCount}个图表渲染失败，已达到最大重试次数`);
+          // 为失败的图表添加重试按钮事件监听
+          setupRetryButtons();
+        } else {
+          console.log('所有图表渲染成功');
+        }
+      }
+    } catch (error) {
+      console.error("处理Mermaid图表失败:", error);
+      if (retryCount < maxRetries) {
+        console.log(`整体处理失败，将在1.5秒后重试 (${retryCount + 1}/${maxRetries})`);
+        setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1500);
       }
     }
-
-    // 等待所有渲染完成
-    if (renderPromises.length > 0) {
-      const results = await Promise.all(renderPromises);
-      const failedCount = results.filter(success => !success).length;
-
-      // 如果有失败的图表，且未超过最大重试次数，则重试
-      if (failedCount > 0 && retryCount < maxRetries) {
-        console.log(`${failedCount}个图表渲染失败，将在1秒后重试 (${retryCount + 1}/${maxRetries})`);
-        setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1000);
-      } else if (failedCount > 0) {
-        console.log(`渲染完成，但有${failedCount}个图表渲染失败，已达到最大重试次数`);
-        // 为失败的图表添加重试按钮事件监听
-        setupRetryButtons();
-      } else {
-        console.log('所有图表渲染成功');
-      }
-    } else if (retryCount < maxRetries && umlElements.length > 0) {
-      // 如果没有渲染承诺但有UML元素，稍后再次尝试
-      console.log(`没有渲染任务但找到了UML元素，1秒后重试 (${retryCount + 1}/${maxRetries})`);
-      setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1000);
-    }
-  } catch (error) {
-    console.error("处理Mermaid图表失败:", error);
-    if (retryCount < maxRetries) {
-      console.log(`整体处理失败，将在1秒后重试 (${retryCount + 1}/${maxRetries})`);
-      setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1000);
-    }
-  }
+  }, 500); // 500ms防抖延迟
 }
 
 // 设置图表渲染失败后的重试按钮事件
@@ -279,6 +305,8 @@ function setupMermaidRefresh() {
           if (container) {
             // 移除loaded类以便重新渲染
             container.classList.remove('loaded');
+            // 清除上次渲染的内容记录，强制重新渲染
+            container.removeAttribute('data-last-rendered');
             targetButton.classList.add('refreshing');
             showNotification("正在刷新图表...", "info");
 
@@ -503,16 +531,29 @@ function processUmlContent(html: string): string {
 
     // 仅对原始、整理过的内容进行一次编码
     const encodedContent = encodeURIComponent(rawContent);
-    console.log("处理UML内容 (Raw):", rawContent); // 记录编码前的原始内容
-    console.log("处理UML内容 (Encoded):", encodedContent); // 记录编码后的内容
-
-    // 返回一个容器，将在渲染后处理
+    
+    // 在流传输过程中，只使用简单的占位符
+    if (isReceivingStream.value) {
+      return `<div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
+                <div class="mermaid-loading">
+                  <div class="placeholder-box">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path>
+                      <path d="M10 2c1 .5 2 2 2 5"></path>
+                    </svg>
+                    <div>UML图表将在消息完整接收后渲染</div>
+                  </div>
+                </div>
+              </div>`;
+    }
+    
+    // 正常渲染的容器，会在流传输完成后处理
     return `<div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
               <div class="mermaid-loading">UML图表加载中...</div>
             </div>`;
   });
 }
-// 修改 updateChatContent 函数，使其处理主题更改
+// 修改 updateChatContent 函数，移除动画效果
 function updateChatContent(messages: ChatMessage[]) {
   if (!messages || messages.length === 0) {
     processedChatContent.value = '';
@@ -584,14 +625,13 @@ function updateChatContent(messages: ChatMessage[]) {
   `;
   }
 
-  // 在updateChatContent函数中更新CSS部分
+  // 移除动画相关的类，保留fade-in以确保消息立即可见
   processedChatContent.value = `
-  <div class="scoped-content ${fadeInMessages.value ? 'fade-in' : ''} ${messageTransition.value ? 'message-transition' : ''}" data-theme="${isDark ? 'dark' : 'light'}">
+  <div class="scoped-content fade-in" data-theme="${isDark ? 'dark' : 'light'}">
     ${messagesHtml}
     <style>
       .scoped-content {
-        opacity: 0;
-        transition: opacity 0.5s ease;
+        opacity: 1; /* 直接设置为可见，移除过渡效果 */
       }
       
       .scoped-content.fade-in {
@@ -603,41 +643,11 @@ function updateChatContent(messages: ChatMessage[]) {
         margin-bottom: 28px;
         position: relative;
         gap: 12px;
-        /* 移除初始透明度设置，保证内容始终可见 */
-        opacity: 1;
-        transform: translateY(0);
-        transition: transform 0.4s ease, opacity 0.4s ease;
-      }
-      
-      /* 仅当启用消息过渡时应用进入动画 */
-      .message-transition .message-wrapper {
-        animation: message-appear 0.4s ease forwards;
-      }
-      
-      @keyframes message-appear {
-        from {
-          transform: translateY(20px);
-          opacity: 0;
-        }
-        to {
-          transform: translateY(0);
-          opacity: 1;
-        }
-      }
-      
-      /* 确保在动画完成后保持可见 */
-      .message-transition .message-wrapper {
         opacity: 1;
         transform: translateY(0);
       }
       
-      /* 每个消息延迟出现 */
-      .message-transition .message-wrapper:nth-child(1) { animation-delay: 0.1s; }
-      .message-transition .message-wrapper:nth-child(2) { animation-delay: 0.15s; }
-      .message-transition .message-wrapper:nth-child(3) { animation-delay: 0.2s; }
-      .message-transition .message-wrapper:nth-child(4) { animation-delay: 0.25s; }
-      .message-transition .message-wrapper:nth-child(5) { animation-delay: 0.3s; }
-      .message-transition .message-wrapper:nth-child(n+6) { animation-delay: 0.35s; }
+      /* 移除所有消息出现的动画效果 */
       
       .message-avatar {
         display: flex;
@@ -646,31 +656,11 @@ function updateChatContent(messages: ChatMessage[]) {
         margin-top: 4px;
         flex-shrink: 0;
         width: 42px;
-        /* 移除初始透明度设置，确保内容始终可见 */
         transform: scale(1);
         opacity: 1;
       }
       
-      /* 仅在启用动画时应用头像弹跳效果 */
-      .message-transition .message-avatar {
-        animation: avatar-bounce 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-        animation-delay: 0.3s;
-      }
-      
-      @keyframes avatar-bounce {
-        0% {
-          transform: scale(0.8);
-          opacity: 0.5;
-        }
-        60% {
-          transform: scale(1.1);
-          opacity: 1;
-        }
-        100% {
-          transform: scale(1);
-          opacity: 1;
-        }
-      }
+      /* 移除头像的动画效果 */
       
       .avatar-icon {
         width: 36px;
@@ -715,12 +705,8 @@ function updateChatContent(messages: ChatMessage[]) {
         display: flex;
         flex-direction: column;
         position: relative;
-        transform: translateY(15px);
-        /* 添加气泡过渡效果 */
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
       }
       
-
       .message-content {
         padding: 14px 18px;
         border-radius: 18px;
@@ -743,18 +729,17 @@ function updateChatContent(messages: ChatMessage[]) {
         color: ${isDark ? 'var(--message-color)' : 'var(--text-color)'};
       }
       
-      /* Mermaid图表容器样式 */
+      /* Mermaid图表容器样式 - 移除动画效果 */
       .mermaid-container {
         background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
         border-radius: 6px;
         margin: 16px 0;
         padding: 16px;
-        overflow: hidden; /* 保持垂直方向隐藏 */
-        overflow-x: auto; /* 添加水平滚动条 */
+        overflow: hidden;
+        overflow-x: auto;
         box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
         border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
         position: relative;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
         min-height: 100px;
         display: flex;
         justify-content: center;
@@ -762,42 +747,15 @@ function updateChatContent(messages: ChatMessage[]) {
         text-align: center;
       }
       
+      /* 移除加载动画，使图表立即显示 */
       .mermaid-container.loaded {
-        animation: diagram-fade-in 0.5s ease forwards;
-      }
-      
-      @keyframes diagram-fade-in {
-        from {
-          opacity: 0.5;
-          transform: scale(0.98);
-        }
-        to {
-          opacity: 1;
-          transform: scale(1);
-        }
-      }
-      
-      .mermaid-container:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px ${isDark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.15)'};
+        opacity: 1;
+        transform: scale(1);
       }
       
       .mermaid-loading {
         color: var(--text-secondary);
         font-size: 14px;
-        animation: pulse 1.5s infinite;
-      }
-      
-      @keyframes pulse {
-        0% {
-          opacity: 0.5;
-        }
-        50% {
-          opacity: 1;
-        }
-        100% {
-          opacity: 0.5;
-        }
       }
       
       .mermaid-error {
@@ -811,7 +769,7 @@ function updateChatContent(messages: ChatMessage[]) {
         background-color: ${isDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.05)'};
         padding: 8px;
         border-radius: 4px;
-        overflow-x: auto; /* 确保错误代码也能滚动 */
+        overflow-x: auto;
         font-size: 12px;
       }
       
@@ -873,24 +831,6 @@ function updateChatContent(messages: ChatMessage[]) {
         margin: 16px auto;
         border-radius: 6px;
         box-shadow: 0 4px 8px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.1)'};
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        animation: img-fade-in 0.5s ease forwards;
-      }
-      
-      .markdown-body img:hover {
-        transform: scale(1.01);
-        box-shadow: 0 6px 16px ${isDark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.15)'};
-      }
-      
-      @keyframes img-fade-in {
-        from {
-          opacity: 0;
-          filter: blur(5px);
-        }
-        to {
-          opacity: 1;
-          filter: blur(0);
-        }
       }
       
       .markdown-body pre {
@@ -902,12 +842,6 @@ function updateChatContent(messages: ChatMessage[]) {
         box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
         border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
         position: relative;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-      }
-      
-      .markdown-body pre:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px ${isDark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.15)'};
       }
       
       .markdown-body code {
@@ -1196,7 +1130,7 @@ function updateChatContent(messages: ChatMessage[]) {
   </div>
 `;
 
-  // 确保内容立即可见，而不是等待动画
+  // 确保内容立即可见，不依赖动画
   nextTick(() => {
     // 强制使内容可见
     const chatMessages = document.querySelector('.chat-messages');
@@ -1222,19 +1156,26 @@ function updateChatContent(messages: ChatMessage[]) {
     // 刷新全局样式，确保主题一致性
     refreshGlobalStyles();
 
-    // 添加短暂延迟后渲染 Mermaid 图表
-    setTimeout(() => {
-      renderMermaidDiagrams();
-    }, 250); // 延迟 250 毫秒，可以根据需要调整
-
+    // 只在非流传输状态下渲染UML图表，添加明确的日志
+    if (!isReceivingStream.value) {
+      console.log("消息更新完成，准备渲染UML图表");
+      setTimeout(() => {
+        renderMermaidDiagrams();
+      }, 500);
+    } else {
+      console.log("正在流式传输中，跳过UML渲染");
+    }
   });
 }
-
 
 // 流式消息处理相关函数
 async function setupStreamListeners() {
   // 监听流式消息事件
   const unlistenStream = await listen('stream-message', (event) => {
+    // 标记正在接收流式消息
+    isReceivingStream.value = true;
+    console.log("流式消息接收中，暂停UML渲染");
+    
     // 将后端发送的聊天历史更新到前端
     const chatData = event.payload as ChatHistory;
     chatContent.value = chatData.content;
@@ -1247,14 +1188,27 @@ async function setupStreamListeners() {
 
   // 监听流完成事件
   const unlistenComplete = await listen('stream-complete', async () => {
-    isStreaming.value = false;
-    isLoading.value = false;
-
+    console.log("流式消息接收完成，开始渲染UML图表");
+    
     // 重新加载聊天历史
     await loadChatHistory();
 
-    // 重新启用消息过渡动画
-    messageTransition.value = true;
+    // 保持禁用消息过渡动画
+    messageTransition.value = false;
+    
+    // 先更新UI显示
+    updateChatContent(chatContent.value);
+    
+    // 标记流式消息接收完成
+    isReceivingStream.value = false;
+    isStreaming.value = false;
+    isLoading.value = false;
+    
+    // 流式传输完成后，启动图表渲染
+    setTimeout(() => {
+      console.log("开始执行延迟的UML渲染");
+      renderMermaidDiagrams();
+    }, 800); // 给更长的延迟以确保DOM完全更新
   });
 
   // 在组件卸载时清理事件监听
@@ -1384,11 +1338,16 @@ function setupActionButtons() {
 async function sendStreamMessage() {
   if (!inputMessage.value.trim()) return;
 
-  // 禁用消息过渡动画，因为流式响应会自动处理
+  // 禁用消息过渡动画
   messageTransition.value = false;
   fadeInMessages.value = true; // 确保内容可见
+  
+  // 先设置状态，确保在任何渲染发生前就已标记为流传输
+  isReceivingStream.value = true;
   isStreaming.value = true;
   isLoading.value = true;
+  
+  console.log("开始流式传输消息，已禁用UML渲染");
 
   try {
     // 清空输入框但保存消息内容
@@ -1404,12 +1363,11 @@ async function sendStreamMessage() {
     showNotification("消息发送失败", "error");
     isStreaming.value = false;
     isLoading.value = false;
+    isReceivingStream.value = false;
   } finally {
-    // 恢复消息过渡动画
-    setTimeout(() => {
-      messageTransition.value = true;
-      fadeInMessages.value = true; // 确保内容可见
-    }, 1000);
+    // 不再恢复消息过渡动画
+    messageTransition.value = false;
+    fadeInMessages.value = true; // 确保内容可见
   }
 }
 
@@ -1438,8 +1396,8 @@ async function createNewChat() {
     return;
   }
 
-  // 添加淡出效果
-  fadeInMessages.value = false;
+  // 直接显示内容，不使用淡出淡入效果
+  fadeInMessages.value = true;
 
   setTimeout(async () => {
     isLoading.value = true;
@@ -1456,12 +1414,10 @@ async function createNewChat() {
       showNotification("创建新对话失败", "error");
     } finally {
       isLoading.value = false;
-      // 短暂延迟后淡入新消息
-      setTimeout(() => {
-        fadeInMessages.value = true;
-      }, 100);
+      // 确保内容可见
+      fadeInMessages.value = true;
     }
-  }, 300);
+  }, 100); // 减少延迟时间
 }
 
 // 监听 chatContent 变化，确保 MathJax 重新渲染
@@ -1470,7 +1426,13 @@ watch(chatContent, () => {
     console.log("聊天内容变化:", chatContent.value);
     refreshGlobalStyles();
     renderMathInElement();
-    renderMermaidDiagrams(); // 添加Mermaid图表渲染
+    
+    // 只在非流传输状态下渲染UML图表
+    if (!isReceivingStream.value) {
+      renderMermaidDiagrams();
+    } else {
+      console.log("正在流式传输中，跳过UML渲染");
+    }
   });
 });
 
@@ -1523,7 +1485,8 @@ onMounted(async () => {
     // 尝试获取当前活跃的聊天内容
     const content = await invoke("get_chat_html");
     chatContent.value = content as ChatMessage[];
-    // 确保初始加载时使用正确的全局主题
+    // 确保初始加载时使用正确的全局主题，但不强制渲染UML
+    isReceivingStream.value = false; // 初始加载时默认没有流传输
     updateChatContent(chatContent.value);
 
     // 所有内容加载完成后，隐藏启动logo
@@ -2082,7 +2045,7 @@ body {
 
 .history-actions {
   padding: 16px;
-  border-bottom: 0px solid var(--border-color);
+  border-bottom: 0px solid var (--border-color);
 }
 
 .new-chat-button {
@@ -2919,6 +2882,22 @@ chat-messages a:active {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+/* 添加占位符样式 */
+.placeholder-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  padding: 20px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.placeholder-box svg {
+  opacity: 0.7;
+}
 
 .render-image-button {
   color: #8b5cf6;
@@ -2928,4 +2907,78 @@ chat-messages a:active {
 .render-image-button:hover {
   background-color: rgba(139, 92, 246, 0.1);
 }
+
+
+/* 自定义滚动条样式 - 改进版本 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb, rgba(100, 116, 139, 0.5));
+  border-radius: 6px;
+  transition: background-color 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.7));
+}
+
+/* 根据主题设置滚动条变量 */
+:root {
+  --scrollbar-thumb: rgba(100, 116, 139, 0.4);
+  --scrollbar-thumb-hover: rgba(100, 116, 139, 0.7);
+}
+
+:root[data-theme="dark"],
+:root[data-theme="system"] {
+  --scrollbar-thumb: rgba(148, 163, 184, 0.4);
+  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.7);
+}
+
+/* 特定区域滚动条定制 */
+.chat-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-content::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 6px;
+}
+
+.chat-content::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+.history-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.history-list::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+.history-list::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/* 支持Firefox的滚动条样式 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.chat-content,
+.history-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
 </style>
