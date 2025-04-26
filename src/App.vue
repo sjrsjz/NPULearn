@@ -240,15 +240,27 @@ async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3) {
           console.log(`渲染完成，但有${failedCount}个图表渲染失败，已达到最大重试次数`);
           // 为失败的图表添加重试按钮事件监听
           setupRetryButtons();
+          
+          // 添加这一行来设置图表的可点击功能
+          setupMermaidRefresh();
         } else {
           console.log('所有图表渲染成功');
+          
+          // 添加这一行来设置图表的可点击功能
+          setupMermaidRefresh();
         }
+      } else {
+        // 如果没有需要渲染的图表，也需要调用setupMermaidRefresh来处理已渲染的图表
+        setupMermaidRefresh();
       }
     } catch (error) {
       console.error("处理Mermaid图表失败:", error);
       if (retryCount < maxRetries) {
         console.log(`整体处理失败，将在1.5秒后重试 (${retryCount + 1}/${maxRetries})`);
         setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1500);
+      } else {
+        // 即使出错，也尝试为已渲染的图表添加交互功能
+        setupMermaidRefresh();
       }
     }
   }, 500); // 500ms防抖延迟
@@ -277,53 +289,6 @@ function setupRetryButtons() {
   });
 }
 
-// 添加手动刷新图表的功能
-function setupMermaidRefresh() {
-  nextTick(() => {
-    // 为所有图表容器添加刷新按钮
-    document.querySelectorAll('.chat-messages .mermaid-container').forEach(container => {
-      // 检查容器是否已经有刷新按钮
-      if (!container.querySelector('.refresh-diagram-button')) {
-        const refreshButton = document.createElement('button');
-        refreshButton.className = 'refresh-diagram-button';
-        refreshButton.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M23 4v6h-6"></path>
-            <path d="M1 20v-6h6"></path>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
-            <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
-          </svg>
-        `;
-        refreshButton.title = "刷新图表";
-
-        refreshButton.addEventListener('click', async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const targetButton = e.currentTarget as HTMLElement;
-          const container = targetButton.closest('.mermaid-container');
-
-          if (container) {
-            // 移除loaded类以便重新渲染
-            container.classList.remove('loaded');
-            // 清除上次渲染的内容记录，强制重新渲染
-            container.removeAttribute('data-last-rendered');
-            targetButton.classList.add('refreshing');
-            showNotification("正在刷新图表...", "info");
-
-            // 延迟后渲染以确保UI更新
-            setTimeout(async () => {
-              await renderMermaidDiagrams(0, 3);
-              targetButton.classList.remove('refreshing');
-            }, 100);
-          }
-        });
-
-        // 将按钮添加到容器中
-        container.appendChild(refreshButton);
-      }
-    });
-  });
-}
 
 // 加载 MathJax
 function loadMathJax() {
@@ -443,6 +408,7 @@ async function loadChatHistory() {
 
 // 处理聊天内容，隔离样式
 const processedChatContent = ref("");
+
 function applyHighlight() {
   nextTick(() => {
     // 查找所有代码块并应用高亮
@@ -495,6 +461,59 @@ function applyHighlight() {
 
         // 替换原始的 pre 元素
         preElement.parentNode?.replaceChild(mermaidContainer, preElement);
+      } else {
+        // 为非 mermaid 的代码块添加复制按钮
+        const preElement = el.parentElement;
+        if (!preElement || preElement.querySelector('.code-copy-button')) return;
+
+        // 获取代码内容
+        const codeContent = el.textContent || '';
+
+        // 创建复制按钮
+        const copyButton = document.createElement('button');
+        copyButton.className = 'code-copy-button';
+        copyButton.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        `;
+        copyButton.title = "复制代码";
+
+        // 添加点击事件
+        copyButton.addEventListener('click', async (e) => {
+          e.preventDefault();
+          try {
+            await writeText(codeContent);
+            // 临时更改按钮状态
+            copyButton.innerHTML = `
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 6L9 17l-5-5"></path>
+              </svg>
+            `;
+            copyButton.classList.add('success');
+
+            // 2秒后恢复原样
+            setTimeout(() => {
+              copyButton.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              `;
+              copyButton.classList.remove('success');
+            }, 2000);
+
+            showNotification("代码已复制到剪贴板", "success");
+          } catch (error) {
+            console.error("复制代码失败:", error);
+            showNotification("复制代码失败", "error");
+          }
+        });
+
+        // 添加复制按钮到 pre 元素
+        preElement.classList.add('code-block-with-copy');
+        preElement.appendChild(copyButton);
       }
     });
 
@@ -1218,6 +1237,12 @@ function updateChatContent(messages: ChatMessage[]) {
       console.log("消息更新完成，准备渲染UML图表");
       setTimeout(() => {
         renderMermaidDiagrams();
+        
+        // 即使没有新渲染的图表，也应该设置已有图表的交互功能
+        // 为确保DOM已更新，使用短暂延迟
+        setTimeout(() => {
+          setupMermaidRefresh();
+        }, 300);
       }, 500);
     } else {
       console.log("正在流式传输中，跳过UML渲染");
@@ -1265,6 +1290,11 @@ async function setupStreamListeners() {
     setTimeout(() => {
       console.log("开始执行延迟的UML渲染");
       renderMermaidDiagrams();
+      
+      // 添加这行以确保渲染完毕后设置交互功能
+      setTimeout(() => {
+        setupMermaidRefresh();
+      }, 400);
     }, 800); // 给更长的延迟以确保DOM完全更新
   });
 
@@ -1641,6 +1671,223 @@ function autoResizeTextarea(event: Event) {
   const newHeight = Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight));
   textarea.style.height = `${newHeight}px`;
 }
+
+// 添加图表查看器相关的状态
+const isChartViewerOpen = ref(false);
+const currentChartContent = ref('');
+const currentChartSvg = ref('');
+const chartViewerScale = ref(1);
+const chartViewerPosition = ref({ x: 0, y: 0 });
+const isDragging = ref(false);
+const dragStart = ref({ x: 0, y: 0 });
+
+// 打开图表查看器
+function openChartViewer(svg: string, content: string) {
+  currentChartSvg.value = svg;
+  currentChartContent.value = content;
+  chartViewerScale.value = 1;
+  chartViewerPosition.value = { x: 0, y: 0 };
+  isChartViewerOpen.value = true;
+  
+  // 阻止背景滚动
+  document.body.style.overflow = 'hidden';
+}
+
+// 关闭图表查看器
+function closeChartViewer() {
+  isChartViewerOpen.value = false;
+  
+  // 恢复背景滚动
+  document.body.style.overflow = '';
+}
+
+// 重置缩放和位置
+function resetChartViewer() {
+  chartViewerScale.value = 1;
+  chartViewerPosition.value = { x: 0, y: 0 };
+}
+
+// 处理缩放
+function handleChartViewerWheel(e: WheelEvent) {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -0.1 : 0.1;
+  const newScale = Math.max(0.5, Math.min(10, chartViewerScale.value + delta));
+  chartViewerScale.value = newScale;
+}
+
+// 开始拖动
+function startDrag(e: MouseEvent | TouchEvent) {
+  isDragging.value = true;
+  
+  // 处理鼠标事件
+  if ('clientX' in e) {
+    dragStart.value = { 
+      x: e.clientX - chartViewerPosition.value.x, 
+      y: e.clientY - chartViewerPosition.value.y 
+    };
+  } 
+  // 处理触摸事件
+  else if (e.touches && e.touches[0]) {
+    dragStart.value = { 
+      x: e.touches[0].clientX - chartViewerPosition.value.x, 
+      y: e.touches[0].clientY - chartViewerPosition.value.y 
+    };
+  }
+}
+
+// 拖动过程
+function handleDrag(e: MouseEvent | TouchEvent) {
+  if (!isDragging.value) return;
+  
+  let clientX, clientY;
+  
+  // 处理鼠标事件
+  if ('clientX' in e) {
+    clientX = e.clientX;
+    clientY = e.clientY;
+  } 
+  // 处理触摸事件
+  else if (e.touches && e.touches[0]) {
+    clientX = e.touches[0].clientX;
+    clientY = e.touches[0].clientY;
+  } else {
+    return;
+  }
+  
+  chartViewerPosition.value = {
+    x: clientX - dragStart.value.x,
+    y: clientY - dragStart.value.y
+  };
+}
+
+// 结束拖动
+function endDrag() {
+  isDragging.value = false;
+}
+
+// 添加鼠标和触摸事件监听
+onMounted(() => {
+  // 添加全局拖动和结束拖动事件
+  window.addEventListener('mousemove', handleDrag);
+  window.addEventListener('mouseup', endDrag);
+  window.addEventListener('touchmove', handleDrag);
+  window.addEventListener('touchend', endDrag);
+});
+
+onUnmounted(() => {
+  // 移除全局拖动和结束拖动事件
+  window.removeEventListener('mousemove', handleDrag);
+  window.removeEventListener('mouseup', endDrag);
+  window.removeEventListener('touchmove', handleDrag);
+  window.removeEventListener('touchend', endDrag);
+});
+
+// 修改 setupMermaidRefresh 函数，添加点击事件以打开图表查看器
+function setupMermaidRefresh() {
+  nextTick(() => {
+    // 为所有图表容器添加刷新按钮
+    document.querySelectorAll('.chat-messages .mermaid-container').forEach(container => {
+      // 检查容器是否已经有刷新按钮
+      if (!container.querySelector('.refresh-diagram-button')) {
+        const refreshButton = document.createElement('button');
+        refreshButton.className = 'refresh-diagram-button';
+        refreshButton.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 4v6h-6"></path>
+            <path d="M1 20v-6h6"></path>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+            <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
+          </svg>
+        `;
+        refreshButton.title = "刷新图表";
+
+        refreshButton.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const targetButton = e.currentTarget as HTMLElement;
+          const container = targetButton.closest('.mermaid-container');
+
+          if (container) {
+            // 移除loaded类以便重新渲染
+            container.classList.remove('loaded');
+            // 清除上次渲染的内容记录，强制重新渲染
+            container.removeAttribute('data-last-rendered');
+            targetButton.classList.add('refreshing');
+            showNotification("正在刷新图表...", "info");
+
+            // 延迟后渲染以确保UI更新
+            setTimeout(async () => {
+              await renderMermaidDiagrams(0, 3);
+              targetButton.classList.remove('refreshing');
+            }, 100);
+          }
+        });
+
+        // 将按钮添加到容器中
+        container.appendChild(refreshButton);
+      }
+      
+      // 添加放大按钮
+      if (!container.querySelector('.zoom-diagram-button')) {
+        const zoomButton = document.createElement('button');
+        zoomButton.className = 'zoom-diagram-button';
+        zoomButton.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            <line x1="11" y1="8" x2="11" y2="14"></line>
+            <line x1="8" y1="11" x2="14" y2="11"></line>
+          </svg>
+        `;
+        zoomButton.title = "放大查看";
+        
+        zoomButton.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          const container = (e.currentTarget as HTMLElement).closest('.mermaid-container') as HTMLElement;
+          if (container) {
+            const svgElement = container.querySelector('svg');
+            const contentElement = container.getAttribute('data-diagram-content');
+            
+            if (svgElement && contentElement) {
+              const svgContent = svgElement.outerHTML;
+              const diagramContent = decodeURIComponent(contentElement);
+              openChartViewer(svgContent, diagramContent);
+            }
+          }
+        });
+        
+        container.appendChild(zoomButton);
+      }
+      
+      // 为整个容器添加点击事件以打开查看器
+      if (!container.hasAttribute('data-has-click-listener')) {
+        container.setAttribute('data-has-click-listener', 'true');
+        
+        container.addEventListener('click', (e) => {
+          // 点击按钮时不触发
+          if ((e.target as HTMLElement).closest('.refresh-diagram-button, .zoom-diagram-button')) {
+            return;
+          }
+          
+          const svgElement = container.querySelector('svg');
+          const contentElement = container.getAttribute('data-diagram-content');
+          
+          if (svgElement && contentElement) {
+            const svgContent = svgElement.outerHTML;
+            const diagramContent = decodeURIComponent(contentElement);
+            openChartViewer(svgContent, diagramContent);
+          }
+        });
+        
+        // 添加视觉提示，表明容器可点击
+        container.classList.add('clickable-container');
+      }
+    });
+  });
+}
+
 </script>
 
 <template>
@@ -1817,6 +2064,54 @@ function autoResizeTextarea(event: Event) {
           </form>
         </div>
       </main>
+    </div>
+    
+    <!-- 图表查看器模态框 -->
+    <div v-if="isChartViewerOpen" class="chart-viewer-modal" @wheel.prevent="handleChartViewerWheel">
+      <div class="chart-viewer-overlay" @click="closeChartViewer"></div>
+      <div class="chart-viewer-content">
+        <div class="chart-viewer-header">
+          <h3>Mermaid 图表查看器</h3>
+          <div class="chart-viewer-controls">
+            <button class="chart-control-button" @click="resetChartViewer" title="重置缩放">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0z"></path>
+                <path d="M14 8H8v6h6"></path>
+              </svg>
+            </button>
+            <button class="chart-control-button" @click="closeChartViewer" title="关闭">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="chart-viewer-body">
+          <div 
+            class="chart-viewer-diagram"
+            @mousedown="startDrag"
+            @touchstart="startDrag"
+            :style="{
+              transform: `scale(${chartViewerScale}) translate(${chartViewerPosition.x / chartViewerScale}px, ${chartViewerPosition.y / chartViewerScale}px)`,
+              cursor: isDragging ? 'grabbing' : 'grab'
+            }"
+            v-html="currentChartSvg"
+          ></div>
+        </div>
+        <div class="chart-viewer-footer">
+          <div class="chart-viewer-info">
+            <span>缩放: {{ Math.round(chartViewerScale * 100) }}%</span>
+            <span>提示: 滚轮缩放, 拖动移动</span>
+          </div>
+          <div class="chart-viewer-code-toggle">
+            <details>
+              <summary>查看 Mermaid 代码</summary>
+              <pre class="chart-viewer-code">{{ currentChartContent }}</pre>
+            </details>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -2249,8 +2544,8 @@ body {
 }
 
 .history-time {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  font-size: var (--font-size-sm);
+  color: var (--text-secondary);
   margin-top: 2px;
 }
 
@@ -3112,6 +3407,303 @@ chat-messages a:active {
 :root[data-theme="dark"] .preview-code,
 :root[data-theme="system"] .preview-code {
   background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Mermaid 容器可点击样式 */
+.mermaid-container.clickable-container {
+  cursor: zoom-in;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mermaid-container.clickable-container:hover {
+  transform: scale(1.01);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 图表容器操作按钮 */
+.mermaid-container {
+  position: relative;
+}
+
+.refresh-diagram-button, 
+.zoom-diagram-button {
+  position: absolute;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 5;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.refresh-diagram-button {
+  top: 8px;
+  right: 8px;
+}
+
+.zoom-diagram-button {
+  top: 8px;
+  right: 44px; /* 位于刷新按钮旁边 */
+}
+
+.refresh-diagram-button:hover,
+.zoom-diagram-button:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.refresh-diagram-button svg,
+.zoom-diagram-button svg {
+  color: var(--text-color);
+}
+
+/* 图表查看器样式 */
+.chart-viewer-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chart-viewer-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(3px);
+}
+
+.chart-viewer-content {
+  position: relative;
+  width: 90%;
+  height: 90%;
+  max-width: 1200px;
+  max-height: 90vh;
+  background-color: var(--card-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modal-in 0.3s ease forwards;
+  z-index: 1101;
+}
+
+.chart-viewer-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chart-viewer-header h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  color: var(--text-color);
+}
+
+.chart-viewer-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.chart-control-button {
+  background: none;
+  border: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  color: var(--text-color);
+  transition: all 0.2s ease;
+}
+
+.chart-control-button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  transform: scale(1.1);
+}
+
+.chart-viewer-body {
+  flex: 1;
+  padding: 24px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background-color: var(--bg-color);
+}
+
+.chart-viewer-diagram {
+  transition: transform 0.05s linear;
+  transform-origin: center center;
+  max-width: 100%;
+  max-height: 100%;
+  touch-action: none;
+  will-change: transform;
+}
+
+.chart-viewer-diagram svg {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+
+.chart-viewer-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chart-viewer-info {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.chart-viewer-code-toggle {
+  width: 100%;
+}
+
+.chart-viewer-code-toggle summary {
+  cursor: pointer;
+  color: var(--primary-color);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  padding: 4px 0;
+  transition: color 0.2s ease;
+}
+
+.chart-viewer-code-toggle summary:hover {
+  color: var(--primary-hover);
+}
+
+.chart-viewer-code {
+  margin-top: 8px;
+  padding: 12px;
+  background-color: rgba(0, 0, 0, 0.03);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre;
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .chart-viewer-content {
+    width: 95%;
+    height: 95%;
+    max-width: none;
+  }
+  
+  .chart-viewer-header {
+    padding: 12px;
+  }
+  
+  .chart-viewer-body {
+    padding: 16px;
+  }
+  
+  .refresh-diagram-button,
+  .zoom-diagram-button {
+    width: 24px;
+    height: 24px;
+  }
+  
+  .zoom-diagram-button {
+    right: 40px;
+  }
+  
+  .refresh-diagram-button svg,
+  .zoom-diagram-button svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+/* 暗色主题支持 */
+:root[data-theme="dark"] .chart-viewer-code,
+:root[data-theme="system"] .chart-viewer-code {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* 代码块复制按钮样式 */
+.code-block-with-copy {
+  position: relative;
+  padding-right: 30px;
+  /* 为按钮留出空间 */
+}
+
+.code-copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+  z-index: 5;
+  color: var(--text-secondary);
+}
+
+.code-copy-button:hover {
+  opacity: 1;
+  transform: scale(1.1);
+  background-color: var(--card-bg);
+}
+
+.code-copy-button.success {
+  background-color: #10b981;
+  color: white;
+  border-color: #10b981;
+  opacity: 1;
+}
+
+/* 暗色主题支持 */
+:root[data-theme="dark"] .code-copy-button,
+:root[data-theme="system"] .code-copy-button {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--dark-text-secondary);
+}
+
+:root[data-theme="dark"] .code-copy-button:hover,
+:root[data-theme="system"] .code-copy-button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: var(--dark-text-color);
 }
 
 </style>
