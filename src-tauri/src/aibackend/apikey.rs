@@ -87,6 +87,7 @@ pub struct ApiKeyList {
     pub keys: Vec<ApiKey>,
 }
 
+#[allow(dead_code)]
 impl ApiKeyList {
     pub fn new() -> Self {
         ApiKeyList { keys: vec![] }
