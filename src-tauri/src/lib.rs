@@ -151,38 +151,47 @@ fn process_message_stream(window: Window, message: String) {
         // 获取API密钥
         let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
         let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
-        
+
         if gemini_keys.keys.is_empty() {
             // 如果没有API密钥，发送错误消息
-            let _ = window_clone.emit("stream-message", "未找到API密钥，请先在设置中添加Gemini API密钥");
+            let _ = window_clone.emit(
+                "stream-message",
+                "未找到API密钥，请先在设置中添加Gemini API密钥",
+            );
             let _ = window_clone.emit("stream-complete", "");
             return;
         }
-        
+
         // 随机选择一个API密钥
         let api_key = gemini_keys.keys[0].clone(); // 或者使用random_key()随机选择
-        
+
         // 初始化AI聊天实例
         let mut chat = aibackend::gemini::GeminiChat::new();
-        
+
         // 设置系统提示语
         let _ = chat.set_system_prompt("你是NPULearn应用的AI助手，请尽可能提供专业、准确的回答。支持使用Markdown语法丰富你的回答。".to_string());
-        
+
         // 获取当前聊天上下文
-        let current_chat_context = {
+        let current_chat_id = *CURRENT_CHAT_ID.lock().unwrap();
+        let mut current_chat_context = {
             let history = CHAT_HISTORY.lock().unwrap();
-            if let Some(chat) = history.get(&CURRENT_CHAT_ID.lock().unwrap()) {
-                chat.clone()
+            if let Some(history_chat) = history.get(&current_chat_id) {
+                history_chat.clone()
             } else {
                 ChatHistory {
-                    id: 0,
+                    id: current_chat_id,
                     title: String::new(),
                     time: String::new(),
                     content: vec![],
                 }
             }
         };
-        
+
+        // 加载聊天历史到AI聊天实例
+        if let Err(e) = chat.load_from(&current_chat_context) {
+            println!("无法加载聊天历史: {}", e);
+        }
+
         // 创建临时用户消息，用于实时显示
         let mut cloned_context = current_chat_context.clone();
         cloned_context.content.push(ChatMessage {
@@ -190,92 +199,116 @@ fn process_message_stream(window: Window, message: String) {
             time: chrono::Local::now().format("%H:%M").to_string(),
             content: message.clone(),
         });
-        
+
         // 临时显示用户消息
         let content: &ChatHistory = &ChatHistory::markdown_to_html(&cloned_context);
         let _ = window_clone.emit("stream-message", content);
-        
+
         // 显示正在加载
         cloned_context.content.push(ChatMessage {
             msgtype: ChatMessageType::Assistant,
             time: chrono::Local::now().format("%H:%M").to_string(),
             content: "正在思考...".to_string(),
         });
-        
+
         let content: &ChatHistory = &ChatHistory::markdown_to_html(&cloned_context);
         let _ = window_clone.emit("stream-message", content);
-        
+
         // 创建一个锁定的变量用于存储累积的响应内容
         let accumulated_markdown = Arc::new(Mutex::new(String::new()));
-        let accumulated_markdown_clone = accumulated_markdown.clone();
-        
+
         // 创建一个回调函数，用于处理流式响应的每个部分
         let callback = {
             let window_clone = window_clone.clone();
             let mut cloned_context = cloned_context.clone();
-            
+            let accumulated_markdown = Arc::clone(&accumulated_markdown);
+
             // 移除"正在思考..."消息
             if !cloned_context.content.is_empty() {
                 cloned_context.content.pop();
             }
-            
+
             // 添加实际的聊天消息，内容将在回调中更新
             cloned_context.content.push(ChatMessage {
                 msgtype: ChatMessageType::Assistant,
                 time: chrono::Local::now().format("%H:%M").to_string(),
                 content: String::new(), // 初始为空，将在回调中更新
             });
-            
+
             move |text: String| {
                 // 累积流式响应内容
-                let mut accumulated = accumulated_markdown_clone.lock().unwrap();
+                let mut accumulated = accumulated_markdown.lock().unwrap();
                 accumulated.push_str(&text);
-                
+
                 // 更新最后一条消息的内容
                 let last_idx = cloned_context.content.len() - 1;
                 cloned_context.content[last_idx].content = accumulated.clone();
-                
-                // 转换为HTML并发送到前端
+
+                // 将内容转换为HTML并立即发送到前端
                 let content: &ChatHistory = &ChatHistory::markdown_to_html(&cloned_context);
+                println!("Sending stream message: {}", text.clone());
                 let _ = window_clone.emit("stream-message", content);
             }
         };
-        
-        // 使用tokio运行时执行异步任务
+
+        // 创建一个tokio运行时
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let response_result = runtime.block_on(chat.generate_response_stream(
-            api_key, 
-            message.clone(),
-            callback
-        ));
+
+        // 创建一个通道用于获取最终结果
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        // Clone message before moving it into the async block
+        let message_for_async = message.clone();
+        println!("message_for_async: {}", message_for_async);
         
+        // 在运行时内启动异步任务，但不阻塞等待它完成
+        runtime.spawn(async move {
+            // 执行流式响应生成
+            let result = chat
+                .generate_response_stream(api_key, message_for_async, callback)
+                .await;
+
+            // 将结果映射错误为String以使其可以安全地在线程间传递
+            let send_result = result.map_err(|e| e.to_string());
+
+            // 将结果发送回主线程
+            let _ = tx.send(send_result);
+        });
+        
+        println!("Waiting for response...");
+        // 等待异步任务完成并获取结果
+        let response_result = rx.recv().unwrap();
+
+        // 处理最终结果
         match response_result {
             Ok(final_response) => {
                 // 储存当前对话的内容
                 let current_id = *CURRENT_CHAT_ID.lock().unwrap();
                 let mut history = CHAT_HISTORY.lock().unwrap();
-                if let Some(chat) = history.get_mut(&current_id) {
-                    chat.content.push(ChatMessage {
+                if let Some(chat_history) = history.get_mut(&current_id) {
+                    // 添加用户消息和助手响应
+                    chat_history.content.push(ChatMessage {
                         msgtype: ChatMessageType::User,
                         time: chrono::Local::now().format("%H:%M").to_string(),
                         content: message.clone(),
                     });
-                    chat.content.push(ChatMessage {
+                    chat_history.content.push(ChatMessage {
                         msgtype: ChatMessageType::Assistant,
                         time: chrono::Local::now().format("%H:%M").to_string(),
                         content: final_response,
                     });
-                    chat.time = chrono::Local::now().format("%H:%M").to_string();
+                    chat_history.time = chrono::Local::now().format("%H:%M").to_string();
+                    
                     // 保存历史记录
                     save_history(&history).unwrap_or_else(|e| {
                         println!("Failed to save history: {}", e);
                     });
                 }
-            },
+            }
             Err(e) => {
                 // 处理错误情况
                 let error_message = format!("生成回复时出错: {}", e);
-                
+
                 // 更新最后一条消息为错误信息
                 let mut cloned_context = current_chat_context.clone();
                 cloned_context.content.push(ChatMessage {
@@ -288,10 +321,10 @@ fn process_message_stream(window: Window, message: String) {
                     time: chrono::Local::now().format("%H:%M").to_string(),
                     content: error_message.clone(),
                 });
-                
+
                 let content: &ChatHistory = &ChatHistory::markdown_to_html(&cloned_context);
                 let _ = window_clone.emit("stream-message", content);
-                
+
                 // 储存当前对话的内容，包括错误信息
                 let current_id = *CURRENT_CHAT_ID.lock().unwrap();
                 let mut history = CHAT_HISTORY.lock().unwrap();
@@ -324,147 +357,208 @@ fn process_message_stream(window: Window, message: String) {
 
 #[tauri::command]
 fn regenerate_message(window: Window, message_index: usize) -> Result<(), String> {
-    // 克隆一份当前对话的内容
-    let current_id = *CURRENT_CHAT_ID.lock().unwrap();
-    let mut history = CHAT_HISTORY.lock().unwrap();
-
-    let chat_history = match history.get_mut(&current_id) {
-        Some(history) => history,
-        None => return Err("当前对话不存在".to_string()),
-    };
-
-    // 检查索引是否有效（必须是Assistant消息）
-    if message_index >= chat_history.content.len() {
-        return Err("消息索引无效".to_string());
-    }
-
-    // 找到指定索引的消息
-    let message = &chat_history.content[message_index];
-
-    // 只允许重做AI的消息
-    if message.msgtype != ChatMessageType::Assistant {
-        return Err("只能重新生成AI助手的消息".to_string());
-    }
-
-    // 找到该消息对应的用户消息（通常是上一条）
-    let user_message = if message_index > 0
-        && chat_history.content[message_index - 1].msgtype == ChatMessageType::User
-    {
-        chat_history.content[message_index - 1].content.clone()
-    } else {
-        // 如果没有找到对应的用户消息，返回错误
-        return Err("未找到对应的用户消息".to_string());
-    };
-
-    // 移除当前消息以及之后的所有消息
-    chat_history.content.truncate(message_index);
-    
-    // 更新前端显示为"正在重新生成..."
+    // 克隆窗口以便在新线程中使用
     let window_clone = window.clone();
-    
-    let cloned_context = chat_history.clone();
-    let mut display_context = cloned_context.clone();
-    
-    display_context.content.push(ChatMessage {
-        msgtype: ChatMessageType::Assistant,
-        time: chrono::Local::now().format("%H:%M").to_string(),
-        content: "正在重新生成...".to_string(),
-    });
-    
-    let content: &ChatHistory = &ChatHistory::markdown_to_html(&display_context);
-    let _ = window_clone.emit("stream-message", content);
 
-    // 获取API密钥
-    let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
-    let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
-    
-    if gemini_keys.keys.is_empty() {
-        // 如果没有API密钥，发送错误消息
-        chat_history.content.push(ChatMessage {
-            msgtype: ChatMessageType::Assistant,
-            time: chrono::Local::now().format("%H:%M").to_string(),
-            content: "未找到API密钥，请先在设置中添加Gemini API密钥".to_string(),
-        });
-        
-        let content: &ChatHistory = &ChatHistory::markdown_to_html(&chat_history);
-        let _ = window_clone.emit("stream-message", content);
-        let _ = window_clone.emit("stream-complete", "");
-        
-        // 保存历史记录
-        save_history(&history).unwrap_or_else(|e| {
-            println!("Failed to save history: {}", e);
-        });
-        
-        return Err("未找到API密钥".to_string());
-    }
-    
-    // 随机选择一个API密钥
-    let api_key = gemini_keys.keys[0].clone(); // 或者使用random_key()随机选择
-    
-    // 创建一个新线程处理消息
-    let window_clone = window.clone();
-    let chat_id = current_id;
-    
-    // 释放锁以便新线程可以获取它
-    drop(history);
-    
+    // 创建一个新线程处理消息重新生成
     std::thread::spawn(move || {
-        // 初始化AI聊天实例
-        let mut chat = aibackend::gemini::GeminiChat::new();
+        // 获取当前聊天ID
+        let current_id = *CURRENT_CHAT_ID.lock().unwrap();
         
-        // 设置系统提示语
-        let _ = chat.set_system_prompt("你是NPULearn应用的AI助手，请尽可能提供专业、准确的回答。支持使用Markdown语法丰富你的回答。".to_string());
-        
-        // 调用AI生成回复
-        let response_future = chat.generate_response(api_key, user_message.clone());
-        
-        // 使用tokio运行时执行异步任务
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let response_result = runtime.block_on(response_future);
-        
-        // 获取锁并更新历史记录
-        let mut history = CHAT_HISTORY.lock().unwrap();
-        let chat_history = match history.get_mut(&chat_id) {
-            Some(history) => history,
-            None => return, // 对话不存在，直接返回
+        // 从锁定的历史中获取聊天记录的克隆，避免长时间持有锁
+        let chat_clone = {
+            let history = CHAT_HISTORY.lock().unwrap();
+            match history.get(&current_id) {
+                Some(chat) => chat.clone(),
+                None => {
+                    let _ = window_clone.emit("stream-message", "找不到当前对话");
+                    let _ = window_clone.emit("stream-complete", "");
+                    return;
+                }
+            }
         };
         
+        // 检查消息索引是否有效
+        if message_index >= chat_clone.content.len() {
+            let _ = window_clone.emit("stream-message", "无效的消息索引");
+            let _ = window_clone.emit("stream-complete", "");
+            return;
+        }
+        
+        // 检查是否是助手消息
+        if chat_clone.content[message_index].msgtype != ChatMessageType::Assistant {
+            let _ = window_clone.emit("stream-message", "只能重新生成助手的消息");
+            let _ = window_clone.emit("stream-complete", "");
+            return;
+        }
+        
+        // 获取用户的上一条消息
+        let user_message = if message_index > 0 && chat_clone.content[message_index - 1].msgtype == ChatMessageType::User {
+            chat_clone.content[message_index - 1].content.clone()
+        } else {
+            let _ = window_clone.emit("stream-message", "找不到对应的用户消息");
+            let _ = window_clone.emit("stream-complete", "");
+            return;
+        };
+        
+        // 获取API密钥
+        let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
+        let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
+        
+        if gemini_keys.keys.is_empty() {
+            // 如果没有API密钥，发送错误消息
+            let _ = window_clone.emit("stream-message", "未找到API密钥，请先在设置中添加Gemini API密钥");
+            let _ = window_clone.emit("stream-complete", "");
+            return;
+        }
+        
+        // 随机选择一个API密钥
+        let api_key = gemini_keys.keys[0].clone(); // 或者使用random_key()随机选择
+        
+        // 初始化AI聊天实例
+        let mut ai_chat = aibackend::gemini::GeminiChat::new();
+        
+        // 设置系统提示语
+        let _ = ai_chat.set_system_prompt("你是NPULearn应用的AI助手，请尽可能提供专业、准确的回答。支持使用Markdown语法丰富你的回答。".to_string());
+        
+        // 截断聊天历史，只保留到用户的消息（丢弃所有后续内容）
+        let mut chat_history = chat_clone.clone();
+        chat_history.content.truncate(message_index);
+        
+        // 加载聊天历史到AI聊天实例
+        if let Err(e) = ai_chat.load_from(&chat_history) {
+            println!("无法加载聊天历史: {}", e);
+            let _ = window_clone.emit("stream-message", format!("无法加载聊天历史: {}", e));
+            let _ = window_clone.emit("stream-complete", "");
+            return;
+        }
+        
+        // 创建用于显示的上下文
+        let mut display_context = chat_history.clone();
+        
+        // 添加"正在思考..."消息
+        display_context.content.push(ChatMessage {
+            msgtype: ChatMessageType::Assistant,
+            time: chrono::Local::now().format("%H:%M").to_string(),
+            content: "正在思考...".to_string(),
+        });
+        
+        // 显示临时状态
+        let display_content = &ChatHistory::markdown_to_html(&display_context);
+        let _ = window_clone.emit("stream-message", display_content);
+        
+        // 创建一个锁定的变量用于存储累积的响应内容
+        let accumulated_markdown = Arc::new(Mutex::new(String::new()));
+        
+        // 创建一个回调函数，用于处理流式响应的每个部分
+        let callback = {
+            let window_clone = window_clone.clone();
+            let mut display_context = display_context.clone();
+            let accumulated_markdown = Arc::clone(&accumulated_markdown);
+            
+            // 移除"正在思考..."消息
+            if !display_context.content.is_empty() {
+                display_context.content.pop();
+            }
+            
+            // 添加实际的聊天消息，内容将在回调中更新
+            display_context.content.push(ChatMessage {
+                msgtype: ChatMessageType::Assistant,
+                time: chrono::Local::now().format("%H:%M").to_string(),
+                content: String::new(), // 初始为空，将在回调中更新
+            });
+            
+            move |text: String| {
+                // 累积流式响应内容
+                let mut accumulated = accumulated_markdown.lock().unwrap();
+                accumulated.push_str(&text);
+                
+                // 更新最后一条消息的内容
+                let last_idx = display_context.content.len() - 1;
+                display_context.content[last_idx].content = accumulated.clone();
+                
+                // 将内容转换为HTML并立即发送到前端
+                let content = &ChatHistory::markdown_to_html(&display_context);
+                println!("Sending stream message: {}", text.clone());
+                let _ = window_clone.emit("stream-message", content);
+            }
+        };
+        
+        // 创建一个tokio运行时
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        
+        // 创建一个通道用于获取最终结果
+        let (tx, rx) = std::sync::mpsc::channel();
+        
+        // 在运行时内启动异步任务
+        runtime.spawn(async move {
+            // 使用regenerate_response_stream方法重新生成响应
+            let result = ai_chat.regenerate_response_stream(api_key, callback).await;
+            
+            // 将结果映射错误为String以使其可以安全地在线程间传递
+            let send_result = result.map_err(|e| e.to_string());
+            
+            // 将结果发送回主线程
+            let _ = tx.send(send_result);
+        });
+        
+        println!("Waiting for regenerated response...");
+        // 等待异步任务完成并获取结果
+        let response_result = rx.recv().unwrap();
+        
+        // 完成后，获取锁并更新实际的历史记录
+        let mut history = CHAT_HISTORY.lock().unwrap();
+        let chat = match history.get_mut(&current_id) {
+            Some(chat) => chat,
+            None => {
+                let _ = window_clone.emit("stream-complete", "");
+                return; // 如果此时找不到对话，直接返回
+            }
+        };
+        
+        // 处理最终结果
         match response_result {
-            Ok(response) => {
-                // 添加AI回复
-                chat_history.content.push(ChatMessage {
+            Ok(final_response) => {
+                // 添加新的助手回复
+                chat.content.push(ChatMessage {
                     msgtype: ChatMessageType::Assistant,
                     time: chrono::Local::now().format("%H:%M").to_string(),
-                    content: response.clone(),
+                    content: final_response,
                 });
                 
-                let content: &ChatHistory = &ChatHistory::markdown_to_html(&chat_history);
+                chat.time = chrono::Local::now().format("%H:%M").to_string();
                 
-                // 更新前端显示
-                let _ = window_clone.emit("stream-message", content);
+                // 保存历史记录
+                save_history(&history).unwrap_or_else(|e| {
+                    println!("Failed to save history: {}", e);
+                });
             },
             Err(e) => {
                 // 处理错误情况
                 let error_message = format!("重新生成回复时出错: {}", e);
-                chat_history.content.push(ChatMessage {
+                
+                // 添加错误消息
+                chat.content.push(ChatMessage {
                     msgtype: ChatMessageType::Assistant,
                     time: chrono::Local::now().format("%H:%M").to_string(),
                     content: error_message.clone(),
                 });
                 
-                let content: &ChatHistory = &ChatHistory::markdown_to_html(&chat_history);
-                let _ = window_clone.emit("stream-message", content);
+                chat.time = chrono::Local::now().format("%H:%M").to_string();
+                
+                
+                // 显示错误消息
+                let display_context = chat.clone();
+                let display_content = &ChatHistory::markdown_to_html(&display_context);
+                let _ = window_clone.emit("stream-message", display_content);
+                // 保存历史记录
+                save_history(&history).unwrap_or_else(|e| {
+                    println!("Failed to save history: {}", e);
+                });
+
             }
         }
-        
-        // 更新对话时间
-        chat_history.time = chrono::Local::now().format("%H:%M").to_string();
-        
-        // 保存历史记录
-        save_history(&history).unwrap_or_else(|e| {
-            println!("Failed to save history: {}", e);
-        });
-        
+
         // 通知前端流式传输完成
         let _ = window_clone.emit("stream-complete", "");
     });

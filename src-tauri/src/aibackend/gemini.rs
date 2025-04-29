@@ -1,5 +1,6 @@
 use crate::aibackend::interface::AIChat;
 use crate::aibackend::template;
+use crate::{ChatHistory, ChatMessage, ChatMessageType};
 use base64::Engine;
 use futures_util::StreamExt;
 use openai_api_rs::v1::chat_completion::{self, Content, MessageRole};
@@ -9,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::error::Error;
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use super::apikey::{ApiKey, ApiKeyType};
 
@@ -62,58 +64,71 @@ pub struct GeminiChat {
     top_p: Option<f32>,
     last_prompt: Option<String>,
     tools: Vec<chat_completion::Tool>, // Consider if this needs to be stored if tools are passed per call
+
+    chat_id: u32,  // 用于唯一标识聊天会话
+    title: String, // 聊天标题
+    time: String,  // 聊天时间
 }
 
 // --- Constants ---
 const GEMINI_API_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
-// --- Stream 相关常量 ---
-const STREAM_DELIM: &str = "\n\n";
-const STREAM_DATA_PREFIX: &str = "data: ";
-const STREAM_DONE_MARKER: &str = "[DONE]";
-
 // --- Helper Functions ---
 
 /// 构建 Gemini API URL
 fn build_gemini_url(model: &str, api_key: &str, action: &str) -> String {
-    format!("{}/{}:{}?key={}", GEMINI_API_BASE_URL, model, action, api_key)
+    format!(
+        "{}/{}:{}?key={}",
+        GEMINI_API_BASE_URL, model, action, api_key
+    )
+}
+
+/// 构建 Gemini API URL，支持流式传输
+fn build_gemini_stream_url(model: &str, api_key: &str) -> String {
+    format!(
+        "{}/{}:streamGenerateContent?key={}",
+        GEMINI_API_BASE_URL, model, api_key
+    )
 }
 
 /// 转换 OpenAI 工具为 Gemini 格式
 fn convert_tools_to_gemini_format(tools: &[chat_completion::Tool]) -> Value {
-    let function_declarations: Vec<Value> = tools.iter().map(|tool| {
-        let func = &tool.function;
-        let mut properties = json!({});
-        
-        if let Some(props) = &func.parameters.properties {
-            for (param_name, param_def) in props {
-                let param_type = match param_def.schema_type {
-                    Some(types::JSONSchemaType::String) => "STRING",
-                    Some(types::JSONSchemaType::Number) => "NUMBER",
-                    Some(types::JSONSchemaType::Boolean) => "BOOLEAN",
-                    Some(types::JSONSchemaType::Object) => "OBJECT",
-                    Some(types::JSONSchemaType::Array) => "ARRAY",
-                    _ => "UNKNOWN" // Or handle more gracefully
-                };
-                
-                properties[param_name] = json!({
-                    "type": param_type,
-                    // Add description if available in param_def
-                    // "description": param_def.description.clone().unwrap_or_default()
-                });
+    let function_declarations: Vec<Value> = tools
+        .iter()
+        .map(|tool| {
+            let func = &tool.function;
+            let mut properties = json!({});
+
+            if let Some(props) = &func.parameters.properties {
+                for (param_name, param_def) in props {
+                    let param_type = match param_def.schema_type {
+                        Some(types::JSONSchemaType::String) => "STRING",
+                        Some(types::JSONSchemaType::Number) => "NUMBER",
+                        Some(types::JSONSchemaType::Boolean) => "BOOLEAN",
+                        Some(types::JSONSchemaType::Object) => "OBJECT",
+                        Some(types::JSONSchemaType::Array) => "ARRAY",
+                        _ => "UNKNOWN", // Or handle more gracefully
+                    };
+
+                    properties[param_name] = json!({
+                        "type": param_type,
+                        // Add description if available in param_def
+                        // "description": param_def.description.clone().unwrap_or_default()
+                    });
+                }
             }
-        }
-        
-        json!({
-            "name": func.name,
-            "description": func.description.clone().unwrap_or_default(),
-            "parameters": {
-                "type": "OBJECT", // Assuming top-level parameters are always an object
-                "properties": properties,
-                "required": func.parameters.required.clone().unwrap_or_default()
-            }
+
+            json!({
+                "name": func.name,
+                "description": func.description.clone().unwrap_or_default(),
+                "parameters": {
+                    "type": "OBJECT", // Assuming top-level parameters are always an object
+                    "properties": properties,
+                    "required": func.parameters.required.clone().unwrap_or_default()
+                }
+            })
         })
-    }).collect();
+        .collect();
 
     json!({
         "tools": [{ "functionDeclarations": function_declarations }],
@@ -129,16 +144,26 @@ fn parse_gemini_response(response_json: &Value) -> Result<String, Box<dyn Error>
             if let Some(finish_reason) = candidate.get("finishReason").and_then(|fr| fr.as_str()) {
                 if finish_reason == "SAFETY" {
                     let mut reasons = String::new();
-                    if let Some(safety_ratings) = candidate.get("safetyRatings").and_then(|sr| sr.as_array()) {
+                    if let Some(safety_ratings) =
+                        candidate.get("safetyRatings").and_then(|sr| sr.as_array())
+                    {
                         for rating in safety_ratings {
-                            if rating.get("blocked").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                if let Some(category) = rating.get("category").and_then(|c| c.as_str()) {
+                            if rating
+                                .get("blocked")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                if let Some(category) =
+                                    rating.get("category").and_then(|c| c.as_str())
+                                {
                                     reasons.push_str(&format!("{}: blocked\n", category));
                                 }
                             }
                         }
                     }
-                    return Err(format!("Content blocked due to safety concerns:\n{}", reasons).into());
+                    return Err(
+                        format!("Content blocked due to safety concerns:\n{}", reasons).into(),
+                    );
                 }
             }
 
@@ -163,7 +188,9 @@ fn parse_gemini_response(response_json: &Value) -> Result<String, Box<dyn Error>
 
 /// 解析 Gemini API 响应以获取工具调用或文本
 #[allow(dead_code)]
-fn parse_gemini_tool_call_response(response_json: &Value) -> Result<(Option<String>, Vec<ToolCall>), Box<dyn Error>> {
+fn parse_gemini_tool_call_response(
+    response_json: &Value,
+) -> Result<(Option<String>, Vec<ToolCall>), Box<dyn Error>> {
     let mut function_calls = Vec::new();
     let mut response_text: Option<String> = None;
 
@@ -171,10 +198,11 @@ fn parse_gemini_tool_call_response(response_json: &Value) -> Result<(Option<Stri
         if let Some(candidate) = candidates.get(0) {
             // 检查安全过滤 (可以复用 parse_gemini_response 的安全检查逻辑)
             if let Some(finish_reason) = candidate.get("finishReason").and_then(|fr| fr.as_str()) {
-                 if finish_reason == "SAFETY" {
-                     // ... (安全检查逻辑同 parse_gemini_response) ...
-                     return Err("Content blocked due to safety concerns.".into()); // 简化错误信息
-                 }
+                if finish_reason == "SAFETY" {
+                    // ... (安全检查逻辑同 parse_gemini_response) ...
+                    return Err("Content blocked due to safety concerns.".into());
+                    // 简化错误信息
+                }
             }
 
             // 提取内容部分
@@ -183,29 +211,31 @@ fn parse_gemini_tool_call_response(response_json: &Value) -> Result<(Option<Stri
                     for part in parts {
                         // 检查函数调用
                         if let Some(function_call) = part.get("functionCall") {
-                            let name = function_call.get("name")
+                            let name = function_call
+                                .get("name")
                                 .and_then(|n| n.as_str())
                                 .unwrap_or_default()
                                 .to_string();
-                            
-                            let args = function_call.get("args")
+
+                            let args = function_call
+                                .get("args")
                                 .and_then(|a| a.as_object())
                                 .map(|obj| {
                                     obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
                                 })
                                 .unwrap_or_default();
-                            
+
                             if !name.is_empty() {
                                 function_calls.push(ToolCall { name, args });
                             }
-                        } 
+                        }
                         // 检查文本部分 (即使有函数调用，也可能包含文本)
                         else if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                           response_text = Some(text.to_string());
-                           // 如果需要模板提取，在这里处理
-                           // if let Some(extracted) = template::extract_response(text) {
-                           //     response_text = Some(extracted);
-                           // }
+                            response_text = Some(text.to_string());
+                            // 如果需要模板提取，在这里处理
+                            // if let Some(extracted) = template::extract_response(text) {
+                            //     response_text = Some(extracted);
+                            // }
                         }
                     }
                 }
@@ -221,13 +251,175 @@ fn parse_gemini_tool_call_response(response_json: &Value) -> Result<(Option<Stri
     }
 }
 
+/// 解析流式响应块并通过回调函数返回文本
+async fn process_stream_response<F>(
+    response: reqwest::Response,
+    mut callback: F,
+) -> Result<String, Box<dyn Error>>
+where
+    F: FnMut(String) + Send + 'static,
+{
+    let mut stream = response.bytes_stream();
+    let mut full_response = String::new();
+    let mut has_received_data = false;
+
+    // 字符级解析变量
+    let mut buffer = String::new();
+    let mut buffer_lv = 0; // 跟踪JSON嵌套深度: 0=最外层, 1=在数组内但未进入对象, >1=在对象内
+    let mut in_string = false; // 是否在字符串内
+    let mut escape_char = false; // 是否在转义字符后
+
+    println!("Starting stream processing...");
+
+    // 处理流式响应
+    while let Some(chunk_result) = stream.next().await {
+        match chunk_result {
+            Ok(chunk) => {
+                has_received_data = true; // 标记已收到数据
+                let chunk_str = String::from_utf8_lossy(&chunk);
+                println!("Received raw chunk: {}", chunk_str); // 调试输出
+
+                // 逐字符处理，模拟Python示例中的逻辑
+                for c in chunk_str.chars() {
+                    // 处理转义
+                    if in_string && !escape_char && c == '\\' {
+                        escape_char = true;
+                        buffer.push(c);
+                        continue;
+                    }
+
+                    if in_string && escape_char {
+                        escape_char = false;
+                        buffer.push(c);
+                        continue;
+                    }
+
+                    // 字符串边界处理
+                    if c == '"' && !escape_char {
+                        in_string = !in_string;
+                    }
+                    // 增加嵌套深度 (仅在非字符串内)
+                    else if (c == '{' || c == '[') && !in_string {
+                        buffer_lv += 1;
+                    }
+                    // 减少嵌套深度 (仅在非字符串内)
+                    else if (c == '}' || c == ']') && !in_string {
+                        buffer_lv -= 1;
+                    }
+
+                    // 当深度>1，即进入JSON对象内时，记录字符
+                    if buffer_lv > 1 {
+                        if in_string && c == '\n' {
+                            buffer.push_str("\\n"); // 处理字符串内的换行符
+                        } else {
+                            buffer.push(c);
+                        }
+                    }
+                    // 当回到深度1(对象结束)且buffer非空，说明完成了一个对象的处理
+                    else if buffer_lv == 1 && !buffer.is_empty() {
+                        // 补充右花括号，因为右花括号已被读取但未加入buffer
+                        buffer.push('}');
+                        println!("Completed buffer: {}", buffer);
+
+                        // 解析整个对象
+                        match serde_json::from_str::<Value>(&buffer) {
+                            Ok(json_value) => {
+                                // 提取文本内容
+                                if let Some(candidates) =
+                                    json_value.get("candidates").and_then(|c| c.as_array())
+                                {
+                                    if let Some(candidate) = candidates.get(0) {
+                                        if let Some(content) = candidate.get("content") {
+                                            if let Some(parts) =
+                                                content.get("parts").and_then(|p| p.as_array())
+                                            {
+                                                if let Some(part) = parts.get(0) {
+                                                    if let Some(text) =
+                                                        part.get("text").and_then(|t| t.as_str())
+                                                    {
+                                                        if !text.is_empty() {
+                                                            println!("Extracted text: {}", text);
+                                                            callback(text.to_string());
+                                                            full_response.push_str(text);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                println!("Failed to parse JSON object: {} - Buffer: {}", e, buffer);
+                            }
+                        }
+
+                        // 清空buffer，准备下一个对象
+                        buffer.clear();
+                    }
+                    // 处理深度0或1的其他字符(如逗号、空格等)，直接忽略
+                }
+            }
+            Err(e) => {
+                println!("Stream error: {}", e);
+                return Err(format!("Stream error: {}", e).into());
+            }
+        }
+    }
+
+    // 处理最后可能未处理完的buffer
+    if !buffer.is_empty() {
+        println!("Processing remaining buffer: {}", buffer);
+        // 如果buffer不为空，尝试修复并解析
+        if buffer.starts_with('{') && !buffer.ends_with('}') {
+            buffer.push('}');
+        }
+
+        match serde_json::from_str::<Value>(&buffer) {
+            Ok(json_value) => {
+                // 提取文本与前面相同
+                if let Some(candidates) = json_value.get("candidates").and_then(|c| c.as_array()) {
+                    if let Some(candidate) = candidates.get(0) {
+                        if let Some(content) = candidate.get("content") {
+                            if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
+                                if let Some(part) = parts.get(0) {
+                                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                        if !text.is_empty() {
+                                            callback(text.to_string());
+                                            full_response.push_str(text);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(_) => {} // 忽略最后一个不完整对象的解析错误
+        }
+    }
+
+    // 检查响应是否为空，但之前收到过数据
+    if full_response.is_empty() && has_received_data {
+        println!("Warning: Received data but couldn't extract text");
+        // 查看是否是特殊情况：所有数据都收到但无法解析为标准格式
+        return Ok("(Response received but requires different format parsing)".to_string());
+    } else if full_response.is_empty() {
+        return Err("No text generated from the stream".into());
+    }
+
+    // 返回完整响应
+    println!("Completed stream response: {}", full_response);
+    Ok(full_response)
+}
+
 #[allow(dead_code)]
 impl GeminiChat {
     pub fn new() -> Self {
         GeminiChat {
             // base_url 仍然保留，以防未来需要与其他兼容 OpenAI 的 API 交互
-            base_url: "https://generativelanguage.googleapis.com/v1beta/openai/".to_string(), 
-            model: "gemini-1.5-flash-latest".to_string(), // 更新为推荐模型
+            base_url: "https://generativelanguage.googleapis.com/v1beta/openai/".to_string(),
+            model: "gemini-2.5-flash-preview-04-17".to_string(), // 更新为推荐模型
             system_prompt: "You are a helpful assistant".to_string(),
             messages: Vec::new(),
             temperature: 0.7,
@@ -235,12 +427,20 @@ impl GeminiChat {
             top_p: Some(0.95),      // 设置默认值
             last_prompt: None,
             tools: Vec::new(),
+            chat_id: 0,                    // 初始化为0或其他默认值
+            title: "New Chat".to_string(), // 初始化标题
+            time: "".to_string(),          // 初始化时间
         }
     }
 
     /// 转换OpenAI格式的消息为Gemini格式的请求体
-    fn build_gemini_request_body(&self, messages: &[chat_completion::ChatCompletionMessage], tools: Option<&[chat_completion::Tool]>) -> Result<Value, Box<dyn Error>> {
-        let gemini_messages: Vec<Value> = messages.iter()
+    fn build_gemini_request_body(
+        &self,
+        messages: &[chat_completion::ChatCompletionMessage],
+        tools: Option<&[chat_completion::Tool]>,
+    ) -> Result<Value, Box<dyn Error>> {
+        let gemini_messages: Vec<Value> = messages
+            .iter()
             .filter_map(|message| {
                 if let Content::Text(content) = &message.content {
                     if !content.is_empty() {
@@ -251,38 +451,48 @@ impl GeminiChat {
                             MessageRole::system => return None, // 或者转换为 user/model 消息
                             MessageRole::function | MessageRole::tool => "function", // Gemini 使用 function 角色表示工具结果
                         };
-                        
+
                         // 处理工具调用和结果的特殊格式
                         if message.role == MessageRole::tool {
-                             Some(json!({
+                            Some(json!({
                                 "role": role,
-                                "parts": [{ 
+                                "parts": [{
                                     "functionResponse": {
                                         "name": message.name.clone().unwrap_or_default(), // 需要工具调用的名称
                                         "response": {
                                             // 假设 content 是 JSON 字符串或其他可序列化的结果
-                                            "content": content 
+                                            "content": content
                                         }
                                     }
                                 }]
                             }))
-                        } else if message.role == MessageRole::assistant && message.tool_calls.is_some() {
+                        } else if message.role == MessageRole::assistant
+                            && message.tool_calls.is_some()
+                        {
                             // 处理模型发起的工具调用请求
-                            let function_calls: Vec<Value> = message.tool_calls.as_ref().unwrap_or(&vec![]).iter().map(|tc| {
-                                let args_value = tc.function.arguments.as_deref() // Get Option<&str>
-                                    .and_then(|s| serde_json::from_str::<Value>(s).ok()) // Try parsing if Some, get Option<Value>
-                                    .unwrap_or(json!({})); // Default to {} if None or parse error
-                                json!({
-                                    "name": tc.function.name,
-                                    "args": args_value
+                            let function_calls: Vec<Value> = message
+                                .tool_calls
+                                .as_ref()
+                                .unwrap_or(&vec![])
+                                .iter()
+                                .map(|tc| {
+                                    let args_value = tc
+                                        .function
+                                        .arguments
+                                        .as_deref() // Get Option<&str>
+                                        .and_then(|s| serde_json::from_str::<Value>(s).ok()) // Try parsing if Some, get Option<Value>
+                                        .unwrap_or(json!({})); // Default to {} if None or parse error
+                                    json!({
+                                        "name": tc.function.name,
+                                        "args": args_value
+                                    })
                                 })
-                            }).collect();
-                             Some(json!({
+                                .collect();
+                            Some(json!({
                                 "role": role,
                                 "parts": [{"functionCall": function_calls[0]}] // Gemini 当前似乎只支持单个 functionCall part
                             }))
-                        }
-                        else {
+                        } else {
                             Some(json!({
                                 "role": role,
                                 "parts": [{ "text": content }]
@@ -318,55 +528,136 @@ impl GeminiChat {
 
         if let Some(active_tools) = tools {
             if !active_tools.is_empty() {
-                 let tool_config = convert_tools_to_gemini_format(active_tools);
-                 // 合并 tool_config 到 request_body
-                 if let Some(obj) = request_body.as_object_mut() {
-                     if let Some(tools_val) = tool_config.get("tools") {
-                         obj.insert("tools".to_string(), tools_val.clone());
-                     }
-                     if let Some(config_val) = tool_config.get("toolConfig") {
-                         obj.insert("toolConfig".to_string(), config_val.clone());
-                     }
-                 }
+                let tool_config = convert_tools_to_gemini_format(active_tools);
+                // 合并 tool_config 到 request_body
+                if let Some(obj) = request_body.as_object_mut() {
+                    if let Some(tools_val) = tool_config.get("tools") {
+                        obj.insert("tools".to_string(), tools_val.clone());
+                    }
+                    if let Some(config_val) = tool_config.get("toolConfig") {
+                        obj.insert("toolConfig".to_string(), config_val.clone());
+                    }
+                }
             }
         }
-        
+
         Ok(request_body)
     }
 
-
-    /// 发送请求到Gemini API 并解析纯文本响应
-    async fn send_request_and_parse_text(&self, api_key: &str, request_body: Value) -> Result<String, Box<dyn Error>> {
+    /// 核心流式处理函数 - 所有Gemini API调用都通过这个接口
+    async fn stream_request<F>(
+        &self,
+        request_body: Value,
+        url: String,
+        callback: F,
+    ) -> Result<String, Box<dyn Error>>
+    where
+        F: FnMut(String) + Send + 'static,
+    {
         let client = reqwest::Client::new();
-        let url = build_gemini_url(&self.model, api_key, "generateContent");
-        
-        let response = client.post(&url)
-            .json(&request_body)
-            .send()
-            .await?;
 
-        let status = response.status(); // Store status before consuming response
+        let response = client.post(&url).json(&request_body).send().await?;
+
+        let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await?;
             return Err(format!("API request failed ({}): {}", status, error_text).into());
         }
-        
-        let response_json: Value = response.json().await?;
-        parse_gemini_response(&response_json)
+
+        // 检查是否是流式响应或普通响应
+        if url.contains("stream") {
+            // 处理流式响应，使用全局函数而不是重复实现
+            process_stream_response(response, callback).await
+        } else {
+            // 处理普通响应（转换为单个回调）
+            let response_json: Value = response.json().await?;
+            match parse_gemini_response(&response_json) {
+                Ok(text) => {
+                    let mut callback_clone = callback;
+                    callback_clone(text.clone());
+                    Ok(text)
+                }
+                Err(e) => Err(e),
+            }
+        }
     }
 
-     /// 发送请求到Gemini API 并解析工具调用或文本响应
-    async fn send_request_and_parse_tool_call(&self, api_key: &str, request_body: Value) -> Result<(Option<String>, Vec<ToolCall>), Box<dyn Error>> {
-        let client = reqwest::Client::new();
-        let url = build_gemini_url(&self.model, api_key, "generateContent");
+    /// 以流式方式发送聊天请求到Gemini API - 高级接口
+    async fn chat_stream<F>(
+        &self,
+        api_key: &str,
+        messages: &[chat_completion::ChatCompletionMessage],
+        tools: Option<&[chat_completion::Tool]>,
+        use_streaming: bool,
+        callback: F,
+    ) -> Result<String, Box<dyn Error>>
+    where
+        F: FnMut(String) + Send + 'static,
+    {
+        // 构建请求体
+        let request_body = self.build_gemini_request_body(messages, tools)?;
 
-        let response = client.post(&url)
-            .json(&request_body)
-            .send()
+        // 根据是否使用流式传输选择URL
+        let url = if use_streaming {
+            build_gemini_stream_url(&self.model, api_key)
+        } else {
+            build_gemini_url(&self.model, api_key, "generateContent")
+        };
+
+        // 使用统一的流处理接口
+        self.stream_request(request_body, url, callback).await
+    }
+
+    /// 简化的非流式聊天接口 (内部复用流式接口)
+    async fn chat_gemini(
+        &self,
+        api_key: &str,
+        messages: &[chat_completion::ChatCompletionMessage],
+        tools: Option<&[chat_completion::Tool]>,
+    ) -> Result<String, Box<dyn Error>> {
+        // 使用流式接口，但禁用实际的流式传输
+        let full_response = Arc::new(std::sync::Mutex::new(String::new()));
+        let response_clone = full_response.clone();
+
+        let _ = self
+            .chat_stream(
+                api_key,
+                messages,
+                tools,
+                false, // 不使用流式传输
+                move |chunk| {
+                    let mut locked_response = response_clone.lock().unwrap();
+                    locked_response.push_str(&chunk);
+                },
+            )
             .await?;
 
-        let status = response.status(); // Store status before consuming response
-        if !response.status().is_success() {
+        // 如果需要，应用模板提取
+        let final_response = full_response.lock().unwrap().clone();
+        if let Some(extracted) = template::extract_response(&final_response) {
+            return Ok(extracted);
+        }
+
+        Ok(final_response)
+    }
+
+    /// 解析工具调用响应
+    async fn parse_tool_calls(
+        &self,
+        api_key: &str,
+        messages: &[chat_completion::ChatCompletionMessage],
+        tools: &[chat_completion::Tool],
+    ) -> Result<(Option<String>, Vec<ToolCall>), Box<dyn Error>> {
+        // 使用chat_gemini获取响应，然后解析工具调用
+        let request_body = self.build_gemini_request_body(messages, Some(tools))?;
+        let url = build_gemini_url(&self.model, api_key, "generateContent");
+
+        // 发送请求
+        let client = reqwest::Client::new();
+        let response = client.post(&url).json(&request_body).send().await?;
+
+        let status = response.status();
+        if !status.is_success() {
             let error_text = response.text().await?;
             return Err(format!("API request failed ({}): {}", status, error_text).into());
         }
@@ -374,325 +665,119 @@ impl GeminiChat {
         let response_json: Value = response.json().await?;
         parse_gemini_tool_call_response(&response_json)
     }
-    
-    /// 准备包含系统指令的消息列表
-    fn prepare_messages_with_system_prompt(&self, messages: Vec<chat_completion::ChatCompletionMessage>, system_instruction: &str) -> Vec<chat_completion::ChatCompletionMessage> {
-        // Gemini 推荐将系统指令放在第一个用户消息之前，或者使用特定的 systemInstruction 字段（如果模型支持）
-        // 这里我们模拟将其放在开头，但标记为 'user' 或 'model' 角色，具体取决于 API 要求
-        // 最简单的方式是将其合并到第一个用户消息中，或者作为单独的 model 消息开始
-        let mut all_messages = vec![
-             // 方式一：作为 model 消息开始 (模拟思考过程)
-            // chat_completion::ChatCompletionMessage {
-            //     role: MessageRole::assistant, // 'model' in Gemini
-            //     content: Content::Text(format!(
-            //         "<|start_header|>think<|end_header|>My instructons are as follows:\n--- [System Instructions] ---\n{}\n--- [System Instructions End] ---<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>ready",
-            //         system_instruction
-            //     )),
-            //     name: None, tool_calls: None, tool_call_id: None,
-            // }
-            // 方式二：将系统指令预置到第一个用户消息（如果存在）
-            // 方式三：使用顶层的 systemInstruction 字段（在 build_gemini_request_body 中处理）
-        ];
 
-        // 如果使用方式一或二，需要调整消息列表
-        // 当前实现假设 system_instruction 通过顶层字段传递或模型默认处理
-        all_messages.extend(messages); 
-        all_messages
-    }
-
-    /// 从Gemini使用系统指令构建聊天请求 (简化版，依赖 build_gemini_request_body)
-    async fn chat_gemini(&mut self, api_key: &str, messages: Vec<chat_completion::ChatCompletionMessage>, system_instruction: &str) -> Result<String, Box<dyn Error>> {
-        // 注意：system_instruction 的处理方式取决于 build_gemini_request_body 的实现
-        // let prepared_messages = self.prepare_messages_with_system_prompt(messages, system_instruction);
-        let request_body = self.build_gemini_request_body(&messages, None)?; // 假设系统指令在顶层处理
-        self.send_request_and_parse_text(api_key, request_body).await
-    }
-    
     /// 通过工具调用实现聊天功能
     async fn chat_gemini_with_tools(
-        &mut self,
+        &self,
         api_key: &str,
-        messages: Vec<chat_completion::ChatCompletionMessage>,
+        messages: &[chat_completion::ChatCompletionMessage],
         tools: &[chat_completion::Tool],
-        system_instruction: &str,
-        tool_call_processor: impl Fn(String, HashMap<String, Value>) -> Pin<Box<dyn Future<Output = Result<String, Box<dyn Error>>> + Send>> + Send + Sync,
+        tool_call_processor: impl Fn(
+                String,
+                HashMap<String, Value>,
+            ) -> Pin<Box<dyn Future<Output = Result<String, Box<dyn Error>>> + Send>>
+            + Send
+            + Sync,
     ) -> Result<String, Box<dyn Error>> {
-        
-        // 1. 第一次调用：发送包含工具的请求
-        // let prepared_messages = self.prepare_messages_with_system_prompt(messages.clone(), system_instruction);
-        let initial_request_body = self.build_gemini_request_body(&messages, Some(tools))?;
-        let (initial_response_text, tool_calls) = self.send_request_and_parse_tool_call(api_key, initial_request_body).await?;
+        // 1. 第一次调用：发送包含工具的请求，解析工具调用
+        let (initial_response_text, tool_calls) =
+            self.parse_tool_calls(api_key, messages, tools).await?;
 
         // 2. 检查是否有工具调用需要执行
         if !tool_calls.is_empty() && !self.check_if_skip_tool_call(&tool_calls) {
-            let mut tool_results_map = HashMap::new();
             let mut tool_result_messages = Vec::new();
 
             // 添加模型的回复（可能包含思考过程或函数调用请求）
-             let mut current_messages = messages.clone(); // 开始构建下一次请求的消息历史
-             if let Some(text) = initial_response_text {
-                 current_messages.push(chat_completion::ChatCompletionMessage {
-                     role: MessageRole::assistant, // 'model'
-                     content: Content::Text(text), // 模型可能的回应文本
-                     name: None, tool_calls: None, tool_call_id: None, // 简化处理，实际应包含 tool_calls
-                 });
-             }
-             // 添加模型请求的工具调用消息 (转换 ToolCall 回 ChatCompletionMessage)
-             // TODO: 需要更精确地将 Gemini 的 FunctionCall 转换为 OpenAI 的 ToolCall 格式存储
-             // current_messages.push( ... 模型请求工具调用的消息 ... );
-
+            let mut current_messages = messages.to_vec(); // 克隆消息列表
+            if let Some(text) = initial_response_text {
+                current_messages.push(chat_completion::ChatCompletionMessage {
+                    role: MessageRole::assistant, // 'model'
+                    content: Content::Text(text), // 模型可能的回应文本
+                    name: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+            }
 
             // 3. 执行工具调用
             for tool_call in &tool_calls {
-                let result = tool_call_processor(tool_call.name.clone(), tool_call.args.clone()).await?;
-                tool_results_map.insert(tool_call.name.clone(), result.clone());
-                
+                let result =
+                    tool_call_processor(tool_call.name.clone(), tool_call.args.clone()).await?;
+
                 // 4. 构建工具结果消息 (Function Response)
                 tool_result_messages.push(chat_completion::ChatCompletionMessage {
-                    role: MessageRole::tool, // 'function' role in Gemini
-                    content: Content::Text(result), // 工具执行结果
+                    role: MessageRole::tool,            // 'function' role in Gemini
+                    content: Content::Text(result),     // 工具执行结果
                     name: Some(tool_call.name.clone()), // 必须提供工具名称
                     tool_calls: None,
-                    tool_call_id: None, // TODO: 需要关联到原始的 tool_call_id (如果 Gemini 提供)
+                    tool_call_id: None,
                 });
             }
 
             // 5. 第二次调用：发送包含工具结果的请求
             current_messages.extend(tool_result_messages);
-            let final_request_body = self.build_gemini_request_body(&current_messages, Some(tools))?; // 仍然传递 tools 定义
-            return self.send_request_and_parse_text(api_key, final_request_body).await;
-
+            return self
+                .chat_gemini(api_key, &current_messages, Some(tools))
+                .await;
         } else if let Some(text) = initial_response_text {
-             // 如果没有工具调用或跳过，直接返回初始文本响应
+            // 如果没有工具调用或跳过，直接返回初始文本响应
             return Ok(text);
         } else {
-             // 如果既没有工具调用也没有文本响应（理论上不应发生，除非API错误或解析问题）
-             return Err("Gemini response contained neither text nor tool calls.".into());
+            // 如果既没有工具调用也没有文本响应（理论上不应发生）
+            return Err("Gemini response contained neither text nor tool calls.".into());
         }
     }
-    
-    // chat_gemini_tool_call 函数被 send_request_and_parse_tool_call 替代
-    
+
     /// 检查是否需要跳过工具调用 (假设有个名为 skip_tool_call 的特殊工具)
     fn check_if_skip_tool_call(&self, tool_calls: &[ToolCall]) -> bool {
         tool_calls.iter().any(|call| call.name == "skip_tool_call")
-    }
-    
-    // format_tool_call_results 不再需要，因为结果直接作为消息发送
-    /// 创建流式请求体
-    fn build_gemini_stream_request_body(&self, messages: &[chat_completion::ChatCompletionMessage]) -> Result<Value, Box<dyn Error>> {
-        // 获取基础请求体 
-        let mut request_body = self.build_gemini_request_body(messages, None)?;
-        
-        // 添加流式处理标志
-        if let Some(obj) = request_body.as_object_mut() {
-            obj.insert("stream".to_string(), json!(true));
-        }
-        
-        Ok(request_body)
-    }
-
-    /// 以流式方式发送请求到Gemini API并处理响应块
-    async fn stream_gemini_chat<F>(&mut self, api_key: &str, messages: Vec<chat_completion::ChatCompletionMessage>, callback: F) -> Result<String, Box<dyn Error>> 
-    where
-        F: FnMut(String) + Send + 'static
-    {
-        use futures_util::StreamExt; // Import StreamExt trait locally to bring `next()` into scope
-        
-        let client = reqwest::Client::new();
-        let url = build_gemini_url(&self.model, api_key, "generateContent");
-        let request_body = self.build_gemini_stream_request_body(&messages)?;
-        
-        let mut callback = callback;
-        let mut full_response = String::new();
-        
-        let response = client.post(&url)
-            .json(&request_body)
-            .send()
-            .await?;
-            
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await?;
-            return Err(format!("API request failed ({}): {}", status, error_text).into());
-        }
-        
-        let mut stream = response.bytes_stream();
-        let mut buffer = String::new();
-        
-        while let Some(chunk_result) = stream.next().await {
-            match chunk_result {
-                Ok(chunk) => {
-                    // 将字节转换为字符串并添加到缓冲区
-                    let chunk_str = String::from_utf8_lossy(&chunk);
-                    buffer.push_str(&chunk_str);
-                    
-                    // 处理缓冲区中的所有完整消息
-                    while let Some(pos) = buffer.find(STREAM_DELIM) {
-                        let message = buffer[..pos].trim().to_string();
-                        buffer = buffer[pos + STREAM_DELIM.len()..].to_string();
-                        
-                        // 跳过空消息
-                        if message.is_empty() {
-                            continue;
-                        }
-                        
-                        // 处理数据前缀
-                        let content = if message.starts_with(STREAM_DATA_PREFIX) {
-                            &message[STREAM_DATA_PREFIX.len()..]
-                        } else {
-                            message.as_str()
-                        };
-                        
-                        // 检查流是否结束
-                        if content == STREAM_DONE_MARKER {
-                            break;
-                        }
-                        
-                        // 解析JSON响应
-                        match serde_json::from_str::<Value>(content) {
-                            Ok(json_value) => {
-                                if let Some(text) = extract_text_from_chunk(&json_value) {
-                                    if !text.is_empty() {
-                                        // 将文本块传递给回调函数
-                                        callback(text.clone());
-                                        full_response.push_str(&text);
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                eprintln!("Failed to parse JSON: {}", e);
-                                eprintln!("Invalid JSON: {}", content);
-                            }
-                        }
-                    }
-                },
-                Err(e) => {
-                    return Err(format!("Stream error: {}", e).into());
-                }
-            }
-        }
-        
-        // 如果完整响应为空，可能会出现错误
-        if full_response.is_empty() {
-            return Err("No text generated from the stream".into());
-        }
-        
-        // 返回完整的响应文本
-        Ok(full_response)
     }
 }
 
 // --- AIChat Trait Implementation ---
 
 impl AIChat for GeminiChat {
-    async fn generate_response(
-        &mut self,
-        api_key: ApiKey,
-        prompt: String,
-    ) -> Result<String, Box<dyn Error>> {
-        if api_key.key_type != ApiKeyType::Gemini {
-            return Err("Invalid API key type for Gemini".into());
-        }
-
-        // 创建用户消息
-        let user_message = chat_completion::ChatCompletionMessage {
-            role: MessageRole::user,
-            content: Content::Text(prompt.clone()),
-            name: None, tool_calls: None, tool_call_id: None,
-        };
-        
-        // 更新消息历史 (只添加用户消息，助手消息在获取响应后添加)
-        let mut current_messages = self.messages.clone();
-        current_messages.push(user_message);
-        
-        // 保存最后的提示
-        self.last_prompt = Some(prompt.clone());
-        
-        // 构建聊天指令 (使用 self.system_prompt)
-        // let chat_instruction = template::gemini_chat_instruction(); // 或者直接用 self.system_prompt
-        
-        // 调用Gemini API
-        // 注意：这里简化为不使用工具。如果需要工具，应调用 chat_gemini_with_tools
-        let response = self.chat_gemini(&api_key.key, current_messages.clone(), self.system_prompt.clone().as_str()).await?;
-        
-        // 创建助手消息
-        let assistant_message = chat_completion::ChatCompletionMessage {
-            role: MessageRole::assistant,
-            content: Content::Text(response.clone()),
-            name: None, tool_calls: None, tool_call_id: None,
-        };
-
-        // 更新完整消息历史
-        current_messages.push(assistant_message);
-        self.messages = current_messages;
-        
-        Ok(response)
-    }
-
-    async fn regenerate_response(&mut self, api_key: ApiKey) -> Result<String, Box<dyn Error>> {
-         if api_key.key_type != ApiKeyType::Gemini {
-            return Err("Invalid API key type for Gemini".into());
-        }
-        if self.messages.len() < 2 { // 需要至少一条用户消息和一条助手消息才能重新生成
-             return Err("Not enough context to regenerate response".into());
-        }
-
-        // 移除最后一条助手消息
-        if self.messages.last().map_or(false, |m| m.role == MessageRole::assistant) {
-            self.messages.pop();
-        } else {
-             return Err("Last message is not an assistant response, cannot regenerate.".into());
-        }
-        
-        // 获取移除助手消息后的当前消息列表
-        let current_messages = self.messages.clone();
-        
-        // 重新调用 Gemini API
-        let response = self.chat_gemini(&api_key.key, current_messages.clone(), self.system_prompt.clone().as_str()).await?;
-
-        // 添加新的助手消息
-        let assistant_message = chat_completion::ChatCompletionMessage {
-            role: MessageRole::assistant,
-            content: Content::Text(response.clone()),
-            name: None, tool_calls: None, tool_call_id: None,
-        };
-        self.messages.push(assistant_message);
-
-        // 更新 last_prompt (如果需要，但通常重新生成不需要改 last_prompt)
-        // self.last_prompt = self.messages.iter().rev().find(|m| m.role == MessageRole::user)...
-
-        Ok(response)
-    }
-
     fn withdraw_response(&mut self) -> Result<String, Box<dyn Error>> {
-        let mut removed_count = 0;
-        // 移除最后一条助手消息
-        if self.messages.last().map_or(false, |m| m.role == MessageRole::assistant) {
-            self.messages.pop();
-            removed_count += 1;
-        }
-        // 移除最后一条用户消息
-        if self.messages.last().map_or(false, |m| m.role == MessageRole::user) {
-            self.messages.pop();
-            removed_count += 1;
+        // 首先移除所有尾部的非用户消息
+        while let Some(message) = self.messages.last() {
+            if message.role != MessageRole::user {
+                self.messages.pop();
+            } else {
+                break;
+            }
         }
 
-        if removed_count > 0 {
-            // 更新 last_prompt 为撤回后的最后一条用户消息内容（如果存在）
-            self.last_prompt = self.messages.iter().rev()
-                .find(|m| m.role == MessageRole::user)
-                .and_then(|m| match &m.content {
-                    Content::Text(text) => Some(text.clone()),
-                    _ => None,
-                });
-            Ok(format!("Removed last {} message(s).", removed_count))
-        } else {
-            Err("No response to withdraw.".into())
+        // 然后检查是否还有用户消息可以移除
+        if let Some(last_message) = self.messages.last() {
+            if last_message.role == MessageRole::user {
+                // 获取用户消息的内容
+                let content = match &last_message.content {
+                    Content::Text(text) => text.clone(),
+                    _ => "".to_string(),
+                };
+
+                // 移除这条用户消息
+                self.messages.pop();
+
+                // 更新 last_prompt 为当前最后一条用户消息的内容（如果存在）
+                self.last_prompt = self
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == MessageRole::user)
+                    .and_then(|m| match &m.content {
+                        Content::Text(text) => Some(text.clone()),
+                        _ => None,
+                    });
+
+                return Ok(content);
+            }
         }
+
+        // 没有找到用户消息
+        Err("No user message to withdraw.".into())
     }
 
-    // ... (clear_context, set_system_prompt, set_parameter, serialize, deserialize 保持不变) ...
     fn clear_context(&mut self) -> Result<String, Box<dyn Error>> {
         self.messages.clear();
         self.last_prompt = None;
@@ -702,16 +787,32 @@ impl AIChat for GeminiChat {
     fn set_system_prompt(&mut self, prompt: String) -> Result<String, Box<dyn Error>> {
         self.system_prompt = prompt;
         // 可能需要清除现有消息，因为系统提示已更改
-        // self.messages.clear(); 
+        // self.messages.clear();
         // self.last_prompt = None;
         Ok("System prompt set. Consider clearing context if needed.".to_string())
     }
 
     fn set_parameter(&mut self, key: String, value: String) -> Result<(), Box<dyn Error>> {
         match key.as_str() {
-            "temperature" => self.temperature = value.parse::<f32>().map_err(|e| format!("Invalid temperature value: {}", e))?,
-            "max_tokens" => self.max_tokens = Some(value.parse::<u32>().map_err(|e| format!("Invalid max_tokens value: {}", e))?),
-            "top_p" => self.top_p = Some(value.parse::<f32>().map_err(|e| format!("Invalid top_p value: {}", e))?),
+            "temperature" => {
+                self.temperature = value
+                    .parse::<f32>()
+                    .map_err(|e| format!("Invalid temperature value: {}", e))?
+            }
+            "max_tokens" => {
+                self.max_tokens = Some(
+                    value
+                        .parse::<u32>()
+                        .map_err(|e| format!("Invalid max_tokens value: {}", e))?,
+                )
+            }
+            "top_p" => {
+                self.top_p = Some(
+                    value
+                        .parse::<f32>()
+                        .map_err(|e| format!("Invalid top_p value: {}", e))?,
+                )
+            }
             "model" => self.model = value,
             // 可以添加 top_k 等其他参数
             _ => return Err(format!("Unknown parameter: {}", key).into()),
@@ -732,7 +833,6 @@ impl AIChat for GeminiChat {
         Ok(())
     }
 
-
     async fn execute_tool_call(
         &mut self,
         _tool_name: String, // 参数名加下划线表示未使用
@@ -741,7 +841,10 @@ impl AIChat for GeminiChat {
         // 这个方法在 Gemini 的流程中可能不太直接适用
         // 因为工具调用是在 chat_gemini_with_tools 内部处理的
         // 如果需要外部触发工具调用，需要不同的设计
-        Err("Direct tool execution via this method is not implemented for the current Gemini flow.".into())
+        Err(
+            "Direct tool execution via this method is not implemented for the current Gemini flow."
+                .into(),
+        )
     }
 
     async fn generate_response_stream<F>(
@@ -751,7 +854,7 @@ impl AIChat for GeminiChat {
         callback: F,
     ) -> Result<String, Box<dyn Error>>
     where
-        F: FnMut(String) + Send + 'static
+        F: FnMut(String) + Send + 'static,
     {
         if api_key.key_type != ApiKeyType::Gemini {
             return Err("Invalid API key type for Gemini".into());
@@ -761,31 +864,109 @@ impl AIChat for GeminiChat {
         let user_message = chat_completion::ChatCompletionMessage {
             role: MessageRole::user,
             content: Content::Text(prompt.clone()),
-            name: None, tool_calls: None, tool_call_id: None,
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
         };
-        
+
         // 更新消息历史 (只添加用户消息，助手消息在获取响应后添加)
         let mut current_messages = self.messages.clone();
         current_messages.push(user_message);
-        
+
         // 保存最后的提示
         self.last_prompt = Some(prompt.clone());
-        
+
         // 使用流式API调用Gemini
-        let response = self.stream_gemini_chat(&api_key.key, current_messages.clone(), callback).await?;
-        
+        let response = self
+            .chat_stream(
+                &api_key.key,
+                &current_messages,
+                None,
+                true, // 使用真正的流式传输
+                callback,
+            )
+            .await?;
+
         // 创建助手消息并添加到历史
         let assistant_message = chat_completion::ChatCompletionMessage {
             role: MessageRole::assistant,
             content: Content::Text(response.clone()),
-            name: None, tool_calls: None, tool_call_id: None,
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
         };
 
         // 更新完整消息历史
         current_messages.push(assistant_message);
         self.messages = current_messages;
-        
+
         Ok(response)
+    }
+
+    async fn regenerate_response_stream<F>(
+        &mut self,
+        api_key: ApiKey,
+        callback: F,
+    ) -> Result<String, Box<dyn Error>>
+    where
+        F: FnMut(String) + Send + 'static,
+    {
+        if api_key.key_type != ApiKeyType::Gemini {
+            return Err("Invalid API key type for Gemini".into());
+        }
+        // 获取最后一条用户消息内容
+        let last_prompt = self.withdraw_response()?;
+        // 重新生成响应
+        self.generate_response_stream(api_key, last_prompt, callback).await
+    }
+
+    fn load_from(&mut self, chat_history: &ChatHistory) -> Result<(), Box<dyn Error>> {
+        self.messages = chat_history
+            .content
+            .iter()
+            .map(|msg| chat_completion::ChatCompletionMessage {
+                role: match msg.msgtype {
+                    ChatMessageType::User => MessageRole::user,
+                    ChatMessageType::Assistant => MessageRole::assistant,
+                    ChatMessageType::System => MessageRole::system,
+                },
+                content: Content::Text(msg.content.clone()),
+                name: Some(msg.time.clone()), // 假设时间戳作为名称
+                tool_calls: None,
+                tool_call_id: None,
+            })
+            .collect();
+        self.time = chat_history.time.clone();
+        self.title = chat_history.title.clone();
+        self.chat_id = chat_history.id;
+        Ok(())
+    }
+
+    fn save_to(&self) -> Result<ChatHistory, Box<dyn Error>> {
+        // 将消息转换为 ChatHistory 格式
+        let chat_history = ChatHistory {
+            content: self
+                .messages
+                .iter()
+                .map(|msg| ChatMessage {
+                    msgtype: match msg.role {
+                        MessageRole::user => ChatMessageType::User,
+                        MessageRole::assistant => ChatMessageType::Assistant,
+                        MessageRole::system => ChatMessageType::System,
+                        _ => ChatMessageType::User, // 默认处理
+                    },
+                    content: match &msg.content {
+                        Content::Text(text) => text.clone(),
+                        _ => "".to_string(), // 其他类型的内容可以根据需要处理
+                    },
+                    time: msg.name.clone().unwrap_or_default(), // 假设名称作为时间戳
+                })
+                .collect(),
+            time: self.time.clone(),
+            title: self.title.clone(),
+            id: self.chat_id,
+        };
+        Ok(chat_history)
     }
 }
 
@@ -795,7 +976,7 @@ impl AIChat for GeminiChat {
 pub async fn image_to_text(api_key: &str, image_data: &[u8]) -> Result<String, Box<dyn Error>> {
     let client = reqwest::Client::new();
     let base64_image = base64::engine::general_purpose::STANDARD.encode(image_data);
-    
+
     let request_json = json!({
         "contents": [{
             "parts": [
@@ -805,42 +986,18 @@ pub async fn image_to_text(api_key: &str, image_data: &[u8]) -> Result<String, B
         }]
         // 可以添加 generationConfig 和 safetySettings
     });
-    
-    // 使用 gemini-1.5-flash 或其他支持视觉的模型
-    let model = "gemini-1.5-flash-latest"; 
-    let url = build_gemini_url(model, api_key, "generateContent"); 
 
-    let response = client.post(&url)
-        .json(&request_json)
-        .send()
-        .await?;
-        
+    let model = "gemini-2.0-flash";
+    let url = build_gemini_url(model, api_key, "generateContent");
+
+    let response = client.post(&url).json(&request_json).send().await?;
+
     let status = response.status(); // Store status before consuming response
     if !response.status().is_success() {
         let error_text = response.text().await?;
         return Err(format!("API request failed ({}): {}", status, error_text).into());
     }
-    
+
     let response_json: Value = response.json().await?;
     parse_gemini_response(&response_json) // 复用解析逻辑
 }
-
-/// 从JSON响应流中提取文本
-fn extract_text_from_chunk(chunk: &Value) -> Option<String> {
-    // 提取Gemini响应中的文本部分
-    if let Some(candidates) = chunk.get("candidates").and_then(|c| c.as_array()) {
-        if let Some(candidate) = candidates.get(0) {
-            if let Some(content) = candidate.get("content") {
-                if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
-                    if let Some(part) = parts.get(0) {
-                        if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                            return Some(text.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
