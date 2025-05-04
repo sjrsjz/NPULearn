@@ -1,5 +1,5 @@
 use crate::aibackend::interface::AIChat;
-use crate::aibackend::template;
+use crate::aibackend::template::{self, gemini_chat_instruction};
 use crate::{ChatHistory, ChatMessage, ChatMessageType};
 use base64::Engine;
 use futures_util::StreamExt;
@@ -15,6 +15,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use super::apikey::{ApiKey, ApiKeyType};
+use super::template::{cot_template, TypesetInfo};
 
 // --- Enums and Structs ---
 
@@ -433,13 +434,27 @@ impl GeminiChat {
         }
     }
 
+    fn build_system_instruction(&self) -> String {
+        return cot_template(&[
+            TypesetInfo {
+                name: "mermaid_render".to_string(),
+                description: "render mermaid graph".to_string(),
+                detail: "render mermaid graph by using codeblock where lang=`mermaid`, replace `tool_code` and just render `mermaid`".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args
+                },
+            }
+        ], &self.system_prompt);
+    }
+
     /// 转换OpenAI格式的消息为Gemini格式的请求体
     fn build_gemini_request_body(
         &self,
         messages: &[chat_completion::ChatCompletionMessage],
         tools: Option<&[chat_completion::Tool]>,
     ) -> Result<Value, Box<dyn Error>> {
-        let gemini_messages: Vec<Value> = messages
+        let mut gemini_messages: Vec<Value> = messages
             .iter()
             .filter_map(|message| {
                 if let Content::Text(content) = &message.content {
@@ -507,6 +522,14 @@ impl GeminiChat {
             })
             .collect();
 
+        gemini_messages.insert(
+            0,
+            json!({
+                "role": "model",
+                "parts": [{ "text": format!("{}\n", self.build_system_instruction()) }]
+            }),
+        ); // 添加系统指令
+
         let mut request_body = json!({
             "contents": gemini_messages,
             "generationConfig": {
@@ -515,6 +538,7 @@ impl GeminiChat {
                 "topK": 40, // 保留或设为可选
                 "maxOutputTokens": self.max_tokens, //.unwrap_or(8192), // 使用 Option 类型
                 //"responseMimeType": "text/plain", // 通常不需要
+
             },
             "safetySettings": [
                 { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE" },
@@ -540,7 +564,15 @@ impl GeminiChat {
                 }
             }
         }
-
+        if !self.system_prompt.is_empty() {
+            // Use as_object_mut to modify the existing JSON Value
+            if let Some(obj) = request_body.as_object_mut() {
+                obj.insert(
+                    "systemInstruction".to_string(),
+                    json!({ "parts": [{"text": gemini_chat_instruction()}] }), // Correct Gemini format
+                );
+            }
+        }
         Ok(request_body)
     }
 
@@ -917,7 +949,8 @@ impl AIChat for GeminiChat {
         // 获取最后一条用户消息内容
         let last_prompt = self.withdraw_response()?;
         // 重新生成响应
-        self.generate_response_stream(api_key, last_prompt, callback).await
+        self.generate_response_stream(api_key, last_prompt, callback)
+            .await
     }
 
     fn load_from(&mut self, chat_history: &ChatHistory) -> Result<(), Box<dyn Error>> {

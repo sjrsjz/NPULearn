@@ -360,7 +360,7 @@ pub async fn process_chatbot_typeset(
     kwargs: HashMap<String, String>
 ) -> String {
     let mut result = String::new();
-    let mut parts = parse_message(message);
+    let parts = parse_message(message);
 
     for part in parts {
         match part {

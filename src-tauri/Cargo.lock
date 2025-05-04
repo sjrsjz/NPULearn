@@ -714,6 +714,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
+name = "colored"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
+dependencies = [
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2467,7 +2476,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e9ec52138abedcc58dc17a7c6c0c00a2bdb4f3427c7f63fa97fd0d859155caf"
 dependencies = [
  "gtk-sys",
- "libloading",
+ "libloading 0.7.4",
  "once_cell",
 ]
 
@@ -2485,6 +2494,16 @@ checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
 dependencies = [
  "cfg-if",
  "winapi",
+]
+
+[[package]]
+name = "libloading"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
+dependencies = [
+ "cfg-if",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -2765,6 +2784,7 @@ dependencies = [
  "tauri-plugin-http",
  "tauri-plugin-opener",
  "tokio",
+ "xlang_frontend",
 ]
 
 [[package]]
@@ -6544,6 +6564,36 @@ checksum = "ec1cdab258fb55c0da61328dc52c8764709b249011b2cad0454c72f0bf10a1f6"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "xlang_frontend"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "764aded4312139f2f1ad2bb77860827debc172bdff06df12d184095d87a15dc7"
+dependencies = [
+ "base64 0.22.1",
+ "colored",
+ "regex",
+ "unicode-segmentation",
+ "xlang_vm_core",
+]
+
+[[package]]
+name = "xlang_vm_core"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6b6b490aa3b781b7f6028c19c0755e29dece1a72f3e0a340501f5a6437efb23"
+dependencies = [
+ "base64 0.22.1",
+ "bincode",
+ "colored",
+ "lazy_static",
+ "libloading 0.8.6",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "unicode-segmentation",
 ]
 
 [[package]]
