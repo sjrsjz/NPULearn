@@ -844,6 +844,10 @@ function updateChatContent(messages: ChatMessage[]) {
     // 滚动到底部
     scrollToBottom(true);
 
+    if (!isStreaming.value) {
+      console.log("消息更新完成，开始处理延迟的渲染任务");
+      completeStreamRendering();
+    }
   });
 }
 
@@ -871,10 +875,8 @@ async function setupStreamListeners() {
     isStreaming.value = false;
     isLoading.value = false;
 
-    const chatContent = await invoke("get_chat_html") as ChatMessage[]; 
-    // 使用新的完成函数处理渲染
+    const chatContent = await invoke("get_chat_html") as ChatMessage[];
     updateChatContent(chatContent);
-    completeStreamRendering();
   });
 
   // 在组件卸载时清理事件监听

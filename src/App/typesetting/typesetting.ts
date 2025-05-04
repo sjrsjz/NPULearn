@@ -10,7 +10,7 @@ import { isStreaming, AppEvents } from '../eventBus';
 
 // 主函数：应用代码高亮和处理各种特殊代码块
 async function applyHighlight(): Promise<void> {
-    //await nextTick(); // 确保 DOM 更新完成
+    await nextTick(); // 确保 DOM 更新完成
     const timestamp = Date.now();
 
     // 查找所有代码块
@@ -317,40 +317,74 @@ function schedulePostHighlightTasks(): void {
     });
 }
 
-// 修复流式传输完成后的渲染问题
 function completeStreamRendering(): void {
     console.log("流式传输完成，执行延迟的渲染任务");
 
-    // 首先标记需要重新渲染的容器
+    // 标记需要重新渲染的Mermaid容器
     document.querySelectorAll('.mermaid-container:not(.loaded)').forEach(container => {
-        // 确保移除任何可能阻止重新渲染的属性
         container.removeAttribute('data-last-rendered');
+        // 添加一个标志，防止重复处理
+        container.setAttribute('data-pending-render', 'true');
     });
 
-    // 使用多阶段渲染策略，确保渲染可靠性
-    setTimeout(() => {
-        // 第一轮渲染
-        renderMermaidDiagrams(0, 3).then(() => {
-            // 检查是否有容器没有成功渲染
-            const unrenderedCount = document.querySelectorAll('.mermaid-container:not(.loaded)').length;
+    // 处理工具代码块
+    document.querySelectorAll('.tool-code-container').forEach(async container => {
+        const originalCodeElem = container.querySelector('.tool-code-original code');
+        if (originalCodeElem && originalCodeElem.textContent) {
+            const codeContent = originalCodeElem.textContent.trim();
 
+            // 重新处理工具代码
+            try {
+                await processToolCode(container as HTMLDivElement, codeContent);
+            } catch (error) {
+                console.error("重新处理工具代码失败:", error);
+                handleToolCodeError(container as HTMLDivElement, error, codeContent);
+            }
+        }
+    });
+
+    // 使用更稳健的渲染策略，增加延迟确保DOM已准备好
+    setTimeout(() => {
+        console.log("开始第一轮Mermaid图表渲染");
+        // 检查渲染前的图表数量
+        const beforeRenderCount = document.querySelectorAll('.mermaid-container').length;
+        console.log(`渲染前找到 ${beforeRenderCount} 个Mermaid容器`);
+
+        // 第一轮渲染
+        renderMermaidDiagrams(0, 5).then(() => {
+            // 检查渲染结果
+            const unrenderedCount = document.querySelectorAll('.mermaid-container:not(.loaded)').length;
+            const renderedCount = document.querySelectorAll('.mermaid-container.loaded').length;
+            console.log(`第一轮渲染后: 已渲染 ${renderedCount} 个图表, 未渲染 ${unrenderedCount} 个图表`);
+
+            // 如果仍有未渲染的图表，进行第二轮渲染
             if (unrenderedCount > 0) {
-                console.log(`第一轮渲染后仍有 ${unrenderedCount} 个图表未渲染，进行第二轮渲染`);
-                // 延迟第二轮渲染
+                console.log(`进行第二轮渲染`);
+                // 增加延迟时间，确保DOM更新完成
                 setTimeout(() => {
-                    renderMermaidDiagrams(0, 3).then(() => {
+                    renderMermaidDiagrams(0, 5).then(() => {
+                        // 处理按钮和刷新逻辑
+                        console.log("渲染完成，设置刷新和交互按钮");
                         setupMermaidRefresh();
                         setupInteractiveButtons();
+
+                        // 再增加一个保险措施，确保图表可见
+                        document.querySelectorAll('.mermaid-container').forEach(container => {
+                            if (container.querySelector('svg')) {
+                                container.classList.add('loaded');
+                                container.querySelector('.mermaid-loading')?.remove();
+                            }
+                        });
                     });
-                }, 500);
+                }, 800); // 增加延迟
             } else {
+                console.log("所有图表已在第一轮渲染完成");
                 setupMermaidRefresh();
                 setupInteractiveButtons();
             }
         });
-    }, 400);
+    }, 700); // 增加初始延迟
 }
-
 /**
  * 解析工具代码AST，提取API调用的关键信息
  * @param ast 解析后的AST JSON对象
