@@ -49,7 +49,7 @@ You should use five headers to guide the reasoning process: `understand`, `think
 + **<|start_header|>verify<|end_header|>**(Chinese): Reevaluate your analysis, checking for mistakes in reasoning, logic, or facts. Refine your thoughts as necessary.
     + Ensure that you have not made any mistakes in your reasoning process.
     +**IF YOU FOUND ANY ERROR, output `<|start_header|>think<|end_header|>` and start new turn of `Chain of Thought`**
-+ **<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>**(Chinese): Present the final response to the user. It must contain your verify and analysis.
++ **<|start_header|>typeset_and_respond<|end_header|>**(Chinese): Present the final response to the user. It must contain your verify and analysis.
     + This step *cannot* be skipped.
     + Ensure your response follows your output format and maintains your personality.
     + Respond like a real person, not a robot.
@@ -58,12 +58,12 @@ You should use five headers to guide the reasoning process: `understand`, `think
 
 ### Important Notes:
 - **Consistency**: Always follow the multi-step reasoning from start to finish.
-- **Visibility**: Only the response after the "<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>" will be visible to the user. All other steps are part of your internal reasoning process.
+- **Visibility**: Only the response after the "<|start_header|>typeset_and_respond<|end_header|>" will be visible to the user. All other steps are part of your internal reasoning process.
 - **Think** is very important to you when you answer question.
-- You CANNOT skip `<|gather_information_and_respond_by_using_typesetting_format|>`, it is the most important part of your response
+- You CANNOT skip `<|typeset_and_respond|>`, it is the most important part of your response
 
 ### Reminder:
-- Make sure your final response after "<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>" is accurate, as only this part will be visible to the user.
+- Make sure your final response after "<|start_header|>typeset_and_respond<|end_header|>" is accurate, as only this part will be visible to the user.
 - Never repeat the same content or similar patterns, always generate new content. Even the same question, you should generate different content.
 - Always following these steps:
     > Understand (In Chinese) -> Self-Think (In Chinese) -> Verify and check your errors (In Chinese) -> Respond(In Chinese, required)
@@ -77,18 +77,15 @@ You should use five headers to guide the reasoning process: `understand`, `think
 ...
 @enduml
 ...(your understanding, in `PlantUML` language)
-READY for `think`
 <|start_header|>think<|end_header|>
 @startuml
 ...
 @enduml
 ...(your thinking, in `PlantUML` language)
-READY for `verify`
 <|start_header|>verify<|end_header|>
 ...(your verify)
 ...(many turns)
-READY for `gather_information_and_respond_by_using_typesetting_format`
-<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|> (REQUIRED)
+<|start_header|>typeset_and_respond<|end_header|> (REQUIRED)
 (many typesetting format use `tool_code`)
 ...
 (your response)
@@ -99,7 +96,7 @@ READY for `gather_information_and_respond_by_using_typesetting_format`
 
 NEVER WRITE YOUR RESONSE IN CODE BLOCK
 
-Your response should contains **at least one** `<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>` to ensure the response is visible to the user."#;
+Your response should contains **at least one** `<|start_header|>typeset_and_respond<|end_header|>` to ensure the response is visible to the user."#;
 
 #[allow(dead_code)]
 fn gemini_template(typesetting: &str, character_description: &str) -> String {
@@ -116,7 +113,7 @@ fn gemini_template(typesetting: &str, character_description: &str) -> String {
 
 {}
 
-# Remeber, all the typesetting format should be written after `<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>` to apply them, otherwise they will be treated as normal text.
+# Remeber, all the typesetting format should be written after `<|start_header|>typeset_and_respond<|end_header|>` to apply them, otherwise they will be treated as normal text.
 
 You can generate your own content freely, **e.g., generate images, sending audio, chat with users, render Markdown, just use one of them or combine them.**
 
@@ -287,7 +284,7 @@ pub fn extract_response(text: &str) -> Option<String> {
             for s3 in &separators {
                 for s4 in &separators {
                     let pattern = format!(
-                        "{}{}start_header{}{}gather_information_and_respond_by_using_typesetting_format{}{}end_header{}{}",
+                        "{}{}start_header{}{}typeset_and_respond{}{}end_header{}{}",
                         brackets_start[0], s1, s2, brackets_end[0],
                         brackets_start[0], s3, s4, brackets_end[0]
                     );
@@ -514,7 +511,7 @@ Some understanding text
 Some thinking
 <|start_header|>verify<|end_header|>
 Verification
-<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>
+<|start_header|>typeset_and_respond<|end_header|>
 This is the actual response
 ```tool_code
 print(default_api.send_image(url="https://example.com/image.jpg"))

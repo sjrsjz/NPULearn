@@ -2,7 +2,7 @@ use comrak::{markdown_to_html, ComrakOptions};
 
 pub fn convert_markdown_with_latex(markdown: &str) -> String {
     // 将输入的 markdown 按照特殊标记分割成思考过程和最终回答
-    let parts: Vec<&str> = markdown.split("<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>").collect();
+    let parts: Vec<&str> = markdown.split("<|start_header|>typeset_and_respond<|end_header|>").collect();
     
     // 设置 Comrak Markdown 转换选项
     let mut options = ComrakOptions::default();
@@ -23,7 +23,7 @@ pub fn convert_markdown_with_latex(markdown: &str) -> String {
     // 收集所有中间思考过程
     let thinking_parts = &parts[0..parts.len() - 1];
     if !thinking_parts.is_empty() {
-        let thinking_content = thinking_parts.join("<|start_header|>gather_information_and_respond_by_using_typesetting_format<|end_header|>");
+        let thinking_content = thinking_parts.join("<|start_header|>typeset_and_respond<|end_header|>");
         let html_thinking = markdown_to_html(&thinking_content, &options);
 
         result.push_str("<details class=\"thinking-details\">\n");

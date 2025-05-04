@@ -420,217 +420,296 @@ async function loadChatHistory() {
   }
   updateChatContent(chatContent.value); // 确保在加载历史后更新内容
 }
-
 // 处理聊天内容，隔离样式
 const processedChatContent = ref("");
-async function applyHighlight() {
-  await nextTick(); // 确保 DOM 更新完成
-  // 查找所有代码块并应用高亮
-  const codeElements = document.querySelectorAll('.chat-messages pre code');
 
+// 主函数：应用代码高亮和处理各种特殊代码块
+async function applyHighlight(): Promise<void> {
+  await nextTick(); // 确保 DOM 更新完成
+
+  // 查找所有代码块
+  const codeElements = document.querySelectorAll('.chat-messages pre code');
+  if (!codeElements || codeElements.length === 0) return;
+
+  console.log(`处理 ${codeElements.length} 个代码块`);
+
+  // 对常规代码块应用高亮
+  await applyCodeHighlight(codeElements);
+
+  // 处理工具代码块
+  await processToolCodeBlocks(codeElements);
+
+  // 为普通代码块设置复制按钮和其他交互功能
+  await setupCodeBlockActions(codeElements);
+
+  // 根据是否在流式传输中决定如何处理图表渲染
+  if (!isReceivingStream.value) {
+    schedulePostHighlightTasks();
+  } else {
+    console.log("流式传输中，推迟渲染任务");
+  }
+}
+
+// 为常规代码块应用高亮
+async function applyCodeHighlight(codeElements: NodeListOf<Element>): Promise<void> {
   for (const el of codeElements) {
     const preElement = el.parentElement as HTMLPreElement | null;
     if (!preElement) continue;
+
+    // 应用高亮库
     hljs.highlightElement(el as HTMLElement);
+  }
+}
+
+// 处理工具代码块
+async function processToolCodeBlocks(codeElements: NodeListOf<Element>): Promise<void> {
+  for (const el of codeElements) {
+    // 跳过非tool_code代码块
+    if (!el.classList.contains('language-tool_code')) continue;
+
     const codeContent = el.textContent?.trim() || '';
     if (!codeContent) continue;
 
-    // 检测是否为 mermaid 代码块
-    if (el.classList.contains('language-mermaid')) {
-      const preElement = el.parentElement;
-      if (!preElement) return;
+    const preElement = el.parentElement;
+    if (!preElement) continue;
 
-      // 获取 mermaid 代码内容
-      const mermaidContent = el.textContent?.trim() || '';
+    console.log("检测到 tool_code 代码块:", codeContent);
 
-      if (!mermaidContent) return;
+    // 创建工具代码容器
+    const toolCodeContainer = document.createElement('div');
+    toolCodeContainer.className = 'tool-code-container';
 
-      // 创建唯一的图表ID
-      const diagramId = `mermaid-diagram-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    // 设置加载状态并保留原始代码
+    toolCodeContainer.innerHTML = `
+      <div class="tool-code-loading">正在解析工具代码...</div>
+      <pre class="tool-code-original"><code>${codeContent}</code></pre>
+    `;
 
-      // 编码内容，以便在属性中安全存储
-      const encodedContent = encodeURIComponent(mermaidContent);
+    // 替换原始的 pre 元素
+    preElement.parentNode?.replaceChild(toolCodeContainer, preElement);
 
-      // 创建 mermaid 容器 - 根据流式传输状态显示不同内容
-      const mermaidContainer = document.createElement('div');
-      mermaidContainer.className = 'mermaid-container';
-      mermaidContainer.setAttribute('data-diagram-id', diagramId);
-      mermaidContainer.setAttribute('data-diagram-content', encodedContent);
-
-      // 根据是否在流式传输中显示不同的内容
-      if (isReceivingStream.value) {
-        mermaidContainer.innerHTML = `
-            <div class="mermaid-loading">
-              <div class="placeholder-box">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path>
-                  <path d="M10 2c1 .5 2 2 2 5"></path>
-                </svg>
-                <div>UML图表将在消息完整接收后渲染</div>
-              </div>
-              <div class="mermaid-preview">
-                <div class="preview-header">代码预览：</div>
-                <pre class="preview-code">${mermaidContent}</pre>
-              </div>
-            </div>`;
-        console.log(`流式传输中: 为 mermaid 代码块创建带预览的占位符容器 ${diagramId}`);
-      } else {
-        mermaidContainer.innerHTML = `<div class="mermaid-loading">UML图表加载中...</div>`;
-        console.log(`已将 language-mermaid 代码块转换为 mermaid 渲染容器: ${diagramId}`);
-      }
-
-      // 替换原始的 pre 元素
-      preElement.parentNode?.replaceChild(mermaidContainer, preElement);
+    try {
+      await processToolCode(toolCodeContainer, codeContent);
+    } catch (error) {
+      handleToolCodeError(toolCodeContainer, error, codeContent);
     }
-    // 新增：检测是否为 tool_code 代码块并进行处理
-    else if (el.classList.contains('language-tool_code')) {
-      console.log("检测到 tool_code 代码块:", codeContent);
+  }
+}
 
-      // 创建工具代码容器
-      const toolCodeContainer = document.createElement('div');
-      toolCodeContainer.className = 'tool-code-container';
+// 处理工具代码的逻辑
+async function processToolCode(toolCodeContainer: HTMLDivElement, codeContent: string): Promise<void> {
+  // 调用后端解析代码
+  const astResult = await invoke<string>("parse_code", { code: codeContent });
+  console.log("AST 解析结果:", astResult);
 
-      // 设置加载状态并保留原始代码
-      toolCodeContainer.innerHTML = `
-        <div class="tool-code-loading">正在解析工具代码...</div>
-        <pre class="tool-code-original"><code>${codeContent}</code></pre>
-      `;
+  // 解析AST JSON并处理
+  const astJson = JSON.parse(astResult);
+  const apiInfo = parseApiCall(astJson);
 
-      // 替换原始的 pre 元素
-      preElement.parentNode?.replaceChild(toolCodeContainer, preElement);
+  if (apiInfo) {
+    // 根据是否在流式传输中决定显示内容
+    if (isReceivingStream.value) {
+      // 流式传输中只显示解析结果和预览
+      toolCodeContainer.innerHTML = createToolCodeStreamingView(apiInfo, codeContent);
 
-      try {
-        // 调用后端解析代码
-        const astResult = await invoke<string>("parse_code", { code: codeContent });
-        console.log("AST 解析结果:", astResult);
-
-        // 解析AST JSON并处理
-        const astJson = JSON.parse(astResult);
-        const apiInfo = parseApiCall(astJson);
-
-        if (apiInfo) {
-          // 如果成功解析出API调用信息，显示结构化结果
-          toolCodeContainer.innerHTML = `
-            <div class="tool-code-header">工具代码解析结果:</div>
-            <div class="tool-code-result">
-              <div class="tool-api-info">
-                <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
-                <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
-                ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
-          ).join('')}
-              </div>
-            </div>
-            <details class="tool-code-details">
-              <summary>查看AST详情</summary>
-              <pre class="tool-code-ast"><code>${JSON.stringify(astJson, null, 2)}</code></pre>
-            </details>
-            <div class="tool-code-header original-header">原始代码:</div>
-            <pre class="tool-code-original"><code>${codeContent}</code></pre>
-          `;
-        } else {
-          // 如果解析失败，显示原始AST结果
-          toolCodeContainer.innerHTML = `
-            <div class="tool-code-header">工具代码 AST:</div>
-            <pre class="tool-code-ast"><code>${JSON.stringify(JSON.parse(astResult), null, 2)}</code></pre>
-            <div class="tool-code-header original-header">原始代码:</div>
-            <pre class="tool-code-original"><code>${codeContent}</code></pre>
-          `;
-        }
-
-        // 对AST结果应用高亮
-        const astCodeElement = toolCodeContainer.querySelector('.tool-code-ast code');
-        if (astCodeElement) {
-          hljs.highlightElement(astCodeElement as HTMLElement);
-        }
-
-        // 对原始代码应用高亮
-        const originalCodeElement = toolCodeContainer.querySelector('.tool-code-original code');
-        if (originalCodeElement) {
-          hljs.highlightElement(originalCodeElement as HTMLElement);
-        }
-      } catch (error) {
-        console.error("解析 tool_code 失败:", error);
-        // 显示错误信息
-        toolCodeContainer.innerHTML = `
-          <div class="tool-code-error">解析工具代码失败:</div>
-          <pre class="tool-code-error-message">${error instanceof Error ? error.message : String(error)}</pre>
-          <div class="tool-code-header original-header">原始代码:</div>
-          <pre class="tool-code-original"><code>${codeContent}</code></pre>
-        `;
-
-        // 确保原始代码也被高亮
-        const originalCodeElement = toolCodeContainer.querySelector('.tool-code-original code');
-        if (originalCodeElement) {
-          hljs.highlightElement(originalCodeElement as HTMLElement);
-        }
+      // 确保原始代码被高亮显示
+      const originalCodeElement = toolCodeContainer.querySelector('.tool-code-original code');
+      if (originalCodeElement) {
+        hljs.highlightElement(originalCodeElement as HTMLElement);
       }
+    } else {
+      // 消息完整接收后，处理特殊API功能
+      toolCodeContainer.innerHTML = processApiCallResult(apiInfo, astJson, codeContent);
     }
-    else {
-      // 为非 mermaid 的代码块添加复制按钮
-      const preElement = el.parentElement;
-      if (!preElement || preElement.querySelector('.code-copy-button')) return;
+  } else {
+    // 解析失败时显示原始AST结果
+    toolCodeContainer.innerHTML = createToolCodeFallbackView(astResult, codeContent);
 
-      // 获取代码内容
-      const codeContent = el.textContent || '';
+    // 高亮显示AST和原始代码
+    highlightToolCodeElements(toolCodeContainer);
+  }
+}
 
-      // 创建复制按钮
-      const copyButton = document.createElement('button');
-      copyButton.className = 'code-copy-button';
+// 创建工具代码流式视图
+function createToolCodeStreamingView(apiInfo: any, codeContent: string): string {
+  return `
+    <div class="tool-code-header">工具代码解析结果:</div>
+    <div class="tool-code-result">
+      <div class="tool-api-info">
+        <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
+        <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
+        ${Object.entries(apiInfo.arguments).map(([key, value]) =>
+    `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
+  ).join('')}
+      </div>
+    </div>
+    <div class="api-call-notice">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span>API功能将在消息完整接收后处理</span>
+    </div>
+    <pre class="tool-code-original"><code>${codeContent}</code></pre>
+  `;
+}
+
+// 创建工具代码的备用视图（解析失败时）
+function createToolCodeFallbackView(astResult: string, codeContent: string): string {
+  return `
+    <div class="tool-code-header">工具代码 AST:</div>
+    <pre class="tool-code-ast"><code>${JSON.stringify(JSON.parse(astResult), null, 2)}</code></pre>
+    <div class="tool-code-header original-header">原始代码:</div>
+    <pre class="tool-code-original"><code>${codeContent}</code></pre>
+  `;
+}
+
+// 处理工具代码错误
+function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unknown, codeContent: string): void {
+  console.error("解析 tool_code 失败:", error);
+
+  // 显示错误信息
+  toolCodeContainer.innerHTML = `
+    <div class="tool-code-error">解析工具代码失败:</div>
+    <pre class="tool-code-error-message">${error instanceof Error ? error.message : String(error)}</pre>
+    <div class="tool-code-header original-header">原始代码:</div>
+    <pre class="tool-code-original"><code>${codeContent}</code></pre>
+  `;
+
+  // 确保原始代码也被高亮
+  const originalCodeElement = toolCodeContainer.querySelector('.tool-code-original code');
+  if (originalCodeElement) {
+    hljs.highlightElement(originalCodeElement as HTMLElement);
+  }
+}
+
+// 高亮工具代码元素
+function highlightToolCodeElements(container: HTMLDivElement): void {
+  // 对AST结果应用高亮
+  const astCodeElement = container.querySelector('.tool-code-ast code');
+  if (astCodeElement) {
+    hljs.highlightElement(astCodeElement as HTMLElement);
+  }
+
+  // 对原始代码应用高亮
+  const originalCodeElement = container.querySelector('.tool-code-original code');
+  if (originalCodeElement) {
+    hljs.highlightElement(originalCodeElement as HTMLElement);
+  }
+}
+
+// 设置代码块的交互功能（复制按钮等）
+async function setupCodeBlockActions(codeElements: NodeListOf<Element>): Promise<void> {
+  for (const el of codeElements) {
+    const preElement = el.parentElement;
+    // 跳过已经处理过的或特殊类型的代码块
+    if (!preElement ||
+      preElement.querySelector('.code-copy-button') ||
+      el.classList.contains('language-mermaid') ||
+      el.classList.contains('language-tool_code')) continue;
+
+    // 获取代码内容
+    const codeContent = el.textContent || '';
+
+    // 创建并添加复制按钮
+    addCopyButtonToCodeBlock(preElement, codeContent);
+  }
+}
+
+// 为代码块添加复制按钮
+function addCopyButtonToCodeBlock(preElement: Element, codeContent: string): void {
+  // 创建复制按钮
+  const copyButton = document.createElement('button');
+  copyButton.className = 'code-copy-button';
+  copyButton.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+    </svg>
+  `;
+  copyButton.title = "复制代码";
+
+  // 添加点击事件
+  copyButton.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      await writeText(codeContent);
+      // 临时更改按钮状态
       copyButton.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 6L9 17l-5-5"></path>
+        </svg>
+      `;
+      copyButton.classList.add('success');
+
+      // 2秒后恢复原样
+      setTimeout(() => {
+        copyButton.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
           </svg>
         `;
-      copyButton.title = "复制代码";
+        copyButton.classList.remove('success');
+      }, 2000);
 
-      // 添加点击事件
-      copyButton.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try {
-          await writeText(codeContent);
-          // 临时更改按钮状态
-          copyButton.innerHTML = `
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20 6L9 17l-5-5"></path>
-              </svg>
-            `;
-          copyButton.classList.add('success');
-
-          // 2秒后恢复原样
-          setTimeout(() => {
-            copyButton.innerHTML = `
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-              `;
-            copyButton.classList.remove('success');
-          }, 2000);
-
-          showNotification("代码已复制到剪贴板", "success");
-        } catch (error) {
-          console.error("复制代码失败:", error);
-          showNotification("复制代码失败", "error");
-        }
-      });
-
-      // 添加复制按钮到 pre 元素
-      preElement.classList.add('code-block-with-copy');
-      preElement.appendChild(copyButton);
+      showNotification("代码已复制到剪贴板", "success");
+    } catch (error) {
+      console.error("复制代码失败:", error);
+      showNotification("复制代码失败", "error");
     }
-  }
+  });
 
-  // 代码高亮和mermaid处理完成后，触发图表渲染
-  // 但仅在非流式传输状态下进行
-  if (!isReceivingStream.value) {
+  // 添加复制按钮到 pre 元素
+  preElement.classList.add('code-block-with-copy');
+  preElement.appendChild(copyButton);
+}
+
+// 处理高亮后需要执行的任务
+function schedulePostHighlightTasks(): void {
+  // 使用 Promise.resolve() 和 setTimeout 来确保这些任务在当前事件循环之后执行
+  Promise.resolve().then(() => {
     setTimeout(() => {
       renderMermaidDiagrams();
+      setupInteractiveButtons(); // 设置交互按钮
     }, 300);
-  } else {
-    console.log("流式传输中，跳过Mermaid图表渲染");
-  }
+  });
+}
+
+// 修复流式传输完成后的渲染问题
+function completeStreamRendering(): void {
+  isReceivingStream.value = false;
+  console.log("流式传输完成，执行延迟的渲染任务");
+
+  // 首先标记需要重新渲染的容器
+  document.querySelectorAll('.mermaid-container:not(.loaded)').forEach(container => {
+    // 确保移除任何可能阻止重新渲染的属性
+    container.removeAttribute('data-last-rendered');
+  });
+
+  // 使用多阶段渲染策略，确保渲染可靠性
+  setTimeout(() => {
+    // 第一轮渲染
+    renderMermaidDiagrams(0, 3).then(() => {
+      // 检查是否有容器没有成功渲染
+      const unrenderedCount = document.querySelectorAll('.mermaid-container:not(.loaded)').length;
+
+      if (unrenderedCount > 0) {
+        console.log(`第一轮渲染后仍有 ${unrenderedCount} 个图表未渲染，进行第二轮渲染`);
+        // 延迟第二轮渲染
+        setTimeout(() => {
+          renderMermaidDiagrams(0, 3).then(() => {
+            setupMermaidRefresh();
+            setupInteractiveButtons();
+          });
+        }, 500);
+      } else {
+        setupMermaidRefresh();
+        setupInteractiveButtons();
+      }
+    });
+  }, 400);
 }
 
 /**
@@ -763,46 +842,202 @@ function parseApiCall(ast: any) {
   }
 }
 
+/**
+ * 处理特殊API调用，生成对应的HTML内容
+ * @param apiInfo 解析出的API调用信息
+ * @returns 处理后的HTML内容，如果无法处理则返回null
+ */
+function handleSpecialApiCall(apiInfo: any): string | null {
+  // 只处理default_api的调用
+  if (apiInfo.api_name !== 'default_api') {
+    return null;
+  }
 
+  // 根据函数名分发到不同的处理函数
+  switch (apiInfo.function_name) {
+    case 'mermaid_render':
+      return handleMermaidRender(apiInfo);
+    case 'interactive_button':
+      return handleInteractiveButton(apiInfo);
+    // 在这里可以方便地添加新的函数处理
+    default:
+      return null; // 不认识的函数调用，返回null使用默认显示
+  }
+}
+
+/**
+ * 处理mermaid_render API调用
+ * @param apiInfo API调用信息
+ * @returns 生成的HTML内容
+ */
+function handleMermaidRender(apiInfo: any): string {
+  // 获取mermaid代码参数
+  const mermaidCode = apiInfo.arguments.mermaid_code || '';
+  
+  // 创建唯一的图表ID
+  const diagramId = `mermaid-diagram-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  
+  // 编码内容，以便在属性中安全存储
+  const encodedContent = encodeURIComponent(mermaidCode);
+  
+  // 构建HTML
+  return `
+    <div class="special-api-call mermaid-api-call">
+      <div class="api-call-header">
+        <span class="api-call-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path>
+            <path d="M10 2c1 .5 2 2 2 5"></path>
+          </svg>
+        </span>
+        <span class="api-call-title">Mermaid 图表</span>
+      </div>
+      <div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
+        <div class="mermaid-loading">UML图表加载中...</div>
+      </div>
+      <div class="api-call-footer">
+        <details>
+          <summary>查看图表代码</summary>
+          <pre class="api-call-code"><code class="language-mermaid">${mermaidCode.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>
+        </details>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 处理interactive_button API调用
+ * @param apiInfo API调用信息
+ * @returns 生成的HTML内容
+ */
+function handleInteractiveButton(apiInfo: any): string {
+  // 获取参数
+  const message = apiInfo.arguments.message || '点击发送';
+  const command = apiInfo.arguments.command || '';
+
+  // 编码命令，用于button属性
+  const encodedCommand = encodeURIComponent(command);
+
+  // 构建HTML - 使用与button://链接处理相同的类和属性
+  return `
+    <div class="special-api-call interactive-button-api-call">
+      <div class="api-call-header">
+        <span class="api-call-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <path d="M7 11v2"></path>
+            <path d="M11 7h2"></path>
+            <path d="M11 15h2"></path>
+            <path d="M15 11v2"></path>
+          </svg>
+        </span>
+        <span class="api-call-title">交互按钮</span>
+      </div>
+      <div class="interactive-button-container">
+        <button class="markdown-button interactive-command-button" data-command="${encodedCommand}">${message}</button>
+      </div>
+      <div class="api-call-footer">
+        <details>
+          <summary>查看按钮配置</summary>
+          <pre class="api-call-code"><code>消息: ${message}
+命令: ${command}</code></pre>
+        </details>
+      </div>
+    </div>
+  `;
+}
+
+// 添加此函数用于设置交互按钮的点击事件
+function setupInteractiveButtons() {
+  nextTick(() => {
+    document.querySelectorAll('.chat-messages .interactive-command-button').forEach(button => {
+      if (button.hasAttribute('data-event-attached')) return; // 避免重复添加事件
+
+      button.setAttribute('data-event-attached', 'true');
+      button.addEventListener('click', async (e) => {
+        e.preventDefault();
+
+        // 如果正在流式输出消息，禁止发送新消息
+        if (isStreaming.value) {
+          showNotification("请等待当前消息输出完成", "error");
+          return;
+        }
+
+        const encodedCommand = (button as HTMLElement).getAttribute('data-command');
+        if (encodedCommand) {
+          const command = decodeURIComponent(encodedCommand);
+          if (command.trim()) {
+            // 设置输入框内容
+            inputMessage.value = "> " + command;
+            // 发送消息
+            await sendStreamMessage();
+            showNotification("已发送命令", "success");
+          }
+        }
+      });
+    });
+  });
+}
+
+// 修改原有的解析逻辑，整合特殊API处理
+function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): string {
+  // 尝试处理特殊API调用
+  const specialApiHtml = handleSpecialApiCall(apiInfo);
+  
+  if (specialApiHtml) {
+    // 如果成功生成了特殊API的HTML，返回带有原始代码和AST的完整结构
+    return `
+      ${specialApiHtml}
+      <details class="tool-code-details">
+        <summary>查看技术详情</summary>
+        <div class="api-details">
+          <h4>API调用信息</h4>
+          <div class="tool-api-info">
+            <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
+            <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
+            ${Object.entries(apiInfo.arguments).map(([key, value]) =>
+              `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
+            ).join('')}
+          </div>
+          
+          <h4>AST详情</h4>
+          <pre class="tool-code-ast"><code>${JSON.stringify(astJson, null, 2)}</code></pre>
+          
+          <h4>原始代码</h4>
+          <pre class="tool-code-original"><code>${codeContent}</code></pre>
+        </div>
+      </details>
+    `;
+  } else {
+    // 如果不是特殊API或处理失败，返回默认的结构化结果
+    return `
+      <div class="tool-code-header">工具代码解析结果:</div>
+      <div class="tool-code-result">
+        <div class="tool-api-info">
+          <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
+          <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
+          ${Object.entries(apiInfo.arguments).map(([key, value]) =>
+            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
+          ).join('')}
+        </div>
+      </div>
+      <details class="tool-code-details">
+        <summary>查看AST详情</summary>
+        <pre class="tool-code-ast"><code>${JSON.stringify(astJson, null, 2)}</code></pre>
+      </details>
+      <div class="tool-code-header original-header">原始代码:</div>
+      <pre class="tool-code-original"><code>${codeContent}</code></pre>
+    `;
+  }
+}
 
 // 修改链接处理函数
 function setupExternalLinks() {
   nextTick(() => {
     document.querySelectorAll('.chat-messages a').forEach(link => {
       const href = link.getAttribute('href');
-
-      // 检查是否是button://格式的链接，将其转换为按钮样式
-      if (href && href.startsWith('button://')) {
-        // 创建按钮元素替换链接
-        const buttonElement = document.createElement('button');
-        buttonElement.className = 'markdown-button';
-        buttonElement.textContent = link.textContent || '点击发送';
-
-        // 从URL中提取消息内容，确保正确处理中文等字符
-        const message = decodeURIComponent(href.substring(9));
-
-        // 设置点击事件
-        buttonElement.addEventListener('click', async (e) => {
-          e.preventDefault();
-
-          // 如果正在流式输出消息，禁止发送新消息
-          if (isStreaming.value) {
-            showNotification("请等待当前消息输出完成", "error");
-            return;
-          }
-
-          if (message.trim()) {
-            // 设置输入框内容
-            inputMessage.value = message;
-            // 发送消息
-            await sendStreamMessage();
-            showNotification("已发送按钮消息", "success");
-          }
-        });
-
-        // 替换原始链接
-        link.parentNode?.replaceChild(buttonElement, link);
-      } else if (href) {
+      
+      if (href) {
         // 普通链接的处理保持不变
         link.addEventListener('click', async (e) => {
           e.preventDefault();
@@ -1535,6 +1770,10 @@ function updateChatContent(messages: ChatMessage[]) {
     // 设置外部链接处理
     setupExternalLinks();
 
+    if (!isReceivingStream.value) {
+      setupInteractiveButtons();
+    }
+
     // 设置复制按钮和重做按钮的事件监听器
     setupActionButtons();
 
@@ -1582,7 +1821,7 @@ async function setupStreamListeners() {
 
   // 监听流完成事件
   const unlistenComplete = await listen('stream-complete', async () => {
-    console.log("流式消息接收完成，开始渲染UML图表");
+    console.log("流式消息接收完成，开始处理延迟的渲染任务");
 
     // 重新加载聊天历史
     await loadChatHistory();
@@ -1594,20 +1833,11 @@ async function setupStreamListeners() {
     updateChatContent(chatContent.value);
 
     // 标记流式消息接收完成
-    isReceivingStream.value = false;
     isStreaming.value = false;
     isLoading.value = false;
 
-    // 流式传输完成后，启动图表渲染
-    setTimeout(() => {
-      console.log("开始执行延迟的UML渲染");
-      renderMermaidDiagrams();
-
-      // 添加这行以确保渲染完毕后设置交互功能
-      setTimeout(() => {
-        setupMermaidRefresh();
-      }, 400);
-    }, 800); // 给更长的延迟以确保DOM完全更新
+    // 使用新的完成函数处理渲染
+    completeStreamRendering();
   });
 
   // 在组件卸载时清理事件监听
@@ -2882,1787 +3112,8 @@ function confirmDeleteChat() {
   </div>
 </template>
 
-
-
-<style>
-.app-container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  width: 100%;
-  overflow: hidden;
-  position: relative;
-  background-color: var(--bg-color);
-  margin: 0;
-  padding: 0;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-}
-
-.app-content {
-  display: flex;
-  flex: 1;
-  position: relative;
-  overflow: hidden;
-}
-
-.custom-titlebar {
-  height: 32px;
-  background-color: var(--card-bg);
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  user-select: none;
-  width: 100%;
-  z-index: 101;
-  /* 确保标题栏在最上层 */
-}
-
-.close {
-  color: var(--text-color);
-}
-
-.minimize {
-  color: var(--text-color);
-}
-
-.maximize {
-  color: var(--text-color);
-}
-
-.app-icon {
-  display: flex;
-  align-items: center;
-  margin-right: 8px;
-}
-
-.app-icon img {
-  width: 16px;
-  height: 16px;
-}
-
-.title {
-  flex: 1;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-color);
-}
-
-.window-controls {
-  display: flex;
-}
-
-.window-controls button {
-  width: 32px;
-  height: 32px;
-  background: transparent;
-  border: none;
-  outline: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.window-controls button:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.window-controls button.close:hover {
-  background-color: #e81123;
-  color: white;
-}
-
-.window-controls svg {
-  width: 10px;
-  height: 10px;
-  stroke: currentColor;
-  stroke-width: 1;
-  fill: none;
-}
-</style>
-
-
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  height: 100%;
-  width: 100%;
-}
-
-
-:root {
-  --primary-color: #3b82f6;
-  /* 更新为蓝色系 */
-  --light-primary-color: #60a5fa;
-  --primary-hover: #2563eb;
-  --bg-color: #f9fafb;
-  --dark-bg-color: #0f172a;
-  --text-color: #1f2937;
-  --text-secondary: #64748b;
-  --dark-text-color: #f3f4f6;
-  --dark-text-secondary: #9ca3af;
-  --border-color: #e5e7eb;
-  --dark-border-color: #334155;
-  --card-bg: #ffffff;
-  --dark-card-bg: #1e293b;
-  --sidebar-width: 280px;
-  --header-height: 64px;
-  --input-area-height: 80px;
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
-  --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 12px;
-  --transition: all 0.2s ease;
-}
-
-
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-/* 字体大小设置 */
-:root[data-font-size="small"] {
-  --font-size-base: 14px;
-  --font-size-sm: 12px;
-  --font-size-lg: 16px;
-  --font-size-heading: 18px;
-}
-
-:root[data-font-size="medium"] {
-  --font-size-base: 16px;
-  --font-size-sm: 14px;
-  --font-size-lg: 18px;
-  --font-size-heading: 20px;
-}
-
-:root[data-font-size="large"] {
-  --font-size-base: 18px;
-  --font-size-sm: 16px;
-  --font-size-lg: 20px;
-  --font-size-heading: 24px;
-}
-
-body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  line-height: 1.5;
-  background-color: var(--bg-color);
-  color: var(--text-color);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-.empty-chat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 60px 20px;
-  height: 100%;
-  color: var(--text-secondary);
-}
-
-.empty-chat-icon {
-  margin-bottom: 20px;
-  color: var(--text-secondary);
-  background-color: var(--card-bg);
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-color);
-}
-
-.empty-chat h3 {
-  margin-bottom: 8px;
-  font-weight: 600;
-  font-size: var(--font-size-lg);
-  color: var(--text-color);
-}
-
-.empty-chat p {
-  max-width: 320px;
-  font-size: var(--font-size-base);
-}
-
-
-/* 遮罩层 */
-.history-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 90;
-  cursor: pointer;
-  backdrop-filter: blur(2px);
-  transition: opacity 0.3s ease;
-}
-
-.history-sidebar {
-  width: var(--sidebar-width);
-  background-color: var(--card-bg);
-  border-right: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  position: fixed;
-  /* 检测是否有标题栏， 有就设置top为32px*/
-  --titlebar-height: v-bind("isMobile ? '0px' : '32px'");
-  top: var(--titlebar-height);
-  /* 默认留出标题栏高度 */
-  left: 0;
-  bottom: 0;
-  z-index: 100;
-  transform: translateX(-100%);
-  box-shadow: var(--shadow);
-}
-
-.chat-container {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  margin-left: 0;
-  min-height: 0;
-  --titlebar-height: v-bind("isMobile ? '0px' : '32px'");
-  /* Define CSS variable */
-  height: calc(100vh - var(--titlebar-height));
-  /* 默认减去标题栏高度 */
-  overflow: hidden;
-}
-
-/* 响应式设计调整 */
-@media (min-width: 768px) {
-  .history-sidebar {
-    transform: translateX(0);
-    position: relative;
-    box-shadow: none;
-    top: 0;
-    /* 在大屏幕上始终从顶部开始 */
-  }
-
-  .chat-container {
-    margin-left: 0;
-    width: calc(100% - var(--sidebar-width));
-    /* 大屏幕非移动设备下，如果标题栏存在，需要减去其高度 */
-    height: calc(100vh - 32px);
-  }
-
-}
-
-.history-open {
-  transform: translateX(0);
-}
-
-.history-header {
-  height: var(--header-height);
-  padding: 0 16px;
-  border-bottom: 0px solid var(--border-color);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  position: relative;
-}
-
-.history-header h3 {
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-  color: var(--text-color);
-  margin: 0;
-  padding: 0;
-  flex: 1;
-}
-
-.close-history {
-  background: none;
-  border: none;
-  color: var(--text-color);
-  cursor: pointer;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  transition: var(--transition);
-}
-
-.close-history:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.history-actions {
-  padding: 16px;
-  border-bottom: 0px solid var(--border-color);
-}
-
-.new-chat-button {
-  width: 100%;
-  padding: 10px;
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: var(--transition);
-  font-size: var(--font-size-base);
-  box-shadow: var(--shadow-sm);
-}
-
-.new-chat-button:hover {
-  background-color: var(--primary-hover);
-  box-shadow: var(--shadow);
-}
-
-.new-chat-button svg.icon {
-  margin-right: 8px;
-}
-
-.history-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 12px;
-  scrollbar-width: thin;
-}
-
-.history-list::-webkit-scrollbar {
-  width: 5px;
-}
-
-.history-list::-webkit-scrollbar-thumb {
-  background-color: #d1d5db;
-  border-radius: 3px;
-}
-
-.history-list::-webkit-scrollbar-track {
-  background-color: transparent;
-}
-
-.history-item {
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  margin-bottom: 4px;
-  transition: var(--transition);
-  border: 1px solid transparent;
-  animation: item-slide-in 0.5s ease forwards;
-  opacity: 0;
-  transform: translateX(-10px);
-}
-
-@keyframes item-slide-in {
-  from {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.history-item:hover {
-  background-color: rgba(0, 0, 0, 0.03);
-  border-color: var(--border-color);
-  transform: translateX(3px);
-}
-
-.history-item-content {
-  display: flex;
-  align-items: center;
-}
-
-.history-icon {
-  color: var(--text-secondary);
-  margin-right: 10px;
-  flex-shrink: 0;
-}
-
-.history-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.history-title {
-  color: var(--text-color);
-  font-weight: 500;
-  font-size: var(--font-size-base);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.history-time {
-  font-size: var(--font-size-sm);
-  color: var (--text-secondary);
-  margin-top: 2px;
-}
-
-
-.settings-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.settings-modal-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(2px);
-}
-
-.settings-modal-content {
-  position: relative;
-  width: 90%;
-  max-width: 800px;
-  max-height: 90vh;
-  border-radius: var(--radius-lg);
-  background-color: var(--card-bg);
-  box-shadow: var(--shadow);
-  overflow: hidden;
-  animation: modal-in 0.3s ease forwards;
-  z-index: 1001;
-}
-
-@keyframes modal-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95) translateY(10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-/* 历史栏底部的设置按钮 */
-.history-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-color);
-  margin-top: auto;
-}
-
-.settings-button {
-  width: 100%;
-  padding: 10px;
-  background-color: transparent;
-  color: var(--text-color);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: var(--transition);
-  font-size: var(--font-size-base);
-  gap: 8px;
-}
-
-.settings-button:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-  border-color: var(--text-color);
-}
-
-/* 头部设置按钮 */
-.header-settings-button {
-  background: none;
-  border: none;
-  color: var(--text-color);
-  cursor: pointer;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius);
-  transition: var(--transition);
-}
-
-.header-settings-button:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-
-/* 聊天区域 */
-.chat-container {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  margin-left: 0;
-  min-height: 0;
-  /* 固定高度为视口高度 */
-  overflow: hidden;
-  /* 防止整体溢出 */
-}
-
-.chat-header {
-  grid-row: 1;
-  border-bottom: 0px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  padding: 0 16px;
-  background-color: var(--card-bg);
-  z-index: 10;
-  /* 绝对固定高度，防止挤压 */
-  height: var(--header-height);
-  min-height: var(--header-height);
-  /* 确保顶部固定 */
-  position: sticky;
-  top: 0;
-  box-shadow: var(--shadow);
-}
-
-.chat-header h1 {
-  color: var(--text-color);
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-  line-height: 1;
-  /* 固定行高 */
-  margin: 0;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  height: 100%;
-  /* 填充父容器 */
-}
-
-.toggle-history {
-  background: none;
-  border: none;
-  color: var(--text-color);
-  cursor: pointer;
-  margin-right: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius);
-  transition: var(--transition);
-}
-
-.toggle-history:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.chat-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 16px;
-  background-color: var(--bg-color);
-  scrollbar-width: thin;
-  min-height: 0;
-  /* 确保内容可以被压缩 */
-  position: relative;
-  overscroll-behavior: contain;
-  /* 防止滚动传播 */
-}
-
-.chat-content::-webkit-scrollbar {
-  width: 5px;
-}
-
-.chat-content::-webkit-scrollbar-thumb {
-  background-color: #d1d5db;
-  border-radius: 3px;
-}
-
-chat-content::-webkit-scrollbar-track {
-  background-color: transparent;
-}
-
-chat-messages .scoped-content {
-  all: initial;
-  /* 重置所有样式 */
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  color: var(--text-color);
-  line-height: 1.5;
-}
-
-.loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 120px;
-}
-
-.loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid rgba(79, 70, 229, 0.2);
-  border-top: 3px solid var(--primary-color);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-bottom: 12px;
-  font-size: var(--font-size-lg);
-  color: var(--text-color);
-
-}
-
-.loading-spinner.enhanced {
-  width: 32px;
-  height: 32px;
-  border: 3px solid rgba(79, 70, 229, 0.2);
-  border-top: 3px solid var(--primary-color);
-  border-radius: 50%;
-  animation: enhanced-spin 1.2s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
-  margin-bottom: 12px;
-  box-shadow: 0 0 15px rgba(79, 70, 229, 0.2);
-}
-
-@keyframes enhanced-spin {
-  0% {
-    transform: rotate(0deg) scale(0.9);
-  }
-
-  50% {
-    transform: rotate(180deg) scale(1.1);
-  }
-
-  100% {
-    transform: rotate(360deg) scale(0.9);
-  }
-}
-
-.loading-text {
-  font-size: var(--font-size-base);
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-.chat-input-area {
-  grid-row: 3;
-  border-top: 1px solid var(--border-color);
-  padding: 12px 16px;
-  /* 内边距决定了容器和内容的间距 */
-  background-color: var(--card-bg);
-  z-index: 10;
-  position: sticky;
-  bottom: 0;
-}
-
-.input-form {
-  display: flex;
-  align-items: flex-end;
-  /* 底部对齐 textarea 和 button */
-  gap: 8px;
-  /* 设置 textarea 和 button 之间的间距 */
-  width: 100%;
-  /* 确保表单宽度正确 */
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.message-input {
-  flex: 1;
-  padding: 12px 16px;
-  /* 恢复标准 padding */
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  font-size: var(--font-size-base);
-  outline: none;
-  transition: var(--transition);
-  font-family: inherit;
-  box-shadow: var(--shadow-sm);
-  background-color: var(--card-bg);
-  color: var (--text-color);
-  resize: none;
-  /* 禁止用户手动调整大小 */
-  overflow-y: auto;
-  /* 内容超出时显示滚动条 */
-  line-height: 1.5;
-  /* 确保行高一致 */
-  min-height: 48px;
-  /* 保证至少有输入框的高度 */
-  max-height: 150px;
-  /* 限制最大高度，例如约5行 */
-  height: 48px;
-  /* 初始高度设为 min-height */
-}
-
-.message-input:focus {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
-}
-
-.send-button {
-  width: 40px;
-  height: 40px;
-  transform: translateY(-4px);
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: var(--transition);
-  flex-shrink: 0;
-  /* 防止按钮被压缩 */
-}
-
-.send-button:hover:not(:disabled) {
-  /* 仅在非禁用状态下应用 hover 效果 */
-  background-color: var(--primary-hover);
-  transform: scale(1.08);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-}
-
-.send-button.streaming {
-  background-color: #2563eb;
-}
-
-send-icon {
-  stroke-width: 2;
-}
-
-.loading-icon.rotating {
-  animation: rotate 2s linear infinite;
-}
-
-@keyframes rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-chat-messages .mjx-chtml {
-  margin: 0.5em 0;
-  font-size: var(--font-size-lg);
-}
-
-chat-messages .mjx-math {
-  max-width: 100%;
-  /* 确保不超过容器宽度 */
-  overflow-x: auto;
-  /* 水平溢出时显示滚动条 */
-  overflow-y: hidden;
-  /* 隐藏垂直滚动条 */
-  display: block;
-  /* 确保 max-width 生效 */
-  padding-bottom: 4px;
-  /* 为滚动条留出一点空间 */
-}
-
-chat-messages .mjx-chtml.MJXc-display {
-  margin: 1em 0;
-  padding: 0.5em 0;
-  overflow-x: auto;
-  /* 水平溢出时显示滚动条 */
-  overflow-y: hidden;
-  /* 隐藏垂直滚动条 */
-  text-align: center;
-  display: block;
-  /* 确保 overflow 生效 */
-  max-width: 100%;
-  /* 确保不超过容器宽度 */
-  padding-bottom: 4px;
-  /* 为滚动条留出一点空间 */
-}
-
-chat-messages .MJX-TEX {
-  text-align: center;
-}
-
-chat-messages .mjx-container {
-  padding: 6px 0;
-  max-width: 100%;
-  /* 确保容器不超过父元素 */
-  overflow-x: auto;
-  /* 为容器本身也添加滚动条 */
-  overflow-y: hidden;
-  display: block;
-  /* 确保 overflow 生效 */
-  padding-bottom: 4px;
-  /* 为滚动条留出一点空间 */
-}
-
-
-/* 通知样式 */
-.notification {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  padding: 12px 16px;
-  border-radius: var(--radius);
-  background-color: var(--card-bg);
-  box-shadow: var(--shadow);
-  z-index: 1000;
-  max-width: 400px;
-  animation: notification-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  border-left: 4px solid;
-  color: var(--text-color);
-}
-
-.notification.success {
-  border-left-color: #10b981;
-}
-
-.notification.error {
-  border-left-color: #ef4444;
-}
-
-.notification.info {
-  border-left-color: #3b82f6;
-}
-
-.notification.warning {
-  border-left-color: #f59e0b;
-}
-
-.notification-content {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.notification-content svg {
-  flex-shrink: 0;
-  color: #10b981;
-}
-
-.notification.error svg {
-  color: #ef4444;
-}
-
-.notification.info svg {
-  color: #3b82f6;
-}
-
-.notification.warning svg {
-  color: #f59e0b;
-}
-
-@keyframes notification-slide-in {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-
-  50% {
-    transform: translateX(-10px);
-    opacity: 1;
-  }
-
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-chat-messages a {
-  color: var(--primary-color);
-  text-decoration: none;
-  border-bottom: 0px dashed var(--primary-color);
-  cursor: pointer;
-  position: relative;
-  padding-right: 16px;
-}
-
-chat-messages a::after {
-  content: '📋';
-  font-size: var(--font-size-sm);
-  position: absolute;
-  right: 0;
-  top: 0;
-  opacity: 0.7;
-}
-
-chat-messages a:hover {
-  opacity: 0.8;
-}
-
-chat-messages a:active {
-  opacity: 0.6;
-}
-
-/* 响应式设计 */
-@media (min-width: 768px) {
-  .history-sidebar {
-    transform: translateX(0);
-    position: relative;
-    box-shadow: none;
-  }
-
-  .chat-container {
-    margin-left: 0;
-    width: calc(100% - var(--sidebar-width));
-  }
-
-  .toggle-history {
-    display: none;
-    /* 在大屏幕上隐藏菜单按钮 */
-  }
-
-  .close-history {
-    display: none;
-    /* 在大屏幕上隐藏侧边栏关闭按钮 */
-  }
-
-  .chat-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px 16px;
-    background-color: var(--bg-color);
-    scrollbar-width: thin;
-    min-height: 0;
-    position: relative;
-    /* 确保内容正确定位 */
-  }
-}
-
-/* 小屏幕模式 */
-@media (max-width: 767px) {
-  .chat-header h1 {
-    font-size: var(--font-size-lg);
-  }
-
-  .sidebar-open {
-    margin-left: 0;
-  }
-
-  .chat-content {
-    padding: 16px 12px;
-  }
-}
-
-
-/* 自定义滚动条样式 */
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
-}
-
-/* 添加新的动效样式 */
-.animated-notification {
-  animation: notification-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animated-sidebar {
-  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.animated-empty {
-  animation: fade-in 0.8s ease;
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-.animate-in {
-  animation: modal-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animated-input {
-  transition: all 0.3s ease;
-}
-
-.animated-button {
-  transition: all 0.3s ease;
-}
-
-.animated-button:not(:disabled):hover {
-  transform: scale(1.08);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-}
-
-.new-chat-button {
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.new-chat-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 15px rgba(59, 130, 246, 0.3);
-}
-
-.new-chat-button:active {
-  transform: translateY(0);
-}
-
-.settings-button {
-  transition: all 0.3s ease;
-}
-
-.settings-button:hover {
-  transform: translateY(-2px);
-}
-
-.settings-button:active {
-  transform: translateY(0);
-}
-
-/* 自定义标题栏按钮动效 */
-.window-controls button {
-  transition: all 0.2s ease;
-}
-
-.window-controls button:hover {
-  transform: scale(1.1);
-}
-
-.window-controls button.close:hover {
-  background-color: #e81123;
-  color: white;
-  transform: scale(1.1);
-}
-
-/* 修改 modal-in 动画更平滑 */
-@keyframes modal-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95) translateY(10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-/* 移动端优化 */
-@media (max-width: 767px) {
-  .history-item:hover {
-    transform: translateX(1px);
-  }
-}
-
-/* 流式输出时禁用相关样式 */
-.send-button:disabled {
-  background-color: #93c5fd;
-  cursor: not-allowed;
-  transform: scale(1);
-  transform: translateY(-4px);
-  box-shadow: none;
-  opacity: 0.7;
-}
-
-/* 流式输出时禁用的按钮和链接 */
-.streaming-disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-/* 流式输出时的视觉反馈 */
-.new-chat-button.streaming-disabled {
-  background-color: #93c5fd;
-  transform: none;
-  box-shadow: none;
-}
-
-/* 在聊天列表项上添加状态指示 */
-.history-item.streaming-disabled::after {
-  content: "⌛";
-  position: absolute;
-  right: 10px;
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-/* 自定义按钮样式 */
-.markdown-button {
-  display: inline-block;
-  padding: 8px 16px;
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  margin: 8px 0;
-  text-align: center;
-}
-
-.markdown-button:hover {
-  background-color: var(--primary-hover);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-}
-
-.markdown-button:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-/* 添加占位符样式 */
-.placeholder-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--text-secondary);
-  padding: 20px;
-  text-align: center;
-  font-size: 14px;
-}
-
-.placeholder-box svg {
-  opacity: 0.7;
-}
-
-.render-image-button {
-  color: #8b5cf6;
-  /* 紫色图标 */
-}
-
-.render-image-button:hover {
-  background-color: rgba(139, 92, 246, 0.1);
-}
-
-
-/* 自定义滚动条样式 - 改进版本 */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-  border-radius: 6px;
-}
-
-::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb, rgba(100, 116, 139, 0.5));
-  border-radius: 6px;
-  transition: background-color 0.3s ease;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background-color: var(--scrollbar-thumb-hover, rgba(100, 116, 139, 0.7));
-}
-
-/* 根据主题设置滚动条变量 */
-:root {
-  --scrollbar-thumb: rgba(100, 116, 139, 0.4);
-  --scrollbar-thumb-hover: rgba(100, 116, 139, 0.7);
-}
-
-:root[data-theme="dark"],
-:root[data-theme="system"] {
-  --scrollbar-thumb: rgba(148, 163, 184, 0.4);
-  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.7);
-}
-
-/* 特定区域滚动条定制 */
-.chat-content::-webkit-scrollbar {
-  width: 6px;
-}
-
-.chat-content::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb);
-  border-radius: 6px;
-}
-
-.chat-content::-webkit-scrollbar-thumb:hover {
-  background-color: var(--scrollbar-thumb-hover);
-}
-
-.history-list::-webkit-scrollbar {
-  width: 5px;
-}
-
-.history-list::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb);
-  border-radius: 4px;
-}
-
-.history-list::-webkit-scrollbar-thumb:hover {
-  background-color: var(--scrollbar-thumb-hover);
-}
-
-/* 支持Firefox的滚动条样式 */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-.chat-content,
-.history-list {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-
-.mermaid-preview {
-  margin-top: 12px;
-  border-top: 1px solid var(--border-color);
-  padding-top: 12px;
-  text-align: left;
-}
-
-.preview-header {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-  font-weight: 500;
-  text-align: left;
-}
-
-.preview-code {
-  background-color: rgba(0, 0, 0, 0.03);
-  border-radius: 4px;
-  padding: 8px;
-  overflow-x: auto;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: var(--font-size-sm);
-  line-height: 1.4;
-  max-height: 200px;
-  overflow-y: auto;
-  white-space: pre;
-  color: var(--text-color);
-  border: 1px solid var(--border-color);
-  text-align: left;
-}
-
-/* 暗色主题支持 */
-:root[data-theme="dark"] .preview-code,
-:root[data-theme="system"] .preview-code {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-/* Mermaid 容器可点击样式 */
-.mermaid-container.clickable-container {
-  cursor: zoom-in;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.mermaid-container.clickable-container:hover {
-  transform: scale(1.01);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-/* 图表容器操作按钮 */
-.mermaid-container {
-  position: relative;
-}
-
-.refresh-diagram-button,
-.zoom-diagram-button {
-  position: absolute;
-  background-color: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 50%;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  z-index: 5;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-}
-
-.refresh-diagram-button {
-  top: 8px;
-  right: 8px;
-}
-
-.zoom-diagram-button {
-  top: 8px;
-  right: 44px;
-  /* 位于刷新按钮旁边 */
-}
-
-.refresh-diagram-button:hover,
-.zoom-diagram-button:hover {
-  opacity: 1;
-  transform: scale(1.1);
-}
-
-.refresh-diagram-button svg,
-.zoom-diagram-button svg {
-  color: var(--text-color);
-}
-
-/* 图表查看器样式 */
-.chart-viewer-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.chart-viewer-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(3px);
-}
-
-.chart-viewer-content {
-  position: relative;
-  width: 90%;
-  height: 90%;
-  max-width: 1200px;
-  max-height: 90vh;
-  background-color: var(--card-bg);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  animation: modal-in 0.3s ease forwards;
-  z-index: 1101;
-}
-
-.chart-viewer-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.chart-viewer-header h3 {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  color: var(--text-color);
-}
-
-.chart-viewer-controls {
-  display: flex;
-  gap: 8px;
-}
-
-.chart-control-button {
-  background: none;
-  border: none;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  color: var(--text-color);
-  transition: all 0.2s ease;
-}
-
-.chart-control-button:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-  transform: scale(1.1);
-}
-
-.chart-viewer-body {
-  flex: 1;
-  padding: 24px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  background-color: var(--bg-color);
-}
-
-.chart-viewer-diagram {
-  transition: transform 0.05s linear;
-  transform-origin: center center;
-  max-width: 100%;
-  max-height: 100%;
-  touch-action: none;
-  will-change: transform;
-}
-
-.chart-viewer-diagram svg {
-  max-width: 100%;
-  max-height: 100%;
-  display: block;
-}
-
-.chart-viewer-footer {
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.chart-viewer-info {
-  display: flex;
-  justify-content: space-between;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.chart-viewer-code-toggle {
-  width: 100%;
-}
-
-.chart-viewer-code-toggle summary {
-  cursor: pointer;
-  color: var(--primary-color);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  padding: 4px 0;
-  transition: color 0.2s ease;
-}
-
-.chart-viewer-code-toggle summary:hover {
-  color: var(--primary-hover);
-}
-
-.chart-viewer-code {
-  margin-top: 8px;
-  padding: 12px;
-  background-color: rgba(0, 0, 0, 0.03);
-  border-radius: var(--radius-sm);
-  overflow-x: auto;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  max-height: 150px;
-  overflow-y: auto;
-  white-space: pre;
-  color: var(--text-color);
-  border: 1px solid var(--border-color);
-}
-
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .chart-viewer-content {
-    width: 95%;
-    height: 95%;
-    max-width: none;
-  }
-
-  .chart-viewer-header {
-    padding: 12px;
-  }
-
-  .chart-viewer-body {
-    padding: 16px;
-  }
-
-  .refresh-diagram-button,
-  .zoom-diagram-button {
-    width: 24px;
-    height: 24px;
-  }
-
-  .zoom-diagram-button {
-    right: 40px;
-  }
-
-  .refresh-diagram-button svg,
-  .zoom-diagram-button svg {
-    width: 14px;
-    height: 14px;
-  }
-}
-
-/* 暗色主题支持 */
-:root[data-theme="dark"] .chart-viewer-code,
-:root[data-theme="system"] .chart-viewer-code {
-  background-color: rgba(255, 255, 255, 0.05);
-}
-
-/* 代码块复制按钮样式 */
-.code-block-with-copy {
-  position: relative;
-  padding-right: 30px;
-  /* 为按钮留出空间 */
-}
-
-.code-copy-button {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background-color: var(--bg-color);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
-  z-index: 5;
-  color: var(--text-secondary);
-}
-
-.code-copy-button:hover {
-  opacity: 1;
-  transform: scale(1.1);
-  background-color: var(--card-bg);
-}
-
-.code-copy-button.success {
-  background-color: #10b981;
-  color: white;
-  border-color: #10b981;
-  opacity: 1;
-}
-
-/* 暗色主题支持 */
-:root[data-theme="dark"] .code-copy-button,
-:root[data-theme="system"] .code-copy-button {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: var(--dark-text-secondary);
-}
-
-:root[data-theme="dark"] .code-copy-button:hover,
-:root[data-theme="system"] .code-copy-button:hover {
-  background-color: rgba(255, 255, 255, 0.2);
-  color: var(--dark-text-color);
-}
-
-/* 对话右键菜单样式 */
-.context-menu {
-  position: fixed; /* 固定定位，相对于视口 */
-  background-color: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); /* 增强阴影效果 */
-  z-index: 1000;
-  padding: 8px 0;
-  width: 160px;
-  animation: fade-in-zoom 0.2s ease; /* 添加缩放动画 */
-  max-height: 300px;
-  overflow-y: auto;
-  pointer-events: auto; /* 确保菜单可点击 */
-}
-
-/* 添加菜单显示动画 */
-@keyframes fade-in-zoom {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.context-menu-item {
-  padding: 8px 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-color);
-  transition: background-color 0.2s ease;
-}
-
-.context-menu-item:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-/* 深色模式下菜单hover效果 */
-:root[data-theme="dark"] .context-menu-item:hover,
-:root[data-theme="system"] .context-menu-item:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
-/* 对话重命名和删除确认对话框样式 */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(2px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background-color: var(--card-bg);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
-  width: 90%;
-  max-width: 400px;
-  animation: modal-in 0.3s ease forwards;
-}
-
-.modal-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  color: var(--text-color);
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  transition: background-color 0.2s ease;
-}
-
-.modal-close:hover {
-  background-color: rgba(0, 0, 0, 0.05);
-}
-
-.modal-body {
-  padding: 16px;
-}
-
-.modal-input {
-  width: 100%;
-  padding: 12px 16px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  font-size: var(--font-size-base);
-  outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  font-family: inherit;
-  background-color: var(--card-bg);
-  color: var(--text-color);
-}
-
-.modal-input:focus {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-}
-
-.modal-footer {
-  padding: 16px;
-  border-top: 1px solid var(--border-color);
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.modal-button {
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: var(--font-size-base);
-  font-weight: 500;
-  transition: background-color 0.2s ease, transform 0.2s ease;
-}
-
-.modal-button.cancel {
-  background-color: rgba(0, 0, 0, 0.05);
-  color: var(--text-color);
-}
-
-.modal-button.cancel:hover {
-  background-color: rgba(0, 0, 0, 0.1);
-}
-
-.modal-button.confirm {
-  background-color: var(--primary-color);
-  color: white;
-}
-
-.modal-button.confirm:hover {
-  background-color: var(--primary-hover);
-}
-
-.modal-button.delete {
-  background-color: #ef4444;
-  color: white;
-}
-
-.modal-button.delete:hover {
-  background-color: #dc2626;
-}
 </style>
+
+<style src="./style.css"></style>

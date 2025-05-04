@@ -63,6 +63,7 @@ pub struct GeminiChat {
     temperature: f32,
     max_tokens: Option<u32>,
     top_p: Option<f32>,
+    top_k: Option<u32>,
     last_prompt: Option<String>,
     tools: Vec<chat_completion::Tool>, // Consider if this needs to be stored if tools are passed per call
 
@@ -423,9 +424,10 @@ impl GeminiChat {
             model: "gemini-2.5-flash-preview-04-17".to_string(), // 更新为推荐模型
             system_prompt: "You are a helpful assistant".to_string(),
             messages: Vec::new(),
-            temperature: 0.7,
+            temperature: 0.95,
             max_tokens: Some(8192), // 设置默认值
             top_p: Some(0.95),      // 设置默认值
+            top_k: Some(40),       // 设置默认值
             last_prompt: None,
             tools: Vec::new(),
             chat_id: 0,                    // 初始化为0或其他默认值
@@ -445,7 +447,22 @@ impl GeminiChat {
                     args.insert("mermaid_code".to_string(), Value::String("mermaid code which you what to render".to_string()));
                     args
                 },
+            },
+            TypesetInfo {
+                name: "interactive_button".to_string(),
+                description: "show a interactive button signed `message`, when user clicks on it, then you will receive `command` text".to_string(),
+                detail: r#"show a interactive button signed `message`, when user clicks on it, then you will receive `command` text
+- `message`: the text which you want to show on the button
+- `command`: the text which will be sent when user clicks the button
+"#.to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("message".to_string(), Value::String("click me to send `Hello!`".to_string()));
+                    args.insert("command".to_string(), Value::String("Hello!".to_string()));
+                    args
+                },
             }
+
         ], &self.system_prompt);
     }
 
@@ -536,7 +553,7 @@ impl GeminiChat {
             "generationConfig": {
                 "temperature": self.temperature,
                 "topP": self.top_p, //.unwrap_or(0.95), // 使用 Option 类型
-                "topK": 40, // 保留或设为可选
+                "topK": self.top_k, //.unwrap_or(40), // 使用 Option 类型
                 "maxOutputTokens": self.max_tokens, //.unwrap_or(8192), // 使用 Option 类型
                 //"responseMimeType": "text/plain", // 通常不需要
 
@@ -844,6 +861,13 @@ impl AIChat for GeminiChat {
                     value
                         .parse::<f32>()
                         .map_err(|e| format!("Invalid top_p value: {}", e))?,
+                )
+            }
+            "top_k" => {
+                self.top_k = Some(
+                    value
+                        .parse::<u32>()
+                        .map_err(|e| format!("Invalid top_k value: {}", e))?,
                 )
             }
             "model" => self.model = value,
