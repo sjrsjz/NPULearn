@@ -820,6 +820,14 @@ fn get_current_chat_id() -> u32 {
     *CURRENT_CHAT_ID.lock().unwrap()
 }
 
+// 检查当前聊天ID是否存在
+#[tauri::command]
+fn check_current_chat_id() -> bool {
+    let current_id = *CURRENT_CHAT_ID.lock().unwrap();
+    let history = CHAT_HISTORY.lock().unwrap();
+    history.contains_key(&current_id)
+}
+
 // 确保在 run 函数中注册所有命令
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -841,6 +849,7 @@ pub fn run() {
             delete_chat,
             rename_chat,
             delete_chat_message,
+            check_current_chat_id,
             aibackend::apikey::get_api_key_list_or_create,
             aibackend::apikey::try_save_api_key_list,
             setting::setting::get_settings,

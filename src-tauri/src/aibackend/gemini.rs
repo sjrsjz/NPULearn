@@ -1031,6 +1031,7 @@ impl AIChat for GeminiChat {
 // --- Standalone Functions ---
 
 /// 图像到文本转换函数 (保持不变，但使用辅助函数构建 URL)
+#[allow(dead_code)]
 pub async fn image_to_text(api_key: &str, image_data: &[u8]) -> Result<String, Box<dyn Error>> {
     let client = reqwest::Client::new();
     let base64_image = base64::engine::general_purpose::STANDARD.encode(image_data);

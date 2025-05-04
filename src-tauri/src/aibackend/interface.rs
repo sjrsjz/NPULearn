@@ -4,6 +4,7 @@ use crate::ChatHistory;
 
 use super::apikey::ApiKey;
 
+#[allow(dead_code)]
 pub(crate) trait AIChat {
     /// 使用流式方式生成响应，接收一个回调函数处理返回的文本片段
     async fn generate_response_stream<F>(

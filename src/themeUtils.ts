@@ -24,11 +24,11 @@ export function applyTheme(theme: 'system' | 'light' | 'dark'): void {
 
   // 不要直接调用refreshGlobalStyles，而是稍后再调用，
   // 以确保themeChanged事件的处理程序有机会先运行
-  setTimeout(() => {
-    console.log("延迟刷新全局样式...");
+  // setTimeout(() => {
+  //   console.log("延迟刷新全局样式...");
     // 修改：调用完整的refreshGlobalStyles函数来确保markdown内容也被正确处理
     refreshGlobalStyles();
-  }, 50);
+  // }, 50);
 }
 
 /**
@@ -504,7 +504,7 @@ function applyMarkdownStyles(): void {
 
 // 为了确保样式一致性，检测浏览器环境和平台
 const isAndroid = /android/i.test(navigator.userAgent);
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+// const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 
 // 在安卓设备上可能需要额外的调整
 if (isAndroid) {

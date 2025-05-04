@@ -37,6 +37,7 @@ pub enum ApiKeyType {
     Gemini,
 }
 
+#[allow(dead_code)]
 impl ApiKeyType {
     pub fn to_string(&self) -> String {
         match self {

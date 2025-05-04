@@ -3,17 +3,25 @@ import { ref, onMounted, onUnmounted, nextTick, watch, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { listen } from '@tauri-apps/api/event';
-import hljs from 'highlight.js';
 import 'highlight.js/styles/github.min.css';
 import 'highlight.js/styles/github-dark.min.css'; // 暗色主题
 import LoadingLogo from './components/LoadingLogo.vue';
 import Setting from './components/Setting.vue';
-import { refreshGlobalStyles } from './themeUtils.ts';
-import mermaid from 'mermaid'; // 导入Mermaid.js库
 import html2canvas from 'html2canvas'; // 导入 html2canvas
 
 import { useSettingsProvider } from './composables/useSettings';
 import { Window } from '@tauri-apps/api/window';
+
+
+import { loadMathJax, renderMathInElement } from "./App/mathjax.ts";
+import { createNewChat, loadChatHistory, selectHistory } from "./App/chatHistory.ts";
+import { initMermaid } from "./App/mermaidRenderer.ts";
+import { renderMermaidDiagrams, setupMermaidRefresh, changeMermaidTheme } from "./App/mermaidRenderer.ts";
+import { applyHighlight, completeStreamRendering } from "./App/typesetting/typesetting.ts";
+import { chatHistory, eventBus, isLoading, isStreaming } from "./App/eventBus.ts";
+import { ChatHistory, ChatMessage } from "./App/types.ts";
+
+
 
 // 初始化全局设置，在整个应用中提供设置
 const {
@@ -25,51 +33,16 @@ const {
 const isAppLoading = ref(true);
 const isMobile = ref(false); // 添加移动设备状态
 
-// 定义聊天历史的类型
-interface ChatHistoryItem {
-  id: number;
-  title: string;
-  time: string;
-}
+// 处理聊天内容，隔离样式
+const processedChatContent = ref("");
 
-// 定义完整的聊天历史结构
-interface ChatHistory {
-  id: number;
-  title: string;
-  time: string;
-  content: ChatMessage[];
-}
-
-// 定义聊天消息的类型
-interface ChatMessage {
-  msgtype: 'User' | 'System' | 'Assistant';
-  time: string;
-  content: string;
-}
 
 // 改为空数组，将从后端加载
-const chatHistory = ref<ChatHistoryItem[]>([]);
 const windowWidth = ref(window.innerWidth);
 const isHistoryOpen = ref(windowWidth.value >= 768);
 const inputMessage = ref("");
-const chatContent = ref<ChatMessage[]>([]);
-const isLoading = ref(false);
 
 const showSettings = ref(false);
-
-// 添加流式消息处理需要的状态变量
-const isStreaming = ref(false);
-
-// 移除动画状态控制变量，改为固定显示
-const fadeInMessages = ref(true); // 保留但始终为true，以确保内容始终可见
-const messageTransition = ref(false); // 禁用消息过渡动画
-
-// 添加用于防抖渲染的变量
-const pendingMermaidRender = ref(false);
-const mermaidRenderTimer = ref<number | null>(null);
-
-// 添加变量标记是否正在接收流式消息
-const isReceivingStream = ref(false);
 
 // 添加对话重命名和删除功能所需的状态
 const currentChatId = ref<number | null>(null); // 当前选中的对话ID
@@ -86,315 +59,25 @@ const showChatContextMenu = ref(false);
 const chatContextMenuPosition = ref({ x: 0, y: 0 });
 const chatContextMenuId = ref<number | null>(null);
 
+
 // 切换设置界面的显示
 function toggleSettings() {
   showSettings.value = !showSettings.value;
   // 如果在小屏幕上打开了历史栏，同时关闭它
-  if (showSettings.value && isHistoryOpen.value && windowWidth.value < 768) {
+  if (showSettings.value) {
+    autoHideHistory();
+  }
+}
+
+function autoHideHistory() {
+  if (windowWidth.value < 768) {
     isHistoryOpen.value = false;
-  }
-}
-
-// 初始化Mermaid.js配置
-function initMermaid() {
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: document.documentElement.getAttribute('data-theme') === 'dark' ||
-      (document.documentElement.getAttribute('data-theme') === 'system' &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'default',
-    securityLevel: 'loose',
-    flowchart: {
-      htmlLabels: true,
-      useMaxWidth: true,
-    },
-    fontSize: 14
-  });
-}
-
-// 修改渲染Mermaid图表函数，添加防抖机制
-async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3) {
-  // 如果已有渲染计划，不重复触发
-  if (pendingMermaidRender.value) {
-    console.log('已有渲染计划，忽略当前渲染请求');
-    return;
-  }
-
-  pendingMermaidRender.value = true;
-
-  // 清除之前的计时器（如果有）
-  if (mermaidRenderTimer.value !== null) {
-    clearTimeout(mermaidRenderTimer.value);
-  }
-
-  // 设置防抖延迟，避免频繁渲染
-  mermaidRenderTimer.value = setTimeout(async () => {
-    pendingMermaidRender.value = false;
-    mermaidRenderTimer.value = null;
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-      (document.documentElement.getAttribute('data-theme') === 'system' &&
-        window.matchMedia('(prefers-color-scheme: dark)').matches);
-
-    // 动态更新主题
-    mermaid.initialize({
-      theme: isDark ? 'dark' : 'default',
-      securityLevel: 'loose',
-      logLevel: 'debug',
-      startOnLoad: false
-    });
-
-    try {
-      // 查找所有需要渲染的UML元素
-      const umlElements = document.querySelectorAll('.chat-messages .mermaid-container:not(.loaded)');
-      console.log(`尝试渲染 ${umlElements.length} 个UML图表，当前重试次数: ${retryCount}`);
-
-      if (umlElements.length === 0 && retryCount === 0) {
-        // 第一次调用且没有找到未加载的图表，检查是否需要全局重新渲染
-        const allUmlElements = document.querySelectorAll('.chat-messages .mermaid-container');
-        if (allUmlElements.length > 0) {
-          // 不再自动重新渲染所有图表，避免性能问题
-          console.log(`未找到未加载的图表，存在 ${allUmlElements.length} 个已加载图表`);
-        }
-        return;
-      }
-
-      let renderPromises = [];
-
-      for (const element of umlElements) {
-        const id = element.getAttribute('data-diagram-id');
-        const encodedContent = element.getAttribute('data-diagram-content');
-        const lastRenderedContent = element.getAttribute('data-last-rendered');
-
-        // 跳过内容未变化的图表渲染，避免重复工作
-        if (encodedContent && lastRenderedContent && encodedContent === lastRenderedContent) {
-          console.log(`跳过图表 ID: ${id} 的渲染，内容未变化`);
-          continue;
-        }
-
-        if (encodedContent && id) {
-          let content = '';
-          try {
-            // 清空现有内容
-            element.innerHTML = '<div class="mermaid-loading">UML图表渲染中...</div>';
-
-            // 正确解码内容
-            content = decodeURIComponent(encodedContent);
-
-            // 使用Promise.resolve()包装渲染过程，以便收集所有渲染任务
-            renderPromises.push(
-              Promise.resolve().then(async () => {
-                if (typeof content === 'string' && content.length > 0) {
-                  try {
-                    const { svg } = await mermaid.render(id, content);
-                    element.innerHTML = svg;
-                    // 添加图表加载完成的标记
-                    element.classList.add('loaded');
-                    // 记录已渲染的内容，用于后续比较避免重复渲染
-                    element.setAttribute('data-last-rendered', encodedContent);
-                    return true;
-                  } catch (renderError) {
-                    console.error(`单个图表渲染失败 ID ${id}:`, renderError);
-                    element.innerHTML = `
-                      <div class="mermaid-error">
-                        <p>UML图表渲染失败</p>
-                        <pre>${renderError}</pre>
-                        <div class="mermaid-source">
-                          <details>
-                            <summary>查看原始图表代码</summary>
-                            <pre>${content}</pre>
-                          </details>
-                        </div>
-                        <button class="retry-render-button" data-diagram-id="${id}">
-                          重试渲染
-                        </button>
-                      </div>
-                    `;
-                    return false;
-                  }
-                } else {
-                  throw new Error("解码后的内容为空或无效。");
-                }
-              })
-            );
-          } catch (error) {
-            // 记录更详细的错误信息和失败的内容
-            console.error(`渲染图表 ID ${id} 失败:`, error);
-            console.error("失败的内容 (decoded):", content); // 记录导致失败的解码后内容
-            element.innerHTML = `
-              <div class="mermaid-error">
-                <p>UML图表渲染失败</p>
-                <pre>${error}</pre>
-                <div class="mermaid-source">
-                  <details>
-                    <summary>查看原始图表代码</summary>
-                    <pre>${content}</pre>
-                  </details>
-                </div>
-                <button class="retry-render-button" data-diagram-id="${id}">
-                  重试渲染
-                </button>
-              </div>
-            `;
-          }
-        } else {
-          // 如果容器缺少必要的属性，则发出警告
-          console.warn("发现缺少必要属性（id 或 content）的 Mermaid 容器。", element);
-        }
-      }
-
-      // 等待所有渲染完成
-      if (renderPromises.length > 0) {
-        const results = await Promise.all(renderPromises);
-        const failedCount = results.filter(success => !success).length;
-
-        // 如果有失败的图表，且未超过最大重试次数，则重试
-        if (failedCount > 0 && retryCount < maxRetries) {
-          console.log(`${failedCount}个图表渲染失败，将在1.5秒后重试 (${retryCount + 1}/${maxRetries})`);
-          setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1500);
-        } else if (failedCount > 0) {
-          console.log(`渲染完成，但有${failedCount}个图表渲染失败，已达到最大重试次数`);
-          // 为失败的图表添加重试按钮事件监听
-          setupRetryButtons();
-
-          // 添加这一行来设置图表的可点击功能
-          setupMermaidRefresh();
-        } else {
-          console.log('所有图表渲染成功');
-
-          // 添加这一行来设置图表的可点击功能
-          setupMermaidRefresh();
-        }
-      } else {
-        // 如果没有需要渲染的图表，也需要调用setupMermaidRefresh来处理已渲染的图表
-        setupMermaidRefresh();
-      }
-    } catch (error) {
-      console.error("处理Mermaid图表失败:", error);
-      if (retryCount < maxRetries) {
-        console.log(`整体处理失败，将在1.5秒后重试 (${retryCount + 1}/${maxRetries})`);
-        setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1500);
-      } else {
-        // 即使出错，也尝试为已渲染的图表添加交互功能
-        setupMermaidRefresh();
-      }
-    }
-  }, 500); // 500ms防抖延迟
-}
-
-// 设置图表渲染失败后的重试按钮事件
-function setupRetryButtons() {
-  nextTick(() => {
-    document.querySelectorAll('.chat-messages .retry-render-button').forEach(button => {
-      button.addEventListener('click', async (e) => {
-        e.preventDefault();
-        const targetButton = e.target as HTMLElement;
-        const diagramId = targetButton.getAttribute('data-diagram-id');
-        const container = document.querySelector(`.mermaid-container[data-diagram-id="${diagramId}"]`);
-
-        if (container) {
-          // 移除loaded类以便重新渲染
-          container.classList.remove('loaded');
-          showNotification("正在重新渲染图表...", "info");
-
-          // 特别处理这个容器
-          await renderMermaidDiagrams(0, 3);
-        }
-      });
-    });
-  });
-}
-
-
-// 加载 MathJax
-function loadMathJax() {
-  return new Promise<void>((resolve) => {
-    // 如果已经加载过，直接返回
-    if (window.MathJax) {
-      resolve();
-      return;
-    }
-
-    // 配置 MathJax
-    window.MathJax = {
-      tex: {
-        inlineMath: [['$', '$'], ['\\(', '\\)']],
-        displayMath: [['$$', '$$'], ['\\[', '\\]']]
-      },
-      svg: {
-        fontCache: 'global'
-      },
-      startup: {
-        pageReady: () => {
-          return window.MathJax.startup.defaultPageReady().then(() => {
-            resolve();
-          });
-        },
-        defaultPageReady: () => {
-          // 这里可以添加其他初始化代码
-          return Promise.resolve();
-        }
-      }
-    };
-
-    // 创建脚本元素
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js';
-    script.async = true;
-    script.id = 'mathjax-script';
-    document.head.appendChild(script);
-  });
-}
-
-// 在需要时渲染数学公式
-function renderMathInElement() {
-  if (window.MathJax && window.MathJax.typesetPromise) {
-    window.MathJax.typesetPromise([document.querySelector('.chat-messages') as HTMLElement]).catch((err: Error) => {
-      console.error('MathJax 渲染错误:', err);
-    });
   }
 }
 
 // 切换历史列表显示
 function toggleHistory() {
   isHistoryOpen.value = !isHistoryOpen.value;
-}
-
-// 选择历史对话
-async function selectHistory(id: number) {
-  // 如果正在流式输出消息，禁止切换聊天
-  if (isStreaming.value) {
-    showNotification("请等待当前消息输出完成", "error");
-    return;
-  }
-
-  // 调用后端加载特定对话
-  console.log(`加载对话 ${id}`);
-
-  // 添加淡出效果但确保立即恢复可见性
-  fadeInMessages.value = false;
-
-  // 短暂延迟后开始加载
-  setTimeout(async () => {
-    isLoading.value = true;
-    try {
-      // 调用 Rust 函数加载特定对话内容
-      chatContent.value = await invoke("select_chat_by_id", { id });
-    } catch (error) {
-      console.error("加载对话失败:", error);
-    } finally {
-      isLoading.value = false;
-      // 更新聊天内容，确保样式隔离
-      updateChatContent(chatContent.value);
-
-      // 强制立即显示内容
-      fadeInMessages.value = true;
-
-      // 在移动设备上选择后自动关闭侧边栏
-      if (windowWidth.value < 768) {
-        isHistoryOpen.value = false;
-      }
-    }
-  }, 300);
 }
 
 // 处理窗口大小变化
@@ -408,635 +91,12 @@ function handleResize() {
 }
 
 
-// 从后端加载聊天历史
-async function loadChatHistory() {
-  try {
-    // 从后端API获取聊天历史列表
-    chatHistory.value = await invoke("get_chat_history");
-    console.log("已加载聊天历史:", chatHistory.value);
-  } catch (error) {
-    console.error("加载聊天历史失败:", error);
-    showNotification("加载聊天历史失败", "error");
-  }
-  updateChatContent(chatContent.value); // 确保在加载历史后更新内容
-}
-// 处理聊天内容，隔离样式
-const processedChatContent = ref("");
-
-// 主函数：应用代码高亮和处理各种特殊代码块
-async function applyHighlight(): Promise<void> {
-  await nextTick(); // 确保 DOM 更新完成
-
-  // 查找所有代码块
-  const codeElements = document.querySelectorAll('.chat-messages pre code');
-  if (!codeElements || codeElements.length === 0) return;
-
-  console.log(`处理 ${codeElements.length} 个代码块`);
-
-  // 对常规代码块应用高亮
-  await applyCodeHighlight(codeElements);
-
-  // 处理工具代码块
-  await processToolCodeBlocks(codeElements);
-
-  // 为普通代码块设置复制按钮和其他交互功能
-  await setupCodeBlockActions(codeElements);
-
-  // 根据是否在流式传输中决定如何处理图表渲染
-  if (!isReceivingStream.value) {
-    schedulePostHighlightTasks();
-  } else {
-    console.log("流式传输中，推迟渲染任务");
-  }
-}
-
-// 为常规代码块应用高亮
-async function applyCodeHighlight(codeElements: NodeListOf<Element>): Promise<void> {
-  for (const el of codeElements) {
-    const preElement = el.parentElement as HTMLPreElement | null;
-    if (!preElement) continue;
-
-    // 应用高亮库
-    hljs.highlightElement(el as HTMLElement);
-  }
-}
-
-// 处理工具代码块
-async function processToolCodeBlocks(codeElements: NodeListOf<Element>): Promise<void> {
-  for (const el of codeElements) {
-    // 跳过非tool_code代码块
-    if (!el.classList.contains('language-tool_code')) continue;
-
-    const codeContent = el.textContent?.trim() || '';
-    if (!codeContent) continue;
-
-    const preElement = el.parentElement;
-    if (!preElement) continue;
-
-    console.log("检测到 tool_code 代码块:", codeContent);
-
-    // 创建工具代码容器
-    const toolCodeContainer = document.createElement('div');
-    toolCodeContainer.className = 'tool-code-container';
-
-    // 设置加载状态并保留原始代码
-    toolCodeContainer.innerHTML = `
-      <div class="tool-code-loading">正在解析工具代码...</div>
-      <pre class="tool-code-original"><code>${codeContent}</code></pre>
-    `;
-
-    // 替换原始的 pre 元素
-    preElement.parentNode?.replaceChild(toolCodeContainer, preElement);
-
-    try {
-      await processToolCode(toolCodeContainer, codeContent);
-    } catch (error) {
-      handleToolCodeError(toolCodeContainer, error, codeContent);
-    }
-  }
-}
-
-// 处理工具代码的逻辑
-async function processToolCode(toolCodeContainer: HTMLDivElement, codeContent: string): Promise<void> {
-  // 调用后端解析代码
-  const astResult = await invoke<string>("parse_code", { code: codeContent });
-  console.log("AST 解析结果:", astResult);
-
-  // 解析AST JSON并处理
-  const astJson = JSON.parse(astResult);
-  const apiInfo = parseApiCall(astJson);
-
-  if (apiInfo) {
-    // 根据是否在流式传输中决定显示内容
-    if (isReceivingStream.value) {
-      // 流式传输中只显示解析结果和预览
-      toolCodeContainer.innerHTML = createToolCodeStreamingView(apiInfo, codeContent);
-
-      // 确保原始代码被高亮显示
-      const originalCodeElement = toolCodeContainer.querySelector('.tool-code-original code');
-      if (originalCodeElement) {
-        hljs.highlightElement(originalCodeElement as HTMLElement);
-      }
-    } else {
-      // 消息完整接收后，处理特殊API功能
-      toolCodeContainer.innerHTML = processApiCallResult(apiInfo, astJson, codeContent);
-    }
-  } else {
-    // 解析失败时显示原始AST结果
-    toolCodeContainer.innerHTML = createToolCodeFallbackView(astResult, codeContent);
-
-    // 高亮显示AST和原始代码
-    highlightToolCodeElements(toolCodeContainer);
-  }
-}
-
-// 创建工具代码流式视图
-function createToolCodeStreamingView(apiInfo: any, codeContent: string): string {
-  return `
-    <div class="tool-code-header">工具代码解析结果:</div>
-    <div class="tool-code-result">
-      <div class="tool-api-info">
-        <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
-        <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
-        ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-    `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
-  ).join('')}
-      </div>
-    </div>
-    <div class="api-call-notice">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"></circle>
-        <line x1="12" y1="8" x2="12" y2="12"></line>
-        <line x1="12" y1="16" x2="12.01" y2="16"></line>
-      </svg>
-      <span>API功能将在消息完整接收后处理</span>
-    </div>
-    <pre class="tool-code-original"><code>${codeContent}</code></pre>
-  `;
-}
-
-// 创建工具代码的备用视图（解析失败时）
-function createToolCodeFallbackView(astResult: string, codeContent: string): string {
-  return `
-    <div class="tool-code-header">工具代码 AST:</div>
-    <pre class="tool-code-ast"><code>${JSON.stringify(JSON.parse(astResult), null, 2)}</code></pre>
-    <div class="tool-code-header original-header">原始代码:</div>
-    <pre class="tool-code-original"><code>${codeContent}</code></pre>
-  `;
-}
-
-// 处理工具代码错误
-function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unknown, codeContent: string): void {
-  console.error("解析 tool_code 失败:", error);
-
-  // 显示错误信息
-  toolCodeContainer.innerHTML = `
-    <div class="tool-code-error">解析工具代码失败:</div>
-    <pre class="tool-code-error-message">${error instanceof Error ? error.message : String(error)}</pre>
-    <div class="tool-code-header original-header">原始代码:</div>
-    <pre class="tool-code-original"><code>${codeContent}</code></pre>
-  `;
-
-  // 确保原始代码也被高亮
-  const originalCodeElement = toolCodeContainer.querySelector('.tool-code-original code');
-  if (originalCodeElement) {
-    hljs.highlightElement(originalCodeElement as HTMLElement);
-  }
-}
-
-// 高亮工具代码元素
-function highlightToolCodeElements(container: HTMLDivElement): void {
-  // 对AST结果应用高亮
-  const astCodeElement = container.querySelector('.tool-code-ast code');
-  if (astCodeElement) {
-    hljs.highlightElement(astCodeElement as HTMLElement);
-  }
-
-  // 对原始代码应用高亮
-  const originalCodeElement = container.querySelector('.tool-code-original code');
-  if (originalCodeElement) {
-    hljs.highlightElement(originalCodeElement as HTMLElement);
-  }
-}
-
-// 设置代码块的交互功能（复制按钮等）
-async function setupCodeBlockActions(codeElements: NodeListOf<Element>): Promise<void> {
-  for (const el of codeElements) {
-    const preElement = el.parentElement;
-    // 跳过已经处理过的或特殊类型的代码块
-    if (!preElement ||
-      preElement.querySelector('.code-copy-button') ||
-      el.classList.contains('language-mermaid') ||
-      el.classList.contains('language-tool_code')) continue;
-
-    // 获取代码内容
-    const codeContent = el.textContent || '';
-
-    // 创建并添加复制按钮
-    addCopyButtonToCodeBlock(preElement, codeContent);
-  }
-}
-
-// 为代码块添加复制按钮
-function addCopyButtonToCodeBlock(preElement: Element, codeContent: string): void {
-  // 创建复制按钮
-  const copyButton = document.createElement('button');
-  copyButton.className = 'code-copy-button';
-  copyButton.innerHTML = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-    </svg>
-  `;
-  copyButton.title = "复制代码";
-
-  // 添加点击事件
-  copyButton.addEventListener('click', async (e) => {
-    e.preventDefault();
-    try {
-      await writeText(codeContent);
-      // 临时更改按钮状态
-      copyButton.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 6L9 17l-5-5"></path>
-        </svg>
-      `;
-      copyButton.classList.add('success');
-
-      // 2秒后恢复原样
-      setTimeout(() => {
-        copyButton.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
-        `;
-        copyButton.classList.remove('success');
-      }, 2000);
-
-      showNotification("代码已复制到剪贴板", "success");
-    } catch (error) {
-      console.error("复制代码失败:", error);
-      showNotification("复制代码失败", "error");
-    }
-  });
-
-  // 添加复制按钮到 pre 元素
-  preElement.classList.add('code-block-with-copy');
-  preElement.appendChild(copyButton);
-}
-
-// 处理高亮后需要执行的任务
-function schedulePostHighlightTasks(): void {
-  // 使用 Promise.resolve() 和 setTimeout 来确保这些任务在当前事件循环之后执行
-  Promise.resolve().then(() => {
-    setTimeout(() => {
-      renderMermaidDiagrams();
-      setupInteractiveButtons(); // 设置交互按钮
-    }, 300);
-  });
-}
-
-// 修复流式传输完成后的渲染问题
-function completeStreamRendering(): void {
-  isReceivingStream.value = false;
-  console.log("流式传输完成，执行延迟的渲染任务");
-
-  // 首先标记需要重新渲染的容器
-  document.querySelectorAll('.mermaid-container:not(.loaded)').forEach(container => {
-    // 确保移除任何可能阻止重新渲染的属性
-    container.removeAttribute('data-last-rendered');
-  });
-
-  // 使用多阶段渲染策略，确保渲染可靠性
-  setTimeout(() => {
-    // 第一轮渲染
-    renderMermaidDiagrams(0, 3).then(() => {
-      // 检查是否有容器没有成功渲染
-      const unrenderedCount = document.querySelectorAll('.mermaid-container:not(.loaded)').length;
-
-      if (unrenderedCount > 0) {
-        console.log(`第一轮渲染后仍有 ${unrenderedCount} 个图表未渲染，进行第二轮渲染`);
-        // 延迟第二轮渲染
-        setTimeout(() => {
-          renderMermaidDiagrams(0, 3).then(() => {
-            setupMermaidRefresh();
-            setupInteractiveButtons();
-          });
-        }, 500);
-      } else {
-        setupMermaidRefresh();
-        setupInteractiveButtons();
-      }
-    });
-  }, 400);
-}
-
-/**
- * 解析工具代码AST，提取API调用的关键信息
- * @param ast 解析后的AST JSON对象
- * @returns 包含API调用信息的对象，如果解析失败则返回null
- */
-function parseApiCall(ast: any) {
-  try {
-    // 检查根节点是否为LambdaCall类型
-    if (ast.node_type !== "LambdaCall") {
-      console.warn("根节点不是LambdaCall类型");
-      return null;
-    }
-
-    // 提取基本信息
-    let result: {
-      type: string;
-      print_call: boolean;
-      api_name: string | null;
-      function_name: string | null;
-      arguments: Record<string, string>;
-    } = {
-      type: "api_call",
-      print_call: false,
-      api_name: null,
-      function_name: null,
-      arguments: {}
-    };
-
-    // 检查是否是print调用
-    if (ast.children && ast.children.length >= 1 &&
-      ast.children[0].node_type === "Variable(\"print\")") {
-      result.print_call = true;
-    }
-
-    // 查找API调用部分(GetAttr节点)
-    let apiCallNode = null;
-
-    // 如果是print调用，API调用节点在第二个子节点的子节点里
-    if (result.print_call && ast.children.length >= 2 && ast.children[1].children) {
-      const tupleNode = ast.children[1];
-      if (tupleNode.children.length > 0) {
-        const firstChild = tupleNode.children[0];
-        if (firstChild.node_type === "LambdaCall" && firstChild.children.length > 0) {
-          apiCallNode = firstChild.children[0]; // 应该是GetAttr节点
-        }
-      }
-    } else if (!result.print_call) {
-      // 直接API调用情况(没有print)
-      // 根据实际结构调整查找逻辑
-      apiCallNode = ast.children[0]; // 可能直接是GetAttr
-    }
-
-    // 提取API名称和函数名
-    if (apiCallNode && apiCallNode.node_type === "GetAttr") {
-      // 提取API名称(第一个子节点)
-      if (apiCallNode.children.length > 0 &&
-        apiCallNode.children[0].node_type &&
-        apiCallNode.children[0].node_type.startsWith("Variable(")) {
-        // 从 Variable("default_api") 中提取 default_api
-        const apiNameMatch = apiCallNode.children[0].node_type.match(/Variable\("(.+)"\)/);
-        if (apiNameMatch) {
-          result.api_name = apiNameMatch[1];
-        }
-      }
-
-      // 提取函数名(第二个子节点)
-      if (apiCallNode.children.length > 1 &&
-        apiCallNode.children[1].node_type &&
-        apiCallNode.children[1].node_type.startsWith("String(")) {
-        // 从 String("image_gen") 中提取 image_gen
-        const funcNameMatch = apiCallNode.children[1].node_type.match(/String\("(.+)"\)/);
-        if (funcNameMatch) {
-          result.function_name = funcNameMatch[1];
-        }
-      }
-    }
-
-    // 查找参数节点 - 通常在LambdaCall的第二个子节点
-    let argsNode = null;
-    if (result.print_call && ast.children.length >= 2 &&
-      ast.children[1].children && ast.children[1].children.length > 0) {
-      const lambdaCallNode = ast.children[1].children[0];
-      if (lambdaCallNode.children && lambdaCallNode.children.length > 1) {
-        argsNode = lambdaCallNode.children[1];
-      }
-    } else if (!result.print_call && ast.children.length > 1) {
-      argsNode = ast.children[1];
-    }
-
-    // 处理参数 - 在Tuple节点中查找Assign节点
-    if (argsNode && argsNode.node_type === "Tuple") {
-      for (const child of argsNode.children) {
-        if (child.node_type === "Assign" && child.children.length >= 2) {
-          const paramName = child.children[0].node_type.match(/Variable\("(.+)"\)/)?.[1];
-
-          // 参数值可能是字符串或其他类型
-          let paramValue = null;
-          if (child.children[1].node_type.startsWith("String(")) {
-            // 从 String("value") 中提取 value
-            const valueMatch = child.children[1].node_type.match(/String\("(.+)"\)/);
-            if (valueMatch) {
-              paramValue = valueMatch[1];
-            } else {
-              // 如果无法提取，则使用原始token值
-              paramValue = child.children[1].start_token.token;
-            }
-          } else if (child.children[1].start_token) {
-            paramValue = child.children[1].start_token.token;
-          }
-
-          if (paramName && paramValue !== null) {
-            result.arguments[paramName] = paramValue;
-          }
-        }
-      }
-    }
-
-    // 检查是否解析到足够的信息
-    if (!result.api_name || !result.function_name) {
-      console.warn("未能提取完整的API调用信息");
-      return null;
-    }
-
-    return result;
-  } catch (error) {
-    console.error("解析API调用失败:", error);
-    return null;
-  }
-}
-
-/**
- * 处理特殊API调用，生成对应的HTML内容
- * @param apiInfo 解析出的API调用信息
- * @returns 处理后的HTML内容，如果无法处理则返回null
- */
-function handleSpecialApiCall(apiInfo: any): string | null {
-  // 只处理default_api的调用
-  if (apiInfo.api_name !== 'default_api') {
-    return null;
-  }
-
-  // 根据函数名分发到不同的处理函数
-  switch (apiInfo.function_name) {
-    case 'mermaid_render':
-      return handleMermaidRender(apiInfo);
-    case 'interactive_button':
-      return handleInteractiveButton(apiInfo);
-    // 在这里可以方便地添加新的函数处理
-    default:
-      return null; // 不认识的函数调用，返回null使用默认显示
-  }
-}
-
-/**
- * 处理mermaid_render API调用
- * @param apiInfo API调用信息
- * @returns 生成的HTML内容
- */
-function handleMermaidRender(apiInfo: any): string {
-  // 获取mermaid代码参数
-  const mermaidCode = apiInfo.arguments.mermaid_code || '';
-  
-  // 创建唯一的图表ID
-  const diagramId = `mermaid-diagram-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-  
-  // 编码内容，以便在属性中安全存储
-  const encodedContent = encodeURIComponent(mermaidCode);
-  
-  // 构建HTML
-  return `
-    <div class="special-api-call mermaid-api-call">
-      <div class="api-call-header">
-        <span class="api-call-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path>
-            <path d="M10 2c1 .5 2 2 2 5"></path>
-          </svg>
-        </span>
-        <span class="api-call-title">Mermaid 图表</span>
-      </div>
-      <div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
-        <div class="mermaid-loading">UML图表加载中...</div>
-      </div>
-      <div class="api-call-footer">
-        <details>
-          <summary>查看图表代码</summary>
-          <pre class="api-call-code"><code class="language-mermaid">${mermaidCode.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>
-        </details>
-      </div>
-    </div>
-  `;
-}
-
-/**
- * 处理interactive_button API调用
- * @param apiInfo API调用信息
- * @returns 生成的HTML内容
- */
-function handleInteractiveButton(apiInfo: any): string {
-  // 获取参数
-  const message = apiInfo.arguments.message || '点击发送';
-  const command = apiInfo.arguments.command || '';
-
-  // 编码命令，用于button属性
-  const encodedCommand = encodeURIComponent(command);
-
-  // 构建HTML - 使用与button://链接处理相同的类和属性
-  return `
-    <div class="special-api-call interactive-button-api-call">
-      <div class="api-call-header">
-        <span class="api-call-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <path d="M7 11v2"></path>
-            <path d="M11 7h2"></path>
-            <path d="M11 15h2"></path>
-            <path d="M15 11v2"></path>
-          </svg>
-        </span>
-        <span class="api-call-title">交互按钮</span>
-      </div>
-      <div class="interactive-button-container">
-        <button class="markdown-button interactive-command-button" data-command="${encodedCommand}">${message}</button>
-      </div>
-      <div class="api-call-footer">
-        <details>
-          <summary>查看按钮配置</summary>
-          <pre class="api-call-code"><code>消息: ${message}
-命令: ${command}</code></pre>
-        </details>
-      </div>
-    </div>
-  `;
-}
-
-// 添加此函数用于设置交互按钮的点击事件
-function setupInteractiveButtons() {
-  nextTick(() => {
-    document.querySelectorAll('.chat-messages .interactive-command-button').forEach(button => {
-      if (button.hasAttribute('data-event-attached')) return; // 避免重复添加事件
-
-      button.setAttribute('data-event-attached', 'true');
-      button.addEventListener('click', async (e) => {
-        e.preventDefault();
-
-        // 如果正在流式输出消息，禁止发送新消息
-        if (isStreaming.value) {
-          showNotification("请等待当前消息输出完成", "error");
-          return;
-        }
-
-        const encodedCommand = (button as HTMLElement).getAttribute('data-command');
-        if (encodedCommand) {
-          const command = decodeURIComponent(encodedCommand);
-          if (command.trim()) {
-            // 设置输入框内容
-            inputMessage.value = "> " + command;
-            // 发送消息
-            await sendStreamMessage();
-            showNotification("已发送命令", "success");
-          }
-        }
-      });
-    });
-  });
-}
-
-// 修改原有的解析逻辑，整合特殊API处理
-function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): string {
-  // 尝试处理特殊API调用
-  const specialApiHtml = handleSpecialApiCall(apiInfo);
-  
-  if (specialApiHtml) {
-    // 如果成功生成了特殊API的HTML，返回带有原始代码和AST的完整结构
-    return `
-      ${specialApiHtml}
-      <details class="tool-code-details">
-        <summary>查看技术详情</summary>
-        <div class="api-details">
-          <h4>API调用信息</h4>
-          <div class="tool-api-info">
-            <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
-            <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
-            ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-              `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
-            ).join('')}
-          </div>
-          
-          <h4>AST详情</h4>
-          <pre class="tool-code-ast"><code>${JSON.stringify(astJson, null, 2)}</code></pre>
-          
-          <h4>原始代码</h4>
-          <pre class="tool-code-original"><code>${codeContent}</code></pre>
-        </div>
-      </details>
-    `;
-  } else {
-    // 如果不是特殊API或处理失败，返回默认的结构化结果
-    return `
-      <div class="tool-code-header">工具代码解析结果:</div>
-      <div class="tool-code-result">
-        <div class="tool-api-info">
-          <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
-          <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
-          ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
-          ).join('')}
-        </div>
-      </div>
-      <details class="tool-code-details">
-        <summary>查看AST详情</summary>
-        <pre class="tool-code-ast"><code>${JSON.stringify(astJson, null, 2)}</code></pre>
-      </details>
-      <div class="tool-code-header original-header">原始代码:</div>
-      <pre class="tool-code-original"><code>${codeContent}</code></pre>
-    `;
-  }
-}
-
 // 修改链接处理函数
 function setupExternalLinks() {
   nextTick(() => {
     document.querySelectorAll('.chat-messages a').forEach(link => {
       const href = link.getAttribute('href');
-      
+
       if (href) {
         // 普通链接的处理保持不变
         link.addEventListener('click', async (e) => {
@@ -1053,6 +113,8 @@ function setupExternalLinks() {
     });
   });
 }
+
+
 // 修改 updateChatContent 函数，移除动画效果
 function updateChatContent(messages: ChatMessage[]) {
   if (!messages || messages.length === 0) {
@@ -1241,7 +303,6 @@ function updateChatContent(messages: ChatMessage[]) {
         box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
         border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
         position: relative;
-        min-height: 100px;
         display: flex;
         justify-content: center;
         align-items: center;
@@ -1486,14 +547,11 @@ function updateChatContent(messages: ChatMessage[]) {
         margin-right: 0.5em;
       }
       
-      /* 移除代码块的装饰效果 */
       .markdown-body pre:before,
       .markdown-body pre:after {
         display: none;
         content: none;
       }
-      
-
       
       .message-wrapper.user-message-right {
         flex-direction: row-reverse;
@@ -1764,40 +822,28 @@ function updateChatContent(messages: ChatMessage[]) {
     // 应用代码高亮
     applyHighlight();
 
+
+    // 只在非流传输状态下渲染UML图表，添加明确的日志
+    if (!isStreaming.value) {
+      console.log("消息更新完成，准备渲染UML图表");
+      renderMermaidDiagrams();
+      setupMermaidRefresh();
+    } else {
+      console.log("正在流式传输中，跳过UML渲染");
+    }
+
     // 渲染数学公式
     renderMathInElement();
 
     // 设置外部链接处理
     setupExternalLinks();
 
-    if (!isReceivingStream.value) {
-      setupInteractiveButtons();
-    }
-
     // 设置复制按钮和重做按钮的事件监听器
     setupActionButtons();
 
     // 滚动到底部
-    scrollToBottom();
+    scrollToBottom(true);
 
-    // 刷新全局样式，确保主题一致性
-    refreshGlobalStyles();
-
-    // 只在非流传输状态下渲染UML图表，添加明确的日志
-    if (!isReceivingStream.value) {
-      console.log("消息更新完成，准备渲染UML图表");
-      setTimeout(() => {
-        renderMermaidDiagrams();
-
-        // 即使没有新渲染的图表，也应该设置已有图表的交互功能
-        // 为确保DOM已更新，使用短暂延迟
-        setTimeout(() => {
-          setupMermaidRefresh();
-        }, 300);
-      }, 500);
-    } else {
-      console.log("正在流式传输中，跳过UML渲染");
-    }
   });
 }
 
@@ -1806,14 +852,13 @@ async function setupStreamListeners() {
   // 监听流式消息事件
   const unlistenStream = await listen('stream-message', (event) => {
     // 标记正在接收流式消息
-    isReceivingStream.value = true;
+    isStreaming.value = true;
     console.log("流式消息接收中，暂停UML渲染");
 
     // 将后端发送的聊天历史更新到前端
     const chatData = event.payload as ChatHistory;
-    chatContent.value = chatData.content;
     // 更新聊天内容显示
-    updateChatContent(chatContent.value);
+    updateChatContent(chatData.content);
 
     // 滚动到底部，添加平滑效果
     scrollToBottom(true);
@@ -1822,21 +867,13 @@ async function setupStreamListeners() {
   // 监听流完成事件
   const unlistenComplete = await listen('stream-complete', async () => {
     console.log("流式消息接收完成，开始处理延迟的渲染任务");
-
-    // 重新加载聊天历史
-    await loadChatHistory();
-
-    // 保持禁用消息过渡动画
-    messageTransition.value = false;
-
-    // 先更新UI显示
-    updateChatContent(chatContent.value);
-
     // 标记流式消息接收完成
     isStreaming.value = false;
     isLoading.value = false;
 
+    const chatContent = await invoke("get_chat_html") as ChatMessage[]; 
     // 使用新的完成函数处理渲染
+    updateChatContent(chatContent);
     completeStreamRendering();
   });
 
@@ -1882,7 +919,6 @@ function setupActionButtons() {
             // 显示加载状态
             isLoading.value = true;
             isStreaming.value = true;
-            messageTransition.value = false;
 
             // 调用后端重新生成消息
             await invoke("regenerate_message", { messageIndex });
@@ -1936,12 +972,6 @@ function setupActionButtons() {
                     }
                   }
                 });
-                // 确保克隆的文档中 MathJax 公式已渲染
-                // MathJax 的渲染可能比较复杂，html2canvas 可能无法完美捕获动态生成的 SVG
-                // 这里可以尝试强制重新渲染，但这可能不可靠
-                // if (window.MathJax && window.MathJax.typesetPromise) {
-                //   window.MathJax.typesetPromise([clonedDoc.body]);
-                // }
               }
             });
 
@@ -1978,10 +1008,6 @@ function resetTextareaHeight() {
 async function sendStreamMessage() {
   if (!inputMessage.value.trim()) return;
 
-  // 禁用消息过渡动画
-  messageTransition.value = false;
-  fadeInMessages.value = true; // 确保内容可见
-
   // 保存消息内容并立即清空输入框，提升用户体验
   const message = inputMessage.value;
   inputMessage.value = "";
@@ -1990,7 +1016,7 @@ async function sendStreamMessage() {
   resetTextareaHeight();
 
   // 检查当前是否有选择的对话
-  if (!chatContent.value || chatContent.value.length === 0) {
+  if (!await invoke("check_current_chat_id")) {
     console.log("未选择对话，正在创建新对话...");
 
     // 显示加载状态
@@ -1998,7 +1024,7 @@ async function sendStreamMessage() {
 
     try {
       // 创建新对话
-      chatContent.value = await invoke("create_new_chat");
+      await invoke("create_new_chat");
       // 刷新历史列表
       await loadChatHistory();
       console.log("已创建新对话，继续发送消息");
@@ -2011,7 +1037,6 @@ async function sendStreamMessage() {
   }
 
   // 先设置状态，确保在任何渲染发生前就已标记为流传输
-  isReceivingStream.value = true;
   isStreaming.value = true;
   isLoading.value = true;
 
@@ -2024,30 +1049,106 @@ async function sendStreamMessage() {
       showNotification("消息发送失败", "error");
       isStreaming.value = false;
       isLoading.value = false;
-      isReceivingStream.value = false;
+      isStreaming.value = false;
     });
 
   // 由于已经设置了状态并启动了异步处理，函数可以立即返回
   // 实际的响应处理将由事件监听器完成
 }
 
-// 自动滚动到底部
-function scrollToBottom(smooth = false) {
-  nextTick(() => {
-    const chatContent = document.querySelector('.chat-content');
-    if (chatContent) {
-      if (smooth) {
-        chatContent.scrollTo({
-          top: chatContent.scrollHeight,
-          behavior: 'smooth'
-        });
-      } else {
-        chatContent.scrollTop = chatContent.scrollHeight;
-      }
+
+// 流式发送消息 - 非阻塞版本
+async function sendStreamMessageDirect(message: string) {
+
+  // 保存消息内容并立即清空输入框，提升用户体验
+  inputMessage.value = "";
+
+  // 重置文本区域高度
+  resetTextareaHeight();
+
+  // 检查当前是否有选择的对话
+  if (!await invoke("check_current_chat_id")) {
+    console.log("未选择对话，正在创建新对话...");
+
+    // 显示加载状态
+    isLoading.value = true;
+
+    try {
+      // 创建新对话
+      await invoke("create_new_chat");
+      // 刷新历史列表
+      await loadChatHistory();
+      console.log("已创建新对话，继续发送消息");
+    } catch (error) {
+      console.error("创建新对话失败:", error);
+      showNotification("创建新对话失败", "error");
+      isLoading.value = false;
+      return; // 创建失败则不继续发送消息
     }
+  }
+
+  // 先设置状态，确保在任何渲染发生前就已标记为流传输
+  isStreaming.value = true;
+  isLoading.value = true;
+
+  console.log("开始流式传输消息，已禁用UML渲染");
+
+  // 使用 Promise 包装后端调用，但不等待它完成
+  invoke("process_message_stream", { message })
+    .catch(error => {
+      console.error("消息发送失败:", error);
+      showNotification("消息发送失败", "error");
+      isStreaming.value = false;
+      isLoading.value = false;
+      isStreaming.value = false;
+    });
+
+}
+
+// 自动滚动到底部 - 改进版
+function scrollToBottom(smooth = false) {
+  // 首次尝试滚动
+  nextTick(() => {
+    scrollToBottomImpl(smooth);
+
+    // 添加额外的延迟滚动尝试，处理动态内容和渲染延迟
+    setTimeout(() => {
+      scrollToBottomImpl(smooth);
+
+      // 再次尝试，确保捕获所有内容变化
+      setTimeout(() => {
+        scrollToBottomImpl(smooth);
+      }, 100);
+    }, 50);
   });
 }
 
+// 滚动实现
+function scrollToBottomImpl(smooth = false) {
+  const chatContent = document.querySelector('.chat-content');
+  if (!chatContent) return;
+
+  // 获取滚动容器的总高度和可见高度
+  const scrollHeight = chatContent.scrollHeight;
+  const clientHeight = chatContent.clientHeight;
+
+  // 计算需要滚动到的位置（使用额外的缓冲空间确保到底部）
+  const scrollPosition = scrollHeight - clientHeight + 10;
+
+  if (smooth) {
+    chatContent.scrollTo({
+      top: scrollPosition,
+      behavior: 'smooth'
+    });
+  } else {
+    chatContent.scrollTop = scrollPosition;
+  }
+
+  // 确保滚动生效
+  if (chatContent.scrollTop < scrollPosition - 20) {
+    chatContent.scrollTop = scrollPosition;
+  }
+}
 // 处理输入框按键事件
 function handleInputKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && event.ctrlKey) {
@@ -2057,53 +1158,23 @@ function handleInputKeydown(event: KeyboardEvent) {
   // 允许 Shift+Enter 换行，textarea 默认支持
 }
 
-// 创建新对话
-async function createNewChat() {
-  // 如果正在流式输出消息，禁止创建新聊天
-  if (isStreaming.value) {
-    showNotification("请等待当前消息输出完成", "error");
-    return;
-  }
 
-  // 直接显示内容，不使用淡出淡入效果
-  fadeInMessages.value = true;
 
-  setTimeout(async () => {
-    isLoading.value = true;
-    try {
-      // 调用后端创建新对话API
-      chatContent.value = await invoke("create_new_chat");
-      // 更新聊天内容显示
-      updateChatContent(chatContent.value);
-      // 重新加载历史记录以显示新创建的对话
-      await loadChatHistory();
-      showNotification("已创建新对话", "success");
-    } catch (error) {
-      console.error("创建新对话失败:", error);
-      showNotification("创建新对话失败", "error");
-    } finally {
-      isLoading.value = false;
-      // 确保内容可见
-      fadeInMessages.value = true;
-    }
-  }, 100); // 减少延迟时间
-}
+// // 监听 chatContent 变化，确保 MathJax 重新渲染
+// watch(chatContent, () => {
+//   nextTick(() => {
+//     console.log("聊天内容变化:", chatContent.value);
+//     refreshGlobalStyles();
+//     renderMathInElement();
 
-// 监听 chatContent 变化，确保 MathJax 重新渲染
-watch(chatContent, () => {
-  nextTick(() => {
-    console.log("聊天内容变化:", chatContent.value);
-    refreshGlobalStyles();
-    renderMathInElement();
-
-    // 只在非流传输状态下渲染UML图表
-    if (!isReceivingStream.value) {
-      renderMermaidDiagrams();
-    } else {
-      console.log("正在流式传输中，跳过UML渲染");
-    }
-  });
-});
+//     // 只在非流传输状态下渲染UML图表
+//     if (!isStreaming.value) {
+//       renderMermaidDiagrams();
+//     } else {
+//       console.log("正在流式传输中，跳过UML渲染");
+//     }
+//   });
+// });
 
 // 监听主题变化，更新聊天内容和Mermaid配置
 watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldTheme) => {
@@ -2115,16 +1186,15 @@ watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldT
     const isDark = newTheme === 'dark' ||
       (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-    mermaid.initialize({
-      theme: isDark ? 'dark' : 'default'
-    });
+    changeMermaidTheme(isDark ? 'dark' : 'default');
 
     // 当主题变化时，重新应用样式
     // 延迟执行，确保全局样式已应用
     setTimeout(() => {
-      if (chatContent.value) {
-        updateChatContent(chatContent.value);
-      }
+      loadChatHistory().catch(error => {
+        console.error("加载聊天历史失败:", error);
+        showNotification("加载聊天历史失败", "error");
+      });
     }, 50); // 短暂延迟
   }
 });
@@ -2132,6 +1202,30 @@ watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldT
 
 // 组件加载时初始化对话内容
 onMounted(async () => {
+  eventBus.on('history:autoHide', () => {
+    autoHideHistory();
+  });
+
+  eventBus.on('content:update', (messages) => {
+    updateChatContent(messages.messages);
+  });
+
+  eventBus.on('chart:open', (data) => {
+    openChartViewer(data.svgContent, data.diagramContent);
+  });
+
+  eventBus.on('message:send', (message) => {
+    sendStreamMessageDirect(message);
+  });
+
+  // 添加全局拖动和结束拖动事件
+  window.addEventListener('mousemove', handleDrag);
+  window.addEventListener('mouseup', endDrag);
+  window.addEventListener('touchmove', handleDrag);
+  window.addEventListener('touchend', endDrag);
+
+
+
   // 检测是否为移动设备
   isMobile.value = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -2151,12 +1245,7 @@ onMounted(async () => {
     // 加载聊天历史和当前对话内容
     await loadChatHistory();
 
-    // 尝试获取当前活跃的聊天内容
-    const content = await invoke("get_chat_html");
-    chatContent.value = content as ChatMessage[];
-    // 确保初始加载时使用正确的全局主题，但不强制渲染UML
-    isReceivingStream.value = false; // 初始加载时默认没有流传输
-    updateChatContent(chatContent.value);
+    isStreaming.value = false; // 初始加载时默认没有流传输
 
     // 所有内容加载完成后，隐藏启动logo
     setTimeout(() => {
@@ -2181,13 +1270,11 @@ onMounted(async () => {
         (document.documentElement.getAttribute('data-theme') === 'system' &&
           window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-      mermaid.initialize({
-        theme: isDark ? 'dark' : 'default'
+      changeMermaidTheme(isDark ? 'dark' : 'default');
+      loadChatHistory().catch(error => {
+        console.error("加载聊天历史失败:", error);
+        showNotification("加载聊天历史失败", "error");
       });
-
-      if (chatContent.value) {
-        updateChatContent(chatContent.value);
-      }
     }, 100); // 保持延迟
   });
 
@@ -2196,21 +1283,28 @@ onMounted(async () => {
     console.log('字体大小已变更:', customEvent.detail);
     // 添加延迟以确保字体大小变更完全应用
     setTimeout(() => {
-      if (chatContent.value) {
-        updateChatContent(chatContent.value);
-      }
+      loadChatHistory().catch(error => {
+        console.error("加载聊天历史失败:", error);
+        showNotification("加载聊天历史失败", "error");
+      });
     }, 100); // 保持延迟
   });
 });
 
 // 组件卸载时清理事件监听
 onUnmounted(() => {
+  window.removeEventListener('mousemove', handleDrag);
+  window.removeEventListener('mouseup', endDrag);
+  window.removeEventListener('touchmove', handleDrag);
+  window.removeEventListener('touchend', endDrag);
   window.removeEventListener('resize', handleResize);
   // 清除主题和字体大小变化的事件监听
   window.removeEventListener('themeChanged', (_: Event) => { });
   window.removeEventListener('fontSizeChanged', (_: Event) => { });
   // 移除菜单关闭监听器
   removeDocumentClickListener();
+
+  eventBus.all.clear();
 });
 
 
@@ -2326,129 +1420,6 @@ function endDrag() {
   isDragging.value = false;
 }
 
-// 添加鼠标和触摸事件监听
-onMounted(() => {
-  // 添加全局拖动和结束拖动事件
-  window.addEventListener('mousemove', handleDrag);
-  window.addEventListener('mouseup', endDrag);
-  window.addEventListener('touchmove', handleDrag);
-  window.addEventListener('touchend', endDrag);
-});
-
-onUnmounted(() => {
-  // 移除全局拖动和结束拖动事件
-  window.removeEventListener('mousemove', handleDrag);
-  window.removeEventListener('mouseup', endDrag);
-  window.removeEventListener('touchmove', handleDrag);
-  window.removeEventListener('touchend', endDrag);
-});
-
-// 修改 setupMermaidRefresh 函数，添加点击事件以打开图表查看器
-function setupMermaidRefresh() {
-  nextTick(() => {
-    // 为所有图表容器添加刷新按钮
-    document.querySelectorAll('.chat-messages .mermaid-container').forEach(container => {
-      // 检查容器是否已经有刷新按钮
-      if (!container.querySelector('.refresh-diagram-button')) {
-        const refreshButton = document.createElement('button');
-        refreshButton.className = 'refresh-diagram-button';
-        refreshButton.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M23 4v6h-6"></path>
-            <path d="M1 20v-6h6"></path>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
-            <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
-          </svg>
-        `;
-        refreshButton.title = "刷新图表";
-
-        refreshButton.addEventListener('click', async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const targetButton = e.currentTarget as HTMLElement;
-          const container = targetButton.closest('.mermaid-container');
-
-          if (container) {
-            // 移除loaded类以便重新渲染
-            container.classList.remove('loaded');
-            // 清除上次渲染的内容记录，强制重新渲染
-            container.removeAttribute('data-last-rendered');
-            targetButton.classList.add('refreshing');
-            showNotification("正在刷新图表...", "info");
-
-            // 延迟后渲染以确保UI更新
-            setTimeout(async () => {
-              await renderMermaidDiagrams(0, 3);
-              targetButton.classList.remove('refreshing');
-            }, 100);
-          }
-        });
-
-        // 将按钮添加到容器中
-        container.appendChild(refreshButton);
-      }
-
-      // 添加放大按钮
-      if (!container.querySelector('.zoom-diagram-button')) {
-        const zoomButton = document.createElement('button');
-        zoomButton.className = 'zoom-diagram-button';
-        zoomButton.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            <line x1="11" y1="8" x2="11" y2="14"></line>
-            <line x1="8" y1="11" x2="14" y2="11"></line>
-          </svg>
-        `;
-        zoomButton.title = "放大查看";
-
-        zoomButton.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-
-          const container = (e.currentTarget as HTMLElement).closest('.mermaid-container') as HTMLElement;
-          if (container) {
-            const svgElement = container.querySelector('svg');
-            const contentElement = container.getAttribute('data-diagram-content');
-
-            if (svgElement && contentElement) {
-              const svgContent = svgElement.outerHTML;
-              const diagramContent = decodeURIComponent(contentElement);
-              openChartViewer(svgContent, diagramContent);
-            }
-          }
-        });
-
-        container.appendChild(zoomButton);
-      }
-
-      // 为整个容器添加点击事件以打开查看器
-      if (!container.hasAttribute('data-has-click-listener')) {
-        container.setAttribute('data-has-click-listener', 'true');
-
-        container.addEventListener('click', (e) => {
-          // 点击按钮时不触发
-          if ((e.target as HTMLElement).closest('.refresh-diagram-button, .zoom-diagram-button')) {
-            return;
-          }
-
-          const svgElement = container.querySelector('svg');
-          const contentElement = container.getAttribute('data-diagram-content');
-
-          if (svgElement && contentElement) {
-            const svgContent = svgElement.outerHTML;
-            const diagramContent = decodeURIComponent(contentElement);
-            openChartViewer(svgContent, diagramContent);
-          }
-        });
-
-        // 添加视觉提示，表明容器可点击
-        container.classList.add('clickable-container');
-      }
-    });
-  });
-}
-
 // 在 data 部分添加变量来存储事件监听器引用
 const documentClickListener = ref<((e: MouseEvent) => void) | null>(null);
 
@@ -2457,7 +1428,7 @@ function openMessageContextMenu(event: MouseEvent, messageIndex: number) {
   // 防止事件冒泡和默认行为
   event.preventDefault();
   event.stopPropagation();
-  
+
   // 确保清理可能已存在的菜单（关闭其他菜单）
   closeAllContextMenus();
 
@@ -2557,7 +1528,7 @@ function closeAllContextMenus() {
 function setupDocumentClickListener() {
   // 先移除可能已存在的监听器
   removeDocumentClickListener();
-  
+
   // 创建新的监听器
   documentClickListener.value = (e: MouseEvent) => {
     const messageMenu = document.querySelector('.context-menu');
@@ -2598,7 +1569,8 @@ function closeMessageContextMenu() {
 // 复制消息内容
 async function copyMessageContent() {
   if (messageContextMenuIndex.value !== null && messageContextMenuIndex.value >= 0) {
-    const message = chatContent.value[messageContextMenuIndex.value];
+    const chatContent = await invoke("get_chat_html") as ChatMessage[];
+    const message = chatContent[messageContextMenuIndex.value];
     if (message) {
       try {
         await writeText(message.content);
@@ -2624,12 +1596,9 @@ async function deleteMessage() {
         messageIndex: messageContextMenuIndex.value
       });
 
-      // 更新本地聊天内容
-      chatContent.value = updatedContent as ChatMessage[];
-      showNotification("消息已删除", "success");
-
       // 刷新聊天界面
-      updateChatContent(chatContent.value);
+      updateChatContent(updatedContent as ChatMessage[]);
+      showNotification("消息已删除", "success");
     } catch (error) {
       console.error("删除消息失败:", error);
       showNotification("删除消息失败", "error");
@@ -2645,7 +1614,6 @@ async function regenerateCurrentMessage() {
       // 显示加载状态
       isLoading.value = true;
       isStreaming.value = true;
-      messageTransition.value = false;
 
       // 调用后端重新生成消息
       await invoke("regenerate_message", { messageIndex: messageContextMenuIndex.value });
@@ -2660,16 +1628,27 @@ async function regenerateCurrentMessage() {
   }
   closeMessageContextMenu();
 }
-
-// 判断是否可以重新生成消息
 const canRegenerateMessage = computed(() => {
+  var canRegenerateMessageResult = false;
   if (messageContextMenuIndex.value !== null && messageContextMenuIndex.value >= 0) {
-    const message = chatContent.value[messageContextMenuIndex.value];
-    return message && message.msgtype === 'Assistant';
+    invoke("get_chat_html").then((chatContent) => {
+      const messages = chatContent as ChatMessage[];
+      const index = messageContextMenuIndex.value;
+      // Only proceed if index is not null and within bounds
+      if (messages && index !== null && messages.length > index) {
+        const message = messages[index];
+        canRegenerateMessageResult = message && message.msgtype === 'Assistant';
+      } else {
+        canRegenerateMessageResult = false;
+      }
+    }).catch(() => {
+      canRegenerateMessageResult = false;
+    });
+  } else {
+    canRegenerateMessageResult = false;
   }
-  return false;
+  return canRegenerateMessageResult;
 });
-
 // 修改对 chat-messages 的点击处理，确保点击消息区域但非消息内容时关闭所有菜单
 function handleChatMessagesClick(event: MouseEvent) {
   // 检查是否点击在消息本身
@@ -2705,7 +1684,7 @@ async function submitRename() {
     // 更新本地聊天历史
     await loadChatHistory();
     showNotification("重命名成功", "success");
-    
+
     // 关闭对话框
     isRenamingChat.value = false;
     newChatTitle.value = "";
@@ -2740,7 +1719,6 @@ async function submitDelete() {
     // 检查当前活跃的对话ID是否与被删除的ID相同
     const currentId = chatHistory.value.find(item => item.id === currentChatId.value)?.id;
     if (currentId === chatToDeleteId.value) {
-      chatContent.value = [];
       updateChatContent([]);
     }
 
@@ -2761,19 +1739,19 @@ function renameChatDialog() {
     closeChatContextMenu();
     return;
   }
-  
+
   // 获取当前对话标题作为默认值
   const currentChat = chatHistory.value.find(item => item.id === chatContextMenuId.value);
   if (currentChat) {
     newChatTitle.value = currentChat.title;
   }
-  
+
   // 显示重命名对话框
   isRenamingChat.value = true;
-  
+
   // 关闭右键菜单
   closeChatContextMenu();
-  
+
   // 聚焦输入框
   nextTick(() => {
     const inputElement = document.querySelector('.modal-input') as HTMLInputElement;

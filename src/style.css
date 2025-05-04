@@ -1905,3 +1905,75 @@ chat-messages a:active {
 :root[data-theme="system"] .tool-api-param {
     background-color: rgba(255, 255, 255, 0.1);
 }
+
+
+.mermaid-error {
+    padding: 10px;
+    border: 1px solid #ff6b6b;
+    border-radius: 4px;
+    background-color: rgba(255, 107, 107, 0.1);
+    margin: 10px 0;
+}
+
+.mermaid-error p {
+    color: #e74c3c;
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.mermaid-error .error-message {
+    color: #e74c3c;
+    background-color: rgba(231, 76, 60, 0.05);
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    max-height: 100px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.mermaid-source details {
+    margin-top: 10px;
+}
+
+.mermaid-source summary {
+    cursor: pointer;
+    color: #3498db;
+    font-size: 14px;
+    padding: 5px 0;
+    user-select: none;
+}
+
+.mermaid-source .code-container {
+    position: relative;
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-top: 5px;
+}
+
+.mermaid-source .code-content {
+    background-color: rgba(0, 0, 0, 0.02);
+    padding: 10px;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .mermaid-error {
+    border-color: #ff7675;
+    background-color: rgba(255, 118, 117, 0.1);
+}
+
+[data-theme="dark"] .mermaid-source .code-container {
+    border-color: #444;
+}
+
+[data-theme="dark"] .mermaid-source .code-content {
+    background-color: rgba(255, 255, 255, 0.05);
+}

@@ -234,8 +234,6 @@ pub fn build_typesetting_template(typeset: &TypesetInfo) -> (String, String) {
 #[allow(dead_code)]
 fn build_typesetting_prompt(typesets: &[TypesetInfo]) -> (String, String) {
     let mut typesetting_content = String::from("--- [Typesetting Format Start] ---\n");
-    typesetting_content.push_str("+ use `[CQ:at,qq=user_qq_id]` to refer the user you mention\n    > e.g., `[CQ:at,qq=123456789]`\n\n");
-
     let mut typesetting_eg = String::new();
 
     // 添加所有typeset
@@ -246,19 +244,6 @@ fn build_typesetting_prompt(typesets: &[TypesetInfo]) -> (String, String) {
         typesetting_eg.push_str(&eg);
         typesetting_eg.push_str("\n\n");
     }
-
-    // 添加split mark说明
-    typesetting_content.push_str(r#"+ use the `---split---` mark to separate your response into multiple messages and send them one by one
-        - you can use this to split your response into multiple messages especially when you want to do some actions in the middle of the conversation
-        > e.g.,
-        ```
-        message 1
-        ---split---
-        message 2
-        ---split---
-        operation on other bots
-        ```
-"#);
 
     typesetting_content.push_str("\n--- [Typesetting Format End] ---\n");
 
@@ -370,7 +355,7 @@ pub async fn process_chatbot_typeset(
                         Ok(handler_result) => {
                             result.push_str(&handler_result);
                         },
-                        Err(err) => {
+                        Err(_) => {
                             result.push_str(&format!(" [{}] {:?} ", name, args));
                         }
                     }
@@ -466,14 +451,6 @@ fn parse_function_call(code: &str) -> Option<(String, HashMap<String, Value>)> {
     Some((function_name, args))
 }
 
-#[allow(dead_code)]
-pub fn split_response(message: &str) -> Vec<String> {
-    message
-        .split("---split---")
-        .map(|m| m.trim().to_string())
-        .filter(|m| !m.is_empty())
-        .collect()
-}
 
 #[cfg(test)]
 mod tests {
@@ -522,13 +499,4 @@ More text"#;
         assert_eq!(response, "This is the actual response\n```tool_code\nprint(default_api.send_image(url=\"https://example.com/image.jpg\"))\n```\nMore text");
     }
     
-    #[test]
-    fn test_split_response() {
-        let text = "Message 1\n---split---\nMessage 2\n---split---\nMessage 3";
-        let messages = split_response(text);
-        assert_eq!(messages.len(), 3);
-        assert_eq!(messages[0], "Message 1");
-        assert_eq!(messages[1], "Message 2");
-        assert_eq!(messages[2], "Message 3");
-    }
 }
