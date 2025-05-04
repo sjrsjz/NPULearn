@@ -78,7 +78,7 @@ fn get_chat_history() -> Vec<ChatHistoryItem> {
 
 // 获取指定ID的聊天内容
 #[tauri::command]
-fn get_chat_by_id(id: u32) -> Vec<ChatMessage> {
+fn select_chat_by_id(id: u32) -> Vec<ChatMessage> {
     let mut current_id = CURRENT_CHAT_ID.lock().unwrap();
     *current_id = id; // 更新当前对话ID
 
@@ -580,7 +580,7 @@ Examples that showcase Alice's emotional range:
 - *Shitposting (in some cases, if the abstract speech is intentionally nonsensical or provocative)*"#.to_string());
 
         // 截断聊天历史，只保留到用户的消息（丢弃所有后续内容）
-        let mut chat_history = chat_clone.clone();
+        let mut chat_history: ChatHistory = chat_clone.clone();
         chat_history.content.truncate(message_index);
 
         // 加载聊天历史到AI聊天实例
@@ -611,13 +611,8 @@ Examples that showcase Alice's emotional range:
         // 创建一个回调函数，用于处理流式响应的每个部分
         let callback = {
             let window_clone = window_clone.clone();
-            let mut display_context = display_context.clone();
+            let mut display_context = chat_history.clone();
             let accumulated_markdown = Arc::clone(&accumulated_markdown);
-
-            // 移除"正在思考..."消息
-            if !display_context.content.is_empty() {
-                display_context.content.pop();
-            }
 
             // 添加实际的聊天消息，内容将在回调中更新
             display_context.content.push(ChatMessage {
@@ -673,6 +668,9 @@ Examples that showcase Alice's emotional range:
                 return; // 如果此时找不到对话，直接返回
             }
         };
+
+        // 截断聊天历史，只保留到用户的消息（丢弃所有后续内容）
+        chat.content.truncate(message_index);
 
         // 处理最终结果
         match response_result {
@@ -816,6 +814,12 @@ fn delete_chat_message(chat_id: u32, message_index: usize) -> Result<Vec<ChatMes
     }
 }
 
+// 获取当前活跃的聊天ID
+#[tauri::command]
+fn get_current_chat_id() -> u32 {
+    *CURRENT_CHAT_ID.lock().unwrap()
+}
+
 // 确保在 run 函数中注册所有命令
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -828,7 +832,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_chat_html,
             get_chat_history,
-            get_chat_by_id,
+            select_chat_by_id,
+            get_current_chat_id,
             create_new_chat,
             process_message_stream,
             regenerate_message,

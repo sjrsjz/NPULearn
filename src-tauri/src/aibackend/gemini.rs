@@ -439,9 +439,10 @@ impl GeminiChat {
             TypesetInfo {
                 name: "mermaid_render".to_string(),
                 description: "render mermaid graph".to_string(),
-                detail: "render mermaid graph by using codeblock where lang=`mermaid`, replace `tool_code` and just render `mermaid`".to_string(),
+                detail: "render mermaid graph by using mermaid.js renderer, should write down CORRECT mermaid code for sucessfully rendering".to_string(),
                 args: {
                     let mut args = HashMap::new();
+                    args.insert("mermaid_code".to_string(), Value::String("mermaid code which you what to render".to_string()));
                     args
                 },
             }

@@ -378,7 +378,7 @@ async function selectHistory(id: number) {
     isLoading.value = true;
     try {
       // 调用 Rust 函数加载特定对话内容
-      chatContent.value = await invoke("get_chat_by_id", { id });
+      chatContent.value = await invoke("select_chat_by_id", { id });
     } catch (error) {
       console.error("加载对话失败:", error);
     } finally {
@@ -423,7 +423,6 @@ async function loadChatHistory() {
 
 // 处理聊天内容，隔离样式
 const processedChatContent = ref("");
-
 async function applyHighlight() {
   await nextTick(); // 确保 DOM 更新完成
   // 查找所有代码块并应用高亮
@@ -435,6 +434,7 @@ async function applyHighlight() {
     hljs.highlightElement(el as HTMLElement);
     const codeContent = el.textContent?.trim() || '';
     if (!codeContent) continue;
+
     // 检测是否为 mermaid 代码块
     if (el.classList.contains('language-mermaid')) {
       const preElement = el.parentElement;
@@ -481,28 +481,73 @@ async function applyHighlight() {
 
       // 替换原始的 pre 元素
       preElement.parentNode?.replaceChild(mermaidContainer, preElement);
-    } else if (el.classList.contains('language-tool_code')) {
+    }
+    // 新增：检测是否为 tool_code 代码块并进行处理
+    else if (el.classList.contains('language-tool_code')) {
       console.log("检测到 tool_code 代码块:", codeContent);
+
+      // 创建工具代码容器
       const toolCodeContainer = document.createElement('div');
       toolCodeContainer.className = 'tool-code-container';
-      toolCodeContainer.innerHTML = `<div class="tool-code-loading">正在解析工具代码...</div><pre class="tool-code-original"><code>${codeContent}</code></pre>`;
+
+      // 设置加载状态并保留原始代码
+      toolCodeContainer.innerHTML = `
+        <div class="tool-code-loading">正在解析工具代码...</div>
+        <pre class="tool-code-original"><code>${codeContent}</code></pre>
+      `;
+
+      // 替换原始的 pre 元素
       preElement.parentNode?.replaceChild(toolCodeContainer, preElement);
 
       try {
         // 调用后端解析代码
         const astResult = await invoke<string>("parse_code", { code: codeContent });
         console.log("AST 解析结果:", astResult);
-        // 显示解析结果 (格式化为 JSON)
-        toolCodeContainer.innerHTML = `
-          <div class="tool-code-header">工具代码 AST:</div>
-          <pre class="tool-code-ast"><code>${JSON.stringify(JSON.parse(astResult), null, 2)}</code></pre>
-          <div class="tool-code-header original-header">原始代码:</div>
-          <pre class="tool-code-original"><code>${codeContent}</code></pre>
-        `;
-        // 对AST结果应用高亮 (如果需要)
+
+        // 解析AST JSON并处理
+        const astJson = JSON.parse(astResult);
+        const apiInfo = parseApiCall(astJson);
+
+        if (apiInfo) {
+          // 如果成功解析出API调用信息，显示结构化结果
+          toolCodeContainer.innerHTML = `
+            <div class="tool-code-header">工具代码解析结果:</div>
+            <div class="tool-code-result">
+              <div class="tool-api-info">
+                <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
+                <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
+                ${Object.entries(apiInfo.arguments).map(([key, value]) =>
+            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
+          ).join('')}
+              </div>
+            </div>
+            <details class="tool-code-details">
+              <summary>查看AST详情</summary>
+              <pre class="tool-code-ast"><code>${JSON.stringify(astJson, null, 2)}</code></pre>
+            </details>
+            <div class="tool-code-header original-header">原始代码:</div>
+            <pre class="tool-code-original"><code>${codeContent}</code></pre>
+          `;
+        } else {
+          // 如果解析失败，显示原始AST结果
+          toolCodeContainer.innerHTML = `
+            <div class="tool-code-header">工具代码 AST:</div>
+            <pre class="tool-code-ast"><code>${JSON.stringify(JSON.parse(astResult), null, 2)}</code></pre>
+            <div class="tool-code-header original-header">原始代码:</div>
+            <pre class="tool-code-original"><code>${codeContent}</code></pre>
+          `;
+        }
+
+        // 对AST结果应用高亮
         const astCodeElement = toolCodeContainer.querySelector('.tool-code-ast code');
         if (astCodeElement) {
           hljs.highlightElement(astCodeElement as HTMLElement);
+        }
+
+        // 对原始代码应用高亮
+        const originalCodeElement = toolCodeContainer.querySelector('.tool-code-original code');
+        if (originalCodeElement) {
+          hljs.highlightElement(originalCodeElement as HTMLElement);
         }
       } catch (error) {
         console.error("解析 tool_code 失败:", error);
@@ -513,6 +558,12 @@ async function applyHighlight() {
           <div class="tool-code-header original-header">原始代码:</div>
           <pre class="tool-code-original"><code>${codeContent}</code></pre>
         `;
+
+        // 确保原始代码也被高亮
+        const originalCodeElement = toolCodeContainer.querySelector('.tool-code-original code');
+        if (originalCodeElement) {
+          hljs.highlightElement(originalCodeElement as HTMLElement);
+        }
       }
     }
     else {
@@ -569,7 +620,7 @@ async function applyHighlight() {
       preElement.classList.add('code-block-with-copy');
       preElement.appendChild(copyButton);
     }
-  };
+  }
 
   // 代码高亮和mermaid处理完成后，触发图表渲染
   // 但仅在非流式传输状态下进行
@@ -582,6 +633,135 @@ async function applyHighlight() {
   }
 }
 
+/**
+ * 解析工具代码AST，提取API调用的关键信息
+ * @param ast 解析后的AST JSON对象
+ * @returns 包含API调用信息的对象，如果解析失败则返回null
+ */
+function parseApiCall(ast: any) {
+  try {
+    // 检查根节点是否为LambdaCall类型
+    if (ast.node_type !== "LambdaCall") {
+      console.warn("根节点不是LambdaCall类型");
+      return null;
+    }
+
+    // 提取基本信息
+    let result: {
+      type: string;
+      print_call: boolean;
+      api_name: string | null;
+      function_name: string | null;
+      arguments: Record<string, string>;
+    } = {
+      type: "api_call",
+      print_call: false,
+      api_name: null,
+      function_name: null,
+      arguments: {}
+    };
+
+    // 检查是否是print调用
+    if (ast.children && ast.children.length >= 1 &&
+      ast.children[0].node_type === "Variable(\"print\")") {
+      result.print_call = true;
+    }
+
+    // 查找API调用部分(GetAttr节点)
+    let apiCallNode = null;
+
+    // 如果是print调用，API调用节点在第二个子节点的子节点里
+    if (result.print_call && ast.children.length >= 2 && ast.children[1].children) {
+      const tupleNode = ast.children[1];
+      if (tupleNode.children.length > 0) {
+        const firstChild = tupleNode.children[0];
+        if (firstChild.node_type === "LambdaCall" && firstChild.children.length > 0) {
+          apiCallNode = firstChild.children[0]; // 应该是GetAttr节点
+        }
+      }
+    } else if (!result.print_call) {
+      // 直接API调用情况(没有print)
+      // 根据实际结构调整查找逻辑
+      apiCallNode = ast.children[0]; // 可能直接是GetAttr
+    }
+
+    // 提取API名称和函数名
+    if (apiCallNode && apiCallNode.node_type === "GetAttr") {
+      // 提取API名称(第一个子节点)
+      if (apiCallNode.children.length > 0 &&
+        apiCallNode.children[0].node_type &&
+        apiCallNode.children[0].node_type.startsWith("Variable(")) {
+        // 从 Variable("default_api") 中提取 default_api
+        const apiNameMatch = apiCallNode.children[0].node_type.match(/Variable\("(.+)"\)/);
+        if (apiNameMatch) {
+          result.api_name = apiNameMatch[1];
+        }
+      }
+
+      // 提取函数名(第二个子节点)
+      if (apiCallNode.children.length > 1 &&
+        apiCallNode.children[1].node_type &&
+        apiCallNode.children[1].node_type.startsWith("String(")) {
+        // 从 String("image_gen") 中提取 image_gen
+        const funcNameMatch = apiCallNode.children[1].node_type.match(/String\("(.+)"\)/);
+        if (funcNameMatch) {
+          result.function_name = funcNameMatch[1];
+        }
+      }
+    }
+
+    // 查找参数节点 - 通常在LambdaCall的第二个子节点
+    let argsNode = null;
+    if (result.print_call && ast.children.length >= 2 &&
+      ast.children[1].children && ast.children[1].children.length > 0) {
+      const lambdaCallNode = ast.children[1].children[0];
+      if (lambdaCallNode.children && lambdaCallNode.children.length > 1) {
+        argsNode = lambdaCallNode.children[1];
+      }
+    } else if (!result.print_call && ast.children.length > 1) {
+      argsNode = ast.children[1];
+    }
+
+    // 处理参数 - 在Tuple节点中查找Assign节点
+    if (argsNode && argsNode.node_type === "Tuple") {
+      for (const child of argsNode.children) {
+        if (child.node_type === "Assign" && child.children.length >= 2) {
+          const paramName = child.children[0].node_type.match(/Variable\("(.+)"\)/)?.[1];
+
+          // 参数值可能是字符串或其他类型
+          let paramValue = null;
+          if (child.children[1].node_type.startsWith("String(")) {
+            // 从 String("value") 中提取 value
+            const valueMatch = child.children[1].node_type.match(/String\("(.+)"\)/);
+            if (valueMatch) {
+              paramValue = valueMatch[1];
+            } else {
+              // 如果无法提取，则使用原始token值
+              paramValue = child.children[1].start_token.token;
+            }
+          } else if (child.children[1].start_token) {
+            paramValue = child.children[1].start_token.token;
+          }
+
+          if (paramName && paramValue !== null) {
+            result.arguments[paramName] = paramValue;
+          }
+        }
+      }
+    }
+
+    // 检查是否解析到足够的信息
+    if (!result.api_name || !result.function_name) {
+      console.warn("未能提取完整的API调用信息");
+      return null;
+    }
+
+    return result;
+  } catch (error) {
+    console.error("解析API调用失败:", error);
+    return null;
+  }
+}
 
 
 
@@ -638,51 +818,6 @@ function setupExternalLinks() {
     });
   });
 }
-// 处理UML标签
-function processUmlContent(html: string): string {
-  // 查找所有 <uml>...</uml> 标签并替换为 mermaid 容器
-  const umlRegex = /<uml>([\s\S]*?)<\/uml>/g;
-  let counter = 0;
-
-  return html.replace(umlRegex, (_, umlContent) => {
-    const diagramId = `mermaid-diagram-${Date.now()}-${counter++}`;
-
-    // 提取```mermaid和```之间的内容
-    const mermaidMatch = umlContent.match(/```mermaid\s*([\s\S]*?)```/);
-    let rawContent = ""; // 使用不同的变量名以清晰起见
-
-    if (mermaidMatch && mermaidMatch[1]) {
-      // 获取原始内容并去除首尾空格
-      rawContent = mermaidMatch[1].trim();
-    } else {
-      // 如果没有使用```mermaid格式，直接使用内容并去除首尾空格
-      rawContent = umlContent.trim();
-    }
-
-    // 仅对原始、整理过的内容进行一次编码
-    const encodedContent = encodeURIComponent(rawContent);
-
-    // 在流传输过程中，只使用简单的占位符
-    if (isReceivingStream.value) {
-      return `<div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
-                <div class="mermaid-loading">
-                  <div class="placeholder-box">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path>
-                      <path d="M10 2c1 .5 2 2 2 5"></path>
-                    </svg>
-                    <div>UML图表将在消息完整接收后渲染</div>
-                  </div>
-                </div>
-              </div>`;
-    }
-
-    // 正常渲染的容器，会在流传输完成后处理
-    return `<div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
-              <div class="mermaid-loading">UML图表加载中...</div>
-            </div>`;
-  });
-}
 // 修改 updateChatContent 函数，移除动画效果
 function updateChatContent(messages: ChatMessage[]) {
   if (!messages || messages.length === 0) {
@@ -708,7 +843,7 @@ function updateChatContent(messages: ChatMessage[]) {
     const isUserMessage = msg.msgtype === 'User';
 
     // 处理消息内容中的UML标签
-    const processedContent = processUmlContent(msg.content);
+    const processedContent = msg.content;
 
     messagesHtml += `
     <div class="message-wrapper ${messageClass} ${isUserMessage ? 'user-message-right' : ''}" @contextmenu.prevent="openMessageContextMenu($event, ${messages.indexOf(msg)})">
@@ -1233,7 +1368,45 @@ function updateChatContent(messages: ChatMessage[]) {
       .render-image-button:hover {
         background-color: rgba(139, 92, 246, 0.1);
       }
-      
+
+      .thinking-details {
+        margin-bottom: 16px;
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .thinking-summary {
+        cursor: pointer;
+        font-weight: bold;
+        padding: 8px 12px;
+        background-color: var(--card-bg, #f0f0f0);
+        color: var(--text-color);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-color);
+        transition: background-color 0.2s;
+      }
+      .thinking-summary:hover {
+        background-color: var(--hover-bg, #e0e0e0);
+      }
+      .thinking-content {
+        padding: 12px 16px;
+        border: 1px solid var(--border-color, #ddd);
+        border-radius: var(--radius-sm);
+        margin-top: 8px;
+        background-color: var(--card-bg, #ffffff);
+        color: var(--text-color);
+      }
+      [data-theme="dark"] .thinking-summary {
+        background-color: var(--card-bg, #1e293b);
+        border-color: var(--border-color, #334155);
+      }
+      [data-theme="dark"] .thinking-summary:hover {
+        background-color: var(--hover-bg, #2d3748);
+      }
+      [data-theme="dark"] .thinking-content {
+        border-color: var(--border-color, #334155);
+        background-color: var(--card-bg, #1e293b);
+      }
+
       /* 移动端优化 */
       @media (max-width: 767px) {
         .message-bubble {
@@ -1341,6 +1514,16 @@ function updateChatContent(messages: ChatMessage[]) {
     const chatMessages = document.querySelector('.chat-messages');
     if (chatMessages) {
       chatMessages.querySelector('.scoped-content')?.classList.add('fade-in');
+
+      // 为每个消息容器添加右键菜单事件
+      document.querySelectorAll('.message-content[data-message-index]').forEach(messageElement => {
+        messageElement.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const messageIndex = parseInt((messageElement as HTMLElement).dataset.messageIndex || '0', 10);
+          openMessageContextMenu(e as MouseEvent, messageIndex);
+        });
+      });
     }
 
     // 应用代码高亮
@@ -1579,10 +1762,10 @@ async function sendStreamMessage() {
   // 检查当前是否有选择的对话
   if (!chatContent.value || chatContent.value.length === 0) {
     console.log("未选择对话，正在创建新对话...");
-    
+
     // 显示加载状态
     isLoading.value = true;
-    
+
     try {
       // 创建新对话
       chatContent.value = await invoke("create_new_chat");
@@ -1797,10 +1980,7 @@ onUnmounted(() => {
   window.removeEventListener('themeChanged', (_: Event) => { });
   window.removeEventListener('fontSizeChanged', (_: Event) => { });
   // 移除菜单关闭监听器
-  if (documentClickListener.value) {
-    document.removeEventListener('click', documentClickListener.value);
-    documentClickListener.value = null;
-  }
+  removeDocumentClickListener();
 });
 
 
@@ -2042,152 +2222,147 @@ function setupMermaidRefresh() {
 // 在 data 部分添加变量来存储事件监听器引用
 const documentClickListener = ref<((e: MouseEvent) => void) | null>(null);
 
-// 修改打开对话右键菜单函数
+// 修改 openMessageContextMenu 函数，添加事件冒泡控制和更严格的条件检查
+function openMessageContextMenu(event: MouseEvent, messageIndex: number) {
+  // 防止事件冒泡和默认行为
+  event.preventDefault();
+  event.stopPropagation();
+  
+  // 确保清理可能已存在的菜单（关闭其他菜单）
+  closeAllContextMenus();
+
+  // 获取菜单将要放置的位置
+  const x = event.clientX;
+  const y = event.clientY;
+
+  // 设置菜单索引
+  messageContextMenuIndex.value = messageIndex;
+  // 设置菜单位置
+  messageContextMenuPosition.value = { x, y };
+  // 显示菜单
+  showMessageContextMenu.value = true;
+
+  // 下一个渲染周期调整菜单位置
+  nextTick(() => {
+    adjustMenuPosition('.context-menu');
+  });
+
+  // 添加全局点击事件来关闭菜单
+  setupDocumentClickListener();
+}
+
+// 修改对话历史右键菜单函数
 function openChatContextMenu(event: MouseEvent, chatId: number) {
-  event.stopPropagation(); // 阻止事件冒泡
-  chatContextMenuPosition.value = { x: event.clientX, y: event.clientY };
+  // 防止事件冒泡和默认行为
+  event.preventDefault();
+  event.stopPropagation();
+
+  // 确保清理可能已存在的菜单
+  closeAllContextMenus();
+
+  // 获取菜单将要放置的位置
+  const x = event.clientX;
+  const y = event.clientY;
+
+  // 设置菜单ID和位置
+  chatContextMenuPosition.value = { x, y };
   chatContextMenuId.value = chatId;
+  // 显示菜单
   showChatContextMenu.value = true;
 
-  // 添加点击其他区域关闭菜单的监听器
+  // 下一个渲染周期调整菜单位置
   nextTick(() => {
-    // 确保先移除可能存在的监听器
-    if (documentClickListener.value) {
-      document.removeEventListener('click', documentClickListener.value);
-    }
-
-    // 创建新的监听器函数
-    documentClickListener.value = (e: MouseEvent) => {
-      // 检查点击是否在菜单外部
-      const menu = document.querySelector('.context-menu');
-      if (menu && !menu.contains(e.target as Node)) {
-        closeChatContextMenu();
-      }
-    };
-
-    // 添加监听器（使用延时避免立即触发）
-    setTimeout(() => {
-      document.addEventListener('click', documentClickListener.value!);
-    }, 0);
+    adjustMenuPosition('.context-menu');
   });
+
+  // 添加全局点击事件来关闭菜单
+  setupDocumentClickListener();
+}
+
+// 新增函数：统一调整菜单位置，避免超出视口
+function adjustMenuPosition(menuSelector: string) {
+  const menu = document.querySelector(menuSelector) as HTMLElement;
+  if (!menu) return;
+
+  // 获取视口大小
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+
+  // 获取菜单尺寸
+  const menuWidth = menu.offsetWidth;
+  const menuHeight = menu.offsetHeight;
+
+  // 获取当前位置
+  let currentX = parseInt(menu.style.left || '0', 10);
+  let currentY = parseInt(menu.style.top || '0', 10);
+
+  // 水平方向调整
+  if (currentX + menuWidth > viewportWidth) {
+    currentX = viewportWidth - menuWidth - 10; // 留出10px边距
+  }
+  // 确保不超出左边界
+  currentX = Math.max(10, currentX);
+
+  // 垂直方向调整
+  if (currentY + menuHeight > viewportHeight) {
+    currentY = viewportHeight - menuHeight - 10; // 留出10px边距
+  }
+  // 确保不超出上边界
+  currentY = Math.max(10, currentY);
+
+  // 应用调整后的位置
+  menu.style.left = `${currentX}px`;
+  menu.style.top = `${currentY}px`;
+}
+
+// 新增函数：关闭所有上下文菜单
+function closeAllContextMenus() {
+  showMessageContextMenu.value = false;
+  showChatContextMenu.value = false;
+  // 移除可能存在的文档事件监听器
+  removeDocumentClickListener();
+}
+
+// 新增函数：设置文档点击事件监听器（避免重复）
+function setupDocumentClickListener() {
+  // 先移除可能已存在的监听器
+  removeDocumentClickListener();
+  
+  // 创建新的监听器
+  documentClickListener.value = (e: MouseEvent) => {
+    const messageMenu = document.querySelector('.context-menu');
+    // 如果点击的不是菜单内部元素，则关闭所有菜单
+    if (messageMenu && !messageMenu.contains(e.target as Node)) {
+      closeAllContextMenus();
+    }
+  };
+
+  // 使用 setTimeout 确保监听器在当前点击事件处理完后才添加
+  setTimeout(() => {
+    document.addEventListener('click', documentClickListener.value!);
+  }, 0);
+}
+
+// 新增函数：移除文档点击事件监听器
+function removeDocumentClickListener() {
+  if (documentClickListener.value) {
+    document.removeEventListener('click', documentClickListener.value);
+    documentClickListener.value = null;
+  }
 }
 
 // 修改关闭对话右键菜单函数
 function closeChatContextMenu() {
   showChatContextMenu.value = false;
   // 移除文档点击事件监听器
-  if (documentClickListener.value) {
-    document.removeEventListener('click', documentClickListener.value);
-    documentClickListener.value = null;
-  }
-}
-
-// 打开重命名对话框
-function renameChatDialog() {
-  if (chatContextMenuId.value !== null) {
-    currentChatId.value = chatContextMenuId.value;
-    const chat = chatHistory.value.find(item => item.id === currentChatId.value);
-    if (chat) {
-      newChatTitle.value = chat.title;
-      isRenamingChat.value = true;
-    }
-  }
-  closeChatContextMenu();
-}
-
-// 提交重命名
-async function submitRename() {
-  if (currentChatId.value !== null && newChatTitle.value.trim()) {
-    try {
-      await invoke("rename_chat", { id: currentChatId.value, newTitle: newChatTitle.value.trim() });
-      await loadChatHistory();
-      showNotification("对话重命名成功", "success");
-    } catch (error) {
-      console.error("重命名对话失败:", error);
-      showNotification("重命名对话失败", "error");
-    } finally {
-      isRenamingChat.value = false;
-    }
-  }
-}
-
-// 取消重命名
-function cancelRename() {
-  isRenamingChat.value = false;
-}
-
-// 打开删除确认对话框
-function confirmDeleteChat() {
-  if (chatContextMenuId.value !== null) {
-    chatToDeleteId.value = chatContextMenuId.value;
-    showConfirmDelete.value = true;
-  }
-  closeChatContextMenu();
-}
-
-// 提交删除
-async function submitDelete() {
-  if (chatToDeleteId.value !== null) {
-    try {
-      await invoke("delete_chat", { id: chatToDeleteId.value });
-      await loadChatHistory();
-      showNotification("对话删除成功", "success");
-    } catch (error) {
-      console.error("删除对话失败:", error);
-      showNotification("删除对话失败", "error");
-    } finally {
-      showConfirmDelete.value = false;
-    }
-  }
-}
-
-// 取消删除
-function cancelDelete() {
-  showConfirmDelete.value = false;
-}
-
-
-// 同样修改消息右键菜单的相关函数
-function openMessageContextMenu(event: MouseEvent, messageIndex: number) {
-  event.preventDefault();
-  event.stopPropagation();
-  messageContextMenuPosition.value = { x: event.clientX, y: event.clientY };
-  messageContextMenuIndex.value = messageIndex;
-  showMessageContextMenu.value = true;
-  // 同时关闭其他菜单
-  showChatContextMenu.value = false;
-
-  // 添加点击其他区域关闭菜单的监听器
-  nextTick(() => {
-    // 确保先移除可能存在的监听器
-    if (documentClickListener.value) {
-      document.removeEventListener('click', documentClickListener.value);
-    }
-
-    // 创建新的监听器函数
-    documentClickListener.value = (e: MouseEvent) => {
-      // 检查点击是否在菜单外部
-      const menu = document.querySelector('.context-menu');
-      if (menu && !menu.contains(e.target as Node)) {
-        closeMessageContextMenu();
-      }
-    };
-
-    // 添加监听器（使用延时避免立即触发）
-    setTimeout(() => {
-      document.addEventListener('click', documentClickListener.value!);
-    }, 0);
-  });
+  removeDocumentClickListener();
 }
 
 // 修改关闭消息右键菜单函数
 function closeMessageContextMenu() {
   showMessageContextMenu.value = false;
   // 移除文档点击事件监听器
-  if (documentClickListener.value) {
-    document.removeEventListener('click', documentClickListener.value);
-    documentClickListener.value = null;
-  }
+  removeDocumentClickListener();
 }
 
 // 复制消息内容
@@ -2206,27 +2381,23 @@ async function copyMessageContent() {
   }
   closeMessageContextMenu();
 }
-
 // 删除消息
 async function deleteMessage() {
   if (messageContextMenuIndex.value !== null && messageContextMenuIndex.value >= 0) {
     try {
-      const currentId = chatHistory.value.find(item => item.id === currentChatId.value)?.id;
-      if (!currentId) {
-        showNotification("找不到当前对话ID", "error");
-        return;
-      }
-      
-      // 调用后端删除消息
-      const updatedContent = await invoke("delete_chat_message", { 
-        chatId: currentId, 
-        messageIndex: messageContextMenuIndex.value 
+      // 先获取当前聊天ID
+      const chatId = await invoke("get_current_chat_id");
+
+      // 使用chatId和messageIndex调用后端API
+      const updatedContent = await invoke("delete_chat_message", {
+        chatId: chatId,
+        messageIndex: messageContextMenuIndex.value
       });
-      
+
       // 更新本地聊天内容
       chatContent.value = updatedContent as ChatMessage[];
       showNotification("消息已删除", "success");
-      
+
       // 刷新聊天界面
       updateChatContent(chatContent.value);
     } catch (error) {
@@ -2268,6 +2439,132 @@ const canRegenerateMessage = computed(() => {
   }
   return false;
 });
+
+// 修改对 chat-messages 的点击处理，确保点击消息区域但非消息内容时关闭所有菜单
+function handleChatMessagesClick(event: MouseEvent) {
+  // 检查是否点击在消息本身
+  const isMessageContent = (event.target as HTMLElement).closest('.message-content');
+  // 如果点击在消息区域但不是消息内容本身，关闭所有右键菜单
+  if (!isMessageContent) {
+    closeAllContextMenus();
+  }
+}
+
+// 取消重命名操作
+function cancelRename() {
+  isRenamingChat.value = false;
+  newChatTitle.value = "";
+  chatContextMenuId.value = null;
+  removeDocumentClickListener();
+}
+
+// 提交重命名操作
+async function submitRename() {
+  if (!newChatTitle.value.trim() || !chatContextMenuId.value) {
+    showNotification("标题不能为空", "error");
+    return;
+  }
+
+  try {
+    // 调用后端重命名API
+    await invoke("rename_chat", {
+      id: chatContextMenuId.value,
+      newTitle: newChatTitle.value.trim()
+    });
+
+    // 更新本地聊天历史
+    await loadChatHistory();
+    showNotification("重命名成功", "success");
+    
+    // 关闭对话框
+    isRenamingChat.value = false;
+    newChatTitle.value = "";
+    chatContextMenuId.value = null;
+  } catch (error) {
+    console.error("重命名失败:", error);
+    showNotification("重命名失败", "error");
+  }
+}
+
+// 取消删除操作
+function cancelDelete() {
+  showConfirmDelete.value = false;
+  chatToDeleteId.value = null;
+}
+
+// 执行删除操作
+async function submitDelete() {
+  if (!chatToDeleteId.value) {
+    showNotification("无效的对话ID", "error");
+    return;
+  }
+
+  try {
+    // 调用后端删除API
+    await invoke("delete_chat", { id: chatToDeleteId.value });
+
+    // 更新本地聊天历史
+    await loadChatHistory();
+
+    // 如果当前显示的就是被删除的对话，则清空显示内容
+    // 检查当前活跃的对话ID是否与被删除的ID相同
+    const currentId = chatHistory.value.find(item => item.id === currentChatId.value)?.id;
+    if (currentId === chatToDeleteId.value) {
+      chatContent.value = [];
+      updateChatContent([]);
+    }
+
+    showNotification("删除成功", "success");
+  } catch (error) {
+    console.error("删除失败:", error);
+    showNotification("删除失败", "error");
+  } finally {
+    // 关闭对话框
+    showConfirmDelete.value = false;
+    chatToDeleteId.value = null;
+  }
+}
+
+// 打开重命名对话框
+function renameChatDialog() {
+  if (!chatContextMenuId.value) {
+    closeChatContextMenu();
+    return;
+  }
+  
+  // 获取当前对话标题作为默认值
+  const currentChat = chatHistory.value.find(item => item.id === chatContextMenuId.value);
+  if (currentChat) {
+    newChatTitle.value = currentChat.title;
+  }
+  
+  // 显示重命名对话框
+  isRenamingChat.value = true;
+  
+  // 关闭右键菜单
+  closeChatContextMenu();
+  
+  // 聚焦输入框
+  nextTick(() => {
+    const inputElement = document.querySelector('.modal-input') as HTMLInputElement;
+    if (inputElement) {
+      inputElement.focus();
+      inputElement.select();
+    }
+  });
+}
+
+// 显示删除确认对话框
+function confirmDeleteChat() {
+  if (!chatContextMenuId.value) {
+    showNotification("无效的对话ID", "error");
+    return;
+  }
+
+  chatToDeleteId.value = chatContextMenuId.value;
+  showConfirmDelete.value = true;
+  closeChatContextMenu();
+}
 
 </script>
 
@@ -2353,9 +2650,8 @@ const canRegenerateMessage = computed(() => {
         <div class="history-list">
           <div v-for="(item, index) in chatHistory" :key="item.id"
             @click="isStreaming ? showNotification('请等待当前消息输出完成', 'error') : selectHistory(item.id)"
-            @contextmenu.prevent="openChatContextMenu($event, item.id)"
-            class="history-item" :class="{ 'streaming-disabled': isStreaming }"
-            :style="{ animationDelay: index * 0.05 + 's' }">
+            @contextmenu.prevent="openChatContextMenu($event, item.id)" class="history-item"
+            :class="{ 'streaming-disabled': isStreaming }" :style="{ animationDelay: index * 0.05 + 's' }">
             <div class="history-item-content">
               <svg class="history-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2370,16 +2666,19 @@ const canRegenerateMessage = computed(() => {
         </div>
 
         <!-- 对话记录右键菜单 -->
-        <div v-if="showChatContextMenu" class="context-menu" :style="{ top: chatContextMenuPosition.y + 'px', left: chatContextMenuPosition.x + 'px' }">
+        <div v-if="showChatContextMenu" class="context-menu"
+          :style="{ top: chatContextMenuPosition.y + 'px', left: chatContextMenuPosition.x + 'px' }">
           <div class="context-menu-item" @click="renameChatDialog">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"></path>
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
             </svg>
             重命名
           </div>
           <div class="context-menu-item delete-item" @click="confirmDeleteChat">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 6h18"></path>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
@@ -2416,7 +2715,7 @@ const canRegenerateMessage = computed(() => {
           <h1>NPULearn</h1>
         </header>
 
-        <!-- 聊天内容区域 -->
+        <!-- 聊天内容区域 - 添加点击事件处理函数 -->
         <div class="chat-content">
           <div v-if="isLoading" class="loading">
             <div class="loading-spinner enhanced"></div>
@@ -2432,34 +2731,38 @@ const canRegenerateMessage = computed(() => {
             <h3>开始一个新对话</h3>
             <p>在下方输入框中提问，开始与AI助手交流</p>
           </div>
-          <div v-html="processedChatContent" class="chat-messages" @click="closeChatContextMenu" @contextmenu.prevent="closeMessageContextMenu"></div>
+          <div v-html="processedChatContent" class="chat-messages" @click="handleChatMessagesClick"></div>
 
-    <!-- 消息右键菜单 -->
-    <div v-if="showMessageContextMenu" class="context-menu" :style="{ top: messageContextMenuPosition.y + 'px', left: messageContextMenuPosition.x + 'px' }">
-      <div class="context-menu-item" @click="copyMessageContent">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-        </svg>
-        复制内容
-      </div>
-      <div class="context-menu-item delete-item" @click="deleteMessage">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 6h18"></path>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-        </svg>
-        删除消息
-      </div>
-      <div class="context-menu-item" v-if="canRegenerateMessage" @click="regenerateCurrentMessage">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M23 4v6h-6"></path>
-          <path d="M1 20v-6h6"></path>
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
-          <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
-        </svg>
-        重新生成
-      </div>
-    </div>
+          <!-- 消息右键菜单 - 添加固定的位置样式 -->
+          <div v-if="showMessageContextMenu" class="context-menu"
+            :style="{ top: messageContextMenuPosition.y + 'px', left: messageContextMenuPosition.x + 'px' }">
+            <div class="context-menu-item" @click="copyMessageContent">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              复制内容
+            </div>
+            <div class="context-menu-item delete-item" @click="deleteMessage">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 6h18"></path>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              删除消息
+            </div>
+            <div class="context-menu-item" v-if="canRegenerateMessage" @click="regenerateCurrentMessage">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 4v6h-6"></path>
+                <path d="M1 20v-6h6"></path>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+                <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
+              </svg>
+              重新生成
+            </div>
+          </div>
         </div>
         <!-- 底部输入区 -->
         <div class="chat-input-area">
@@ -3012,7 +3315,7 @@ body {
 
 .history-time {
   font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  color: var (--text-secondary);
   margin-top: 2px;
 }
 
@@ -3309,7 +3612,7 @@ chat-messages .scoped-content {
   font-family: inherit;
   box-shadow: var(--shadow-sm);
   background-color: var(--card-bg);
-  color: var(--text-color);
+  color: var (--text-color);
   resize: none;
   /* 禁止用户手动调整大小 */
   overflow-y: auto;
@@ -4194,15 +4497,30 @@ chat-messages a:active {
 
 /* 对话右键菜单样式 */
 .context-menu {
-  position: absolute;
+  position: fixed; /* 固定定位，相对于视口 */
   background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); /* 增强阴影效果 */
   z-index: 1000;
   padding: 8px 0;
   width: 160px;
-  animation: fade-in 0.2s ease;
+  animation: fade-in-zoom 0.2s ease; /* 添加缩放动画 */
+  max-height: 300px;
+  overflow-y: auto;
+  pointer-events: auto; /* 确保菜单可点击 */
+}
+
+/* 添加菜单显示动画 */
+@keyframes fade-in-zoom {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .context-menu-item {
@@ -4219,18 +4537,10 @@ chat-messages a:active {
   background-color: rgba(0, 0, 0, 0.05);
 }
 
-.context-menu-item svg {
-  width: 16px;
-  height: 16px;
-  color: var(--text-secondary);
-}
-
-.context-menu-item.delete-item {
-  color: #ef4444;
-}
-
-.context-menu-item.delete-item svg {
-  color: #ef4444;
+/* 深色模式下菜单hover效果 */
+:root[data-theme="dark"] .context-menu-item:hover,
+:root[data-theme="system"] .context-menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* 对话重命名和删除确认对话框样式 */
