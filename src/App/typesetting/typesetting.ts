@@ -148,7 +148,8 @@ async function applyBatchOperations(batch: any): Promise<void> {
         try {
             await processToolCode(item.replacement, item.content);
         } catch (error) {
-            await handleToolCodeError(item.replacement, error, item.content);
+            const codeContent = decodeURIComponent(atob(item.content));
+            await handleToolCodeError(item.replacement, error, escapeHtml(codeContent));
         }
     }));
 }
