@@ -68,7 +68,12 @@ You should use five headers to guide the reasoning process: `understand`, `think
 - Always following these steps:
     > Understand (In Chinese) -> Self-Think (In Chinese) -> Verify and check your errors (In Chinese) -> Respond(In Chinese, required)
     
-# You final output should be like the following format:
+<|start_header|>system_alert<|end_header|>
+
+NEVER WRITE YOUR RESONSE IN CODE BLOCK
+
+Your response should contains **at least one** `<|start_header|>typeset_and_respond<|end_header|>` to ensure the response is visible to the user.
+
 <|start_header|>respond_example<|end_header|>
 
 ````Full output example
@@ -90,13 +95,7 @@ You should use five headers to guide the reasoning process: `understand`, `think
 ...
 (your response)
 ...(in **简体中文**, only this part will be visible to the user)
-````
-
-<|start_header|>system_alert<|end_header|>
-
-NEVER WRITE YOUR RESONSE IN CODE BLOCK
-
-Your response should contains **at least one** `<|start_header|>typeset_and_respond<|end_header|>` to ensure the response is visible to the user."#;
+````"#;
 
 #[allow(dead_code)]
 fn gemini_template(typesetting: &str, character_description: &str) -> String {

@@ -427,7 +427,7 @@ impl GeminiChat {
             temperature: 0.95,
             max_tokens: Some(8192), // 设置默认值
             top_p: Some(0.95),      // 设置默认值
-            top_k: Some(40),       // 设置默认值
+            top_k: Some(40),        // 设置默认值
             last_prompt: None,
             tools: Vec::new(),
             chat_id: 0,                    // 初始化为0或其他默认值
@@ -452,20 +452,43 @@ impl GeminiChat {
                 name: "interactive_button".to_string(),
                 description: "show a interactive button signed `message`, when user clicks on it, then you will receive `command` text".to_string(),
                 detail: r#"show a interactive button signed `message`, when user clicks on it, then you will receive `command` text
-- `message`: the text which you want to show on the button
-- `command`: the text which will be sent when user clicks the button
-"#.to_string(),
+    - `message`: the text which you want to show on the button
+    - `command`: the text which will be sent when user clicks the button
+    "#.to_string(),
                 args: {
                     let mut args = HashMap::new();
                     args.insert("message".to_string(), Value::String("click me to send `Hello!`".to_string()));
                     args.insert("command".to_string(), Value::String("Hello!".to_string()));
                     args
                 },
+            },
+            TypesetInfo {
+                name: "typst_render".to_string(),
+                description: "render typst document".to_string(),
+                detail: "render typst document by using typst.ts renderer, should write down CORRECT typst code for successfully rendering mathematical formulas, diagrams, and professional documents".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("typst_code".to_string(), Value::String("typst code which you want to render".to_string()));
+                    args
+                },
+            },
+            TypesetInfo {
+                name: "html_render".to_string(),
+                description: "render HTML content in a sandboxed environment".to_string(),
+                detail: r#"render HTML content safely in a sandboxed iframe, which tolerates malformed HTML without affecting the page layout
+    - `html`: the HTML content to render
+    - `title`: optional title for the HTML container (default: "HTML内容")
+    - `show_border`: optional boolean to show/hide border (default: true)"#.to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("html".to_string(), Value::String("<div>Your HTML content here</div>".to_string()));
+                    args.insert("title".to_string(), Value::String("HTML内容".to_string()));
+                    args.insert("show_border".to_string(), Value::Bool(true));
+                    args
+                },
             }
-
         ], &self.system_prompt);
     }
-
     /// 转换OpenAI格式的消息为Gemini格式的请求体
     fn build_gemini_request_body(
         &self,
@@ -544,7 +567,7 @@ impl GeminiChat {
             0,
             json!({
                 "role": "model",
-                "parts": [{ "text": format!("{}\n", self.build_system_instruction()) }]
+                "parts": [{ "text": format!("# I have double checked that my basic system settings are as follows, I will never disobey them:\n{}\n", self.build_system_instruction()) }]
             }),
         ); // 添加系统指令
 

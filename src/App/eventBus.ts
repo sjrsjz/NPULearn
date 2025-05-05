@@ -4,7 +4,6 @@ import type { ChatMessage, ChatHistoryItem } from './types';
 // 导出直接可访问的响应式状态
 export const isLoading = ref(false);
 export const isStreaming = ref(false);
-export const chatContent = ref<ChatMessage[]>([]);
 export const chatHistory = ref<ChatHistoryItem[]>([]);
 
 // 只有真正需要事件通信的功能使用事件总线

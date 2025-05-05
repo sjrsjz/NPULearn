@@ -15,8 +15,8 @@ import { Window } from '@tauri-apps/api/window';
 
 import { loadMathJax, renderMathInElement } from "./App/mathjax.ts";
 import { createNewChat, loadChatHistory, selectHistory } from "./App/chatHistory.ts";
-import { initMermaid } from "./App/mermaidRenderer.ts";
-import { renderMermaidDiagrams, setupMermaidRefresh, changeMermaidTheme } from "./App/mermaidRenderer.ts";
+import { initMermaid } from "./App/typesetting/mermaidRenderer.ts";
+import { changeMermaidTheme } from "./App/typesetting/mermaidRenderer.ts";
 import { applyHighlight, completeStreamRendering } from "./App/typesetting/typesetting.ts";
 import { chatHistory, eventBus, isLoading, isStreaming } from "./App/eventBus.ts";
 import { ChatHistory, ChatMessage } from "./App/types.ts";
@@ -115,7 +115,7 @@ function setupExternalLinks() {
 }
 
 
-// 修改 updateChatContent 函数，移除动画效果
+// 修改 updateChatContent 函数，移除直接DOM操作
 function updateChatContent(messages: ChatMessage[]) {
   if (!messages || messages.length === 0) {
     processedChatContent.value = '';
@@ -188,7 +188,7 @@ function updateChatContent(messages: ChatMessage[]) {
   }
 
   // 移除动画相关的类，保留fade-in以确保消息立即可见
-  processedChatContent.value = `
+  var generatedHtml = `
   <div class="scoped-content fade-in" data-theme="${isDark ? 'dark' : 'light'}">
     ${messagesHtml}
     <style>
@@ -801,36 +801,30 @@ function updateChatContent(messages: ChatMessage[]) {
   </div>
 `;
 
-  // 确保内容立即可见，不依赖动画
-  nextTick(() => {
-    // 强制使内容可见
-    const chatMessages = document.querySelector('.chat-messages');
-    if (chatMessages) {
-      chatMessages.querySelector('.scoped-content')?.classList.add('fade-in');
+  // 创建一个解析器来在内存中处理HTML
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div class="chat-messages">${generatedHtml}</div>`, 'text/html');
+  const virtualElement = doc.querySelector('.chat-messages');
 
-      // 为每个消息容器添加右键菜单事件
-      document.querySelectorAll('.message-content[data-message-index]').forEach(messageElement => {
-        messageElement.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const messageIndex = parseInt((messageElement as HTMLElement).dataset.messageIndex || '0', 10);
-          openMessageContextMenu(e as MouseEvent, messageIndex);
-        });
+  if (!virtualElement) return;
+
+  // 在虚拟DOM中应用代码高亮
+  applyHighlight(virtualElement as HTMLElement).then(highlightedElement => {
+    // 更新处理后的HTML
+    processedChatContent.value = highlightedElement.innerHTML;
+
+    // 重新渲染后再执行其他操作
+    if (!highlightedElement) return;
+
+    // 为消息添加右键菜单事件
+    highlightedElement.querySelectorAll('.message-content[data-message-index]').forEach(messageElement => {
+      messageElement.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const messageIndex = parseInt((messageElement as HTMLElement).dataset.messageIndex || '0', 10);
+        openMessageContextMenu(e as MouseEvent, messageIndex);
       });
-    }
-
-    // 应用代码高亮
-    applyHighlight();
-
-
-    // 只在非流传输状态下渲染UML图表，添加明确的日志
-    if (!isStreaming.value) {
-      console.log("消息更新完成，准备渲染UML图表");
-      renderMermaidDiagrams();
-      setupMermaidRefresh();
-    } else {
-      console.log("正在流式传输中，跳过UML渲染");
-    }
+    });
 
     // 渲染数学公式
     renderMathInElement();
@@ -846,9 +840,20 @@ function updateChatContent(messages: ChatMessage[]) {
 
     if (!isStreaming.value) {
       console.log("消息更新完成，开始处理延迟的渲染任务");
-      completeStreamRendering();
+      // 使用处理后的容器渲染其他内容
+      completeStreamRendering(highlightedElement as HTMLElement).then(() => {
+        console.log("延迟渲染任务完成");
+        processedChatContent.value = highlightedElement.innerHTML;
+      }).catch((error) => {
+        console.error("延迟渲染任务失败:", error);
+        showNotification("延迟渲染任务失败", "error");
+        processedChatContent.value = highlightedElement.innerHTML;
+      });
     }
+    processedChatContent.value = highlightedElement.innerHTML;
+
   });
+
 }
 
 // 流式消息处理相关函数

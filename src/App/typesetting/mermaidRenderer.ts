@@ -1,7 +1,7 @@
 import mermaid from 'mermaid'; // 导入Mermaid.js库
 import { nextTick } from "vue";
 
-import { AppEvents } from './eventBus';
+import { AppEvents } from '../eventBus';
 
 // 初始化Mermaid.js配置
 function initMermaid() {
@@ -19,8 +19,8 @@ function initMermaid() {
     });
 }
 
-// 修改渲染Mermaid图表函数，移除防抖机制
-async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3) {
+// 修改渲染Mermaid图表函数，接受容器参数
+async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3, container: HTMLElement = document.body) {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
         (document.documentElement.getAttribute('data-theme') === 'system' &&
             window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -34,15 +34,14 @@ async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3) {
     });
 
     try {
-        // 查找所有需要渲染的UML元素
-        const umlElements = document.querySelectorAll('.chat-messages .mermaid-container:not(.loaded)');
+        // 查找所有需要渲染的UML元素，使用传入的容器
+        const umlElements = container.querySelectorAll('.mermaid-container:not(.loaded)');
         console.log(`尝试渲染 ${umlElements.length} 个UML图表，当前重试次数: ${retryCount}`);
 
         if (umlElements.length === 0 && retryCount === 0) {
             // 第一次调用且没有找到未加载的图表，检查是否需要全局重新渲染
-            const allUmlElements = document.querySelectorAll('.chat-messages .mermaid-container');
+            const allUmlElements = container.querySelectorAll('.mermaid-container');
             if (allUmlElements.length > 0) {
-                // 不再自动重新渲染所有图表，避免性能问题
                 console.log(`未找到未加载的图表，存在 ${allUmlElements.length} 个已加载图表`);
             }
             return;
@@ -138,66 +137,69 @@ async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3) {
             // 如果有失败的图表，且未超过最大重试次数，则重试
             if (failedCount > 0 && retryCount < maxRetries) {
                 console.log(`${failedCount}个图表渲染失败，将在1.5秒后重试 (${retryCount + 1}/${maxRetries})`);
-                setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1500);
+                setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries, container), 1500);
             } else if (failedCount > 0) {
                 console.log(`渲染完成，但有${failedCount}个图表渲染失败，已达到最大重试次数`);
                 // 为失败的图表添加重试按钮事件监听
-                setupRetryButtons();
+                setupRetryButtons(container);
 
-                // 添加这一行来设置图表的可点击功能
-                setupMermaidRefresh();
+                // 设置图表的可点击功能
+                setupMermaidRefresh(container);
             } else {
                 console.log('所有图表渲染成功');
 
-                // 添加这一行来设置图表的可点击功能
-                setupMermaidRefresh();
+                // 设置图表的可点击功能
+                setupMermaidRefresh(container);
             }
         } else {
-            // 如果没有需要渲染的图表，也需要调用setupMermaidRefresh来处理已渲染的图表
-            setupMermaidRefresh();
+            // 如果没有需要渲染的图表，也处理已渲染的图表
+            setupMermaidRefresh(container);
         }
     } catch (error) {
         console.error("处理Mermaid图表失败:", error);
         if (retryCount < maxRetries) {
             console.log(`整体处理失败，将在1.5秒后重试 (${retryCount + 1}/${maxRetries})`);
-            setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries), 1500);
+            setTimeout(() => renderMermaidDiagrams(retryCount + 1, maxRetries, container), 1500);
         } else {
             // 即使出错，也尝试为已渲染的图表添加交互功能
-            setupMermaidRefresh();
+            setupMermaidRefresh(container);
         }
     }
 }
 
 // 设置图表渲染失败后的重试按钮事件
-function setupRetryButtons() {
+function setupRetryButtons(container: HTMLElement = document.body) {
     nextTick(() => {
-        document.querySelectorAll('.chat-messages .retry-render-button').forEach(button => {
+        container.querySelectorAll('.retry-render-button').forEach(button => {
+            if (button.hasAttribute('data-event-attached')) return;
+            
+            button.setAttribute('data-event-attached', 'true');
             button.addEventListener('click', async (e) => {
                 e.preventDefault();
                 const targetButton = e.target as HTMLElement;
                 const diagramId = targetButton.getAttribute('data-diagram-id');
-                const container = document.querySelector(`.mermaid-container[data-diagram-id="${diagramId}"]`);
+                const diagramContainer = container.querySelector(`.mermaid-container[data-diagram-id="${diagramId}"]`);
 
-                if (container) {
+                if (diagramContainer) {
                     // 移除loaded类以便重新渲染
-                    container.classList.remove('loaded');
+                    diagramContainer.classList.remove('loaded');
                     AppEvents.showNotification("正在重新渲染图表...", "info");
 
                     // 特别处理这个容器
-                    await renderMermaidDiagrams(0, 3);
+                    await renderMermaidDiagrams(0, 3, container);
                 }
             });
         });
     });
 }
 
-// 修改 setupMermaidRefresh 函数，添加点击事件以打开图表查看器
-function setupMermaidRefresh() {
+// 修改设置刷新按钮函数，接受容器参数
+function setupMermaidRefresh(container: HTMLElement = document.body) {
     nextTick(() => {
         // 为所有图表容器添加刷新按钮
-        document.querySelectorAll('.chat-messages .mermaid-container').forEach(container => {
+        container.querySelectorAll('.mermaid-container').forEach(diagramContainer => {
             // 检查容器是否已经有刷新按钮
-            if (!container.querySelector('.refresh-diagram-button')) {
+            if (!diagramContainer.querySelector('.refresh-diagram-button')) {
                 const refreshButton = document.createElement('button');
                 refreshButton.className = 'refresh-diagram-button';
                 refreshButton.innerHTML = `
@@ -214,34 +216,34 @@ function setupMermaidRefresh() {
                     e.preventDefault();
                     e.stopPropagation();
                     const targetButton = e.currentTarget as HTMLElement;
-                    const container = targetButton.closest('.mermaid-container');
+                    const clickedContainer = targetButton.closest('.mermaid-container');
 
-                    if (container) {
+                    if (clickedContainer) {
                         // 移除loaded类以便重新渲染
-                        container.classList.remove('loaded');
+                        clickedContainer.classList.remove('loaded');
                         // 清除上次渲染的内容记录，强制重新渲染
-                        container.removeAttribute('data-last-rendered');
+                        clickedContainer.removeAttribute('data-last-rendered');
                         targetButton.classList.add('refreshing');
                         AppEvents.showNotification("正在刷新图表...", "info");
 
                         // 延迟后渲染以确保UI更新
                         setTimeout(async () => {
-                            await renderMermaidDiagrams(0, 3);
+                            await renderMermaidDiagrams(0, 3, container);
                             targetButton.classList.remove('refreshing');
                         }, 100);
                     }
                 });
 
                 // 将按钮添加到容器中
-                container.appendChild(refreshButton);
+                diagramContainer.appendChild(refreshButton);
             }
 
-            // 检查图表是否渲染成功（有 loaded 类且没有 mermaid-error 元素）
-            const isRenderedSuccessfully = container.classList.contains('loaded') &&
-                !container.querySelector('.mermaid-error');
+            // 检查图表是否渲染成功
+            const isRenderedSuccessfully = diagramContainer.classList.contains('loaded') &&
+                !diagramContainer.querySelector('.mermaid-error');
 
             // 只有成功渲染的图表才添加放大按钮
-            if (isRenderedSuccessfully && !container.querySelector('.zoom-diagram-button')) {
+            if (isRenderedSuccessfully && !diagramContainer.querySelector('.zoom-diagram-button')) {
                 const zoomButton = document.createElement('button');
                 zoomButton.className = 'zoom-diagram-button';
                 zoomButton.innerHTML = `
@@ -258,10 +260,10 @@ function setupMermaidRefresh() {
                     e.preventDefault();
                     e.stopPropagation();
 
-                    const container = (e.currentTarget as HTMLElement).closest('.mermaid-container') as HTMLElement;
-                    if (container) {
-                        const svgElement = container.querySelector('svg');
-                        const contentElement = container.getAttribute('data-diagram-content');
+                    const clickedContainer = (e.currentTarget as HTMLElement).closest('.mermaid-container') as HTMLElement;
+                    if (clickedContainer) {
+                        const svgElement = clickedContainer.querySelector('svg');
+                        const contentElement = clickedContainer.getAttribute('data-diagram-content');
 
                         if (svgElement && contentElement) {
                             const svgContent = svgElement.outerHTML;
@@ -271,27 +273,27 @@ function setupMermaidRefresh() {
                     }
                 });
 
-                container.appendChild(zoomButton);
-            } else if (!isRenderedSuccessfully && container.querySelector('.zoom-diagram-button')) {
+                diagramContainer.appendChild(zoomButton);
+            } else if (!isRenderedSuccessfully && diagramContainer.querySelector('.zoom-diagram-button')) {
                 // 如果图表渲染失败，但之前添加了放大按钮，则移除它
-                const zoomButton = container.querySelector('.zoom-diagram-button');
+                const zoomButton = diagramContainer.querySelector('.zoom-diagram-button');
                 if (zoomButton) zoomButton.remove();
             }
 
             // 只为成功渲染的图表添加点击事件
             if (isRenderedSuccessfully) {
                 // 为整个容器添加点击事件以打开查看器
-                if (!container.hasAttribute('data-has-click-listener')) {
-                    container.setAttribute('data-has-click-listener', 'true');
+                if (!diagramContainer.hasAttribute('data-has-click-listener')) {
+                    diagramContainer.setAttribute('data-has-click-listener', 'true');
 
-                    container.addEventListener('click', (e) => {
+                    diagramContainer.addEventListener('click', (e) => {
                         // 点击按钮时不触发
                         if ((e.target as HTMLElement).closest('.refresh-diagram-button, .zoom-diagram-button')) {
                             return;
                         }
 
-                        const svgElement = container.querySelector('svg');
-                        const contentElement = container.getAttribute('data-diagram-content');
+                        const svgElement = diagramContainer.querySelector('svg');
+                        const contentElement = diagramContainer.getAttribute('data-diagram-content');
 
                         if (svgElement && contentElement) {
                             const svgContent = svgElement.outerHTML;
@@ -301,12 +303,11 @@ function setupMermaidRefresh() {
                     });
 
                     // 添加视觉提示，表明容器可点击
-                    container.classList.add('clickable-container');
+                    diagramContainer.classList.add('clickable-container');
                 }
             } else {
-                // 如果图表渲染失败，移除点击相关的类和属性
-                container.classList.remove('clickable-container');
-                // 不删除事件监听器，因为这可能导致内存泄漏问题，而是让它不执行实际操作
+                // 如果图表渲染失败，移除点击相关的类
+                diagramContainer.classList.remove('clickable-container');
             }
         });
     });
@@ -322,4 +323,44 @@ function changeMermaidTheme(theme: string) {
     }
 }
 
-export { initMermaid, renderMermaidDiagrams, setupMermaidRefresh, setupRetryButtons, changeMermaidTheme };
+/**
+ * 处理mermaid_render API调用
+ * @param apiInfo API调用信息
+ * @returns 生成的HTML内容
+ */
+function handleMermaidRender(apiInfo: any): string {
+    // 获取mermaid代码参数
+    const mermaidCode = apiInfo.arguments.mermaid_code || '';
+    console.log("处理mermaid_render:", mermaidCode);
+    // 创建唯一的图表ID
+    const diagramId = `mermaid-diagram-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    // 编码内容，以便在属性中安全存储
+    const encodedContent = encodeURIComponent(mermaidCode);
+
+    // 构建HTML
+    return `
+    <div class="special-api-call mermaid-api-call">
+      <div class="api-call-header">
+        <span class="api-call-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path>
+            <path d="M10 2c1 .5 2 2 2 5"></path>
+          </svg>
+        </span>
+        <span class="api-call-title">Mermaid 图表</span>
+      </div>
+      <div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
+        <div class="mermaid-loading">UML图表加载中...</div>
+      </div>
+      <div class="api-call-footer">
+        <details>
+          <summary>查看图表代码</summary>
+          <pre class="api-call-code"><code class="language-mermaid">${mermaidCode.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>
+        </details>
+      </div>
+    </div>
+  `;
+}
+
+export { initMermaid, renderMermaidDiagrams, setupMermaidRefresh, setupRetryButtons, changeMermaidTheme, handleMermaidRender };

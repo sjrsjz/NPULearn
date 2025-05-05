@@ -1,25 +1,25 @@
-
-import { nextTick } from 'vue';
 // hljs
 import hljs from 'highlight.js/lib/core';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
-import { renderMermaidDiagrams, setupMermaidRefresh } from '../mermaidRenderer';
+import { handleMermaidRender, renderMermaidDiagrams, setupMermaidRefresh } from './mermaidRenderer';
 import { isStreaming, AppEvents } from '../eventBus';
+import { handleTypstRender, renderTypstContainer } from './typstRenderer';
+import { handleHTMLRender, renderHTMLContainers } from './htmlRenderer';
 
 
 // 主函数：应用代码高亮和处理各种特殊代码块
-async function applyHighlight(): Promise<void> {
-    await nextTick(); // 确保 DOM 更新完成
+async function applyHighlight(container: HTMLElement): Promise<HTMLElement> {
     const timestamp = Date.now();
+    const resultContainer = container.cloneNode(true) as HTMLElement;
 
-    // 查找所有代码块
-    const codeElements = document.querySelectorAll('.chat-messages pre code');
-    if (!codeElements || codeElements.length === 0) return;
+    // 查找所有代码块，排除thinking-details中的代码块
+    const codeElements = resultContainer.querySelectorAll('.chat-messages pre:not(.thinking-details pre):not(:has(.thinking-details)) code');
+    if (!codeElements || codeElements.length === 0) return resultContainer;
 
     console.log(`处理 ${codeElements.length} 个代码块`);
 
-    // 创建一批次操作对象，用于收集所有DOM修改
+    // 创建一批次操作对象，用于收集所有修改
     const batch = {
         highlightElements: [] as HTMLElement[],
         toolCodeReplacements: [] as { original: Element, replacement: HTMLElement, content: string }[],
@@ -27,29 +27,26 @@ async function applyHighlight(): Promise<void> {
     };
 
     // 收集所有需要高亮的代码块
-    await collectCodeHighlight(codeElements, batch);
+    collectCodeHighlight(codeElements, batch);
 
     // 收集所有需要处理的工具代码块
-    await collectToolCodeBlocks(codeElements, batch);
+    collectToolCodeBlocks(codeElements, batch);
 
     // 收集所有需要添加复制按钮的代码块
-    await collectCodeBlockActions(codeElements, batch);
+    collectCodeBlockActions(codeElements, batch);
 
-    // 应用所有批次操作到DOM (一次性更新以减少抖动)
+    // 应用所有批次操作到HTML (一次性更新以减少抖动)
     await applyBatchOperations(batch);
 
-    // 根据是否在流式传输中决定如何处理图表渲染
-    if (!isStreaming.value) {
-        schedulePostHighlightTasks();
-    } else {
-        console.log("流式传输中，推迟渲染任务");
-    }
+    // 标记处理完成
+    resultContainer.setAttribute('data-highlight-applied', 'true');
 
     console.log(`高亮处理完成，耗时: ${Date.now() - timestamp}ms`);
+    return resultContainer;
 }
 
 // 收集需要高亮的代码元素
-async function collectCodeHighlight(codeElements: NodeListOf<Element>, batch: any): Promise<void> {
+function collectCodeHighlight(codeElements: NodeListOf<Element>, batch: any): void {
     for (const el of codeElements) {
         const preElement = el.parentElement as HTMLPreElement | null;
         if (!preElement) continue;
@@ -60,12 +57,13 @@ async function collectCodeHighlight(codeElements: NodeListOf<Element>, batch: an
 }
 
 // 收集需要处理的工具代码块
-async function collectToolCodeBlocks(codeElements: NodeListOf<Element>, batch: any): Promise<void> {
+function collectToolCodeBlocks(codeElements: NodeListOf<Element>, batch: any): void {
     for (const el of codeElements) {
         // 跳过非tool_code代码块
         if (!el.classList.contains('language-tool_code')) continue;
 
         const codeContent = el.textContent?.trim() || '';
+        console.warn("tool_code 内容:", codeContent);
         if (!codeContent) continue;
 
         const preElement = el.parentElement;
@@ -73,33 +71,35 @@ async function collectToolCodeBlocks(codeElements: NodeListOf<Element>, batch: a
 
         console.log("检测到 tool_code 代码块:", codeContent);
 
+        // Base64编码代码内容，防止特殊字符导致存储异常
+        const encodedContent = btoa(encodeURIComponent(codeContent));
+
         // 创建工具代码容器
         const toolCodeContainer = document.createElement('div');
         toolCodeContainer.className = 'tool-code-container';
 
-        // 设置初始加载状态
+        // 设置初始加载状态，使用Base64编码存储原始内容
         toolCodeContainer.innerHTML = `
           <div class="tool-code-loading">正在解析工具代码...</div>
-          <pre class="tool-code-original" style="display: none;"><code>${codeContent}</code></pre>
+          <pre class="tool-code-original" style="display: none;" data-encoded="true"><code>${encodedContent}</code></pre>
         `;
 
         // 收集替换信息，但不立即执行
         batch.toolCodeReplacements.push({
             original: preElement,
             replacement: toolCodeContainer,
-            content: codeContent
+            content: encodedContent
         });
     }
 }
 
 // 收集需要添加复制按钮的代码块
-async function collectCodeBlockActions(codeElements: NodeListOf<Element>, batch: any): Promise<void> {
+function collectCodeBlockActions(codeElements: NodeListOf<Element>, batch: any): void {
     for (const el of codeElements) {
         const preElement = el.parentElement;
         // 跳过已经处理过的或特殊类型的代码块
         if (!preElement ||
             preElement.querySelector('.code-copy-button') ||
-            el.classList.contains('language-mermaid') ||
             el.classList.contains('language-tool_code')) continue;
 
         // 获取代码内容
@@ -141,7 +141,10 @@ async function applyBatchOperations(batch: any): Promise<void> {
 }
 
 // 处理工具代码的逻辑
-async function processToolCode(toolCodeContainer: HTMLDivElement, codeContent: string): Promise<void> {
+async function processToolCode(toolCodeContainer: HTMLDivElement, encodedContent: string): Promise<void> {
+    // 解码Base64编码的内容
+    const codeContent = decodeURIComponent(atob(encodedContent));
+
     if (isStreaming.value) {
         // 直接显示原始代码和流式传输提示
         toolCodeContainer.innerHTML = `
@@ -168,7 +171,6 @@ async function processToolCode(toolCodeContainer: HTMLDivElement, codeContent: s
         return;
     }
 
-
     // 调用后端解析代码
     const astResult = await invoke<string>("parse_code", { code: codeContent });
     console.log("AST 解析结果:", astResult);
@@ -186,31 +188,6 @@ async function processToolCode(toolCodeContainer: HTMLDivElement, codeContent: s
         highlightToolCodeElements(toolCodeContainer);
     }
 }
-
-// // 创建工具代码流式视图
-// function createToolCodeStreamingView(apiInfo: any, codeContent: string): string {
-//     return `
-//     <div class="tool-code-header">工具代码解析结果:</div>
-//     <div class="tool-code-result">
-//       <div class="tool-api-info">
-//         <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
-//         <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
-//         ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-//         `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
-//     ).join('')}
-//       </div>
-//     </div>
-//     <div class="api-call-notice">
-//       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-//         <circle cx="12" cy="12" r="10"></circle>
-//         <line x1="12" y1="8" x2="12" y2="12"></line>
-//         <line x1="12" y1="16" x2="12.01" y2="16"></line>
-//       </svg>
-//       <span>API功能将在消息完整接收后处理</span>
-//     </div>
-//     <pre class="tool-code-original"><code>${codeContent}</code></pre>
-//   `;
-// }
 
 // 创建工具代码的备用视图（解析失败时）
 function createToolCodeFallbackView(astResult: string, codeContent: string): string {
@@ -306,36 +283,39 @@ function addCopyButtonToCodeBlock(preElement: Element, codeContent: string): voi
     preElement.appendChild(copyButton);
 }
 
-// 处理高亮后需要执行的任务
-function schedulePostHighlightTasks(): void {
-    // 使用 Promise.resolve() 和 setTimeout 来确保这些任务在当前事件循环之后执行
-    Promise.resolve().then(() => {
-        setTimeout(() => {
-            renderMermaidDiagrams();
-            setupInteractiveButtons(); // 设置交互按钮
-        }, 300);
-    });
-}
 
-function completeStreamRendering(): void {
+function completeStreamRendering(container: HTMLElement): Promise<void> {
     console.log("流式传输完成，执行延迟的渲染任务");
 
     // 标记需要重新渲染的Mermaid容器
-    document.querySelectorAll('.mermaid-container:not(.loaded)').forEach(container => {
+    container.querySelectorAll('.mermaid-container:not(.loaded)').forEach(container => {
         container.removeAttribute('data-last-rendered');
         // 添加一个标志，防止重复处理
         container.setAttribute('data-pending-render', 'true');
     });
 
     // 处理工具代码块
-    document.querySelectorAll('.tool-code-container').forEach(async container => {
+    container.querySelectorAll('.tool-code-container').forEach(async container => {
         const originalCodeElem = container.querySelector('.tool-code-original code');
         if (originalCodeElem && originalCodeElem.textContent) {
-            const codeContent = originalCodeElem.textContent.trim();
+            let codeContent = originalCodeElem.textContent.trim();
+
+            // 检查是否是Base64编码的内容
+            const isEncoded = (originalCodeElem.parentElement as HTMLElement).getAttribute('data-encoded') === 'true';
+            if (isEncoded) {
+                try {
+                    codeContent = decodeURIComponent(atob(codeContent));
+                } catch (error) {
+                    console.error("Base64解码失败:", error);
+                }
+            }
 
             // 重新处理工具代码
             try {
-                await processToolCode(container as HTMLDivElement, codeContent);
+                // 如果是Base64编码，需要重新编码后传递
+                const contentToProcess = !isEncoded ?
+                    btoa(encodeURIComponent(codeContent)) : codeContent;
+                await processToolCode(container as HTMLDivElement, contentToProcess);
             } catch (error) {
                 console.error("重新处理工具代码失败:", error);
                 handleToolCodeError(container as HTMLDivElement, error, codeContent);
@@ -343,47 +323,28 @@ function completeStreamRendering(): void {
         }
     });
 
-    // 使用更稳健的渲染策略，增加延迟确保DOM已准备好
-    setTimeout(() => {
-        console.log("开始第一轮Mermaid图表渲染");
-        // 检查渲染前的图表数量
-        const beforeRenderCount = document.querySelectorAll('.mermaid-container').length;
-        console.log(`渲染前找到 ${beforeRenderCount} 个Mermaid容器`);
+    // 处理Typst容器 
+    container.querySelectorAll('.typst-container:not(.loaded)').forEach(async container => {
+        try {
+            await renderTypstContainer(container as HTMLElement);
+        } catch (error) {
+            console.error("渲染Typst文档失败:", error);
+        }
+    });
 
+    // 处理HTML容器
+    renderHTMLContainers(container);
+
+    // 返回一个Promise，当所有渲染完成时解析
+    return new Promise((resolve) => {
+        console.log("开始Mermaid图表渲染");
         // 第一轮渲染
-        renderMermaidDiagrams(0, 5).then(() => {
-            // 检查渲染结果
-            const unrenderedCount = document.querySelectorAll('.mermaid-container:not(.loaded)').length;
-            const renderedCount = document.querySelectorAll('.mermaid-container.loaded').length;
-            console.log(`第一轮渲染后: 已渲染 ${renderedCount} 个图表, 未渲染 ${unrenderedCount} 个图表`);
-
-            // 如果仍有未渲染的图表，进行第二轮渲染
-            if (unrenderedCount > 0) {
-                console.log(`进行第二轮渲染`);
-                // 增加延迟时间，确保DOM更新完成
-                setTimeout(() => {
-                    renderMermaidDiagrams(0, 5).then(() => {
-                        // 处理按钮和刷新逻辑
-                        console.log("渲染完成，设置刷新和交互按钮");
-                        setupMermaidRefresh();
-                        setupInteractiveButtons();
-
-                        // 再增加一个保险措施，确保图表可见
-                        document.querySelectorAll('.mermaid-container').forEach(container => {
-                            if (container.querySelector('svg')) {
-                                container.classList.add('loaded');
-                                container.querySelector('.mermaid-loading')?.remove();
-                            }
-                        });
-                    });
-                }, 800); // 增加延迟
-            } else {
-                console.log("所有图表已在第一轮渲染完成");
-                setupMermaidRefresh();
-                setupInteractiveButtons();
-            }
+        renderMermaidDiagrams(0, 5, container).then(() => {
+            setupMermaidRefresh(container);
+            setupInteractiveButtons(container);
+            resolve();
         });
-    }, 700); // 增加初始延迟
+    });
 }
 /**
  * 解析工具代码AST，提取API调用的关键信息
@@ -531,50 +492,14 @@ function handleSpecialApiCall(apiInfo: any): string | null {
             return handleMermaidRender(apiInfo);
         case 'interactive_button':
             return handleInteractiveButton(apiInfo);
+        case 'typst_render':
+            return handleTypstRender(apiInfo);
+        case 'html_render':
+            return handleHTMLRender(apiInfo);
         // 在这里可以方便地添加新的函数处理
         default:
             return null; // 不认识的函数调用，返回null使用默认显示
     }
-}
-
-/**
- * 处理mermaid_render API调用
- * @param apiInfo API调用信息
- * @returns 生成的HTML内容
- */
-function handleMermaidRender(apiInfo: any): string {
-    // 获取mermaid代码参数
-    const mermaidCode = apiInfo.arguments.mermaid_code || '';
-    console.log("处理mermaid_render:", mermaidCode);
-    // 创建唯一的图表ID
-    const diagramId = `mermaid-diagram-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-
-    // 编码内容，以便在属性中安全存储
-    const encodedContent = encodeURIComponent(mermaidCode);
-
-    // 构建HTML
-    return `
-    <div class="special-api-call mermaid-api-call">
-      <div class="api-call-header">
-        <span class="api-call-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"></path>
-            <path d="M10 2c1 .5 2 2 2 5"></path>
-          </svg>
-        </span>
-        <span class="api-call-title">Mermaid 图表</span>
-      </div>
-      <div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
-        <div class="mermaid-loading">UML图表加载中...</div>
-      </div>
-      <div class="api-call-footer">
-        <details>
-          <summary>查看图表代码</summary>
-          <pre class="api-call-code"><code class="language-mermaid">${mermaidCode.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>
-        </details>
-      </div>
-    </div>
-  `;
 }
 
 /**
@@ -619,32 +544,32 @@ function handleInteractiveButton(apiInfo: any): string {
   `;
 }
 
+
+
 // 添加此函数用于设置交互按钮的点击事件
-function setupInteractiveButtons() {
-    nextTick(() => {
-        document.querySelectorAll('.chat-messages .interactive-command-button').forEach(button => {
-            if (button.hasAttribute('data-event-attached')) return; // 避免重复添加事件
+function setupInteractiveButtons(container: HTMLElement): void {
+    container.querySelectorAll('.interactive-command-button').forEach(button => {
+        if (button.hasAttribute('data-event-attached')) return; // 避免重复添加事件
 
-            button.setAttribute('data-event-attached', 'true');
-            button.addEventListener('click', async (e) => {
-                e.preventDefault();
+        button.setAttribute('data-event-attached', 'true');
+        button.addEventListener('click', async (e) => {
+            e.preventDefault();
 
-                // 如果正在流式输出消息，禁止发送新消息
-                if (isStreaming.value) {
-                    AppEvents.showNotification("请等待当前消息输出完成", "error");
-                    return;
+            // 如果正在流式输出消息，禁止发送新消息
+            if (isStreaming.value) {
+                AppEvents.showNotification("请等待当前消息输出完成", "error");
+                return;
+            }
+
+            const encodedCommand = (button as HTMLElement).getAttribute('data-command');
+            if (encodedCommand) {
+                const command = decodeURIComponent(encodedCommand);
+                if (command.trim()) {
+                    // 发送消息
+                    await AppEvents.sendStreamMessageDirect("> " + command);
+                    AppEvents.showNotification("已发送命令", "success");
                 }
-
-                const encodedCommand = (button as HTMLElement).getAttribute('data-command');
-                if (encodedCommand) {
-                    const command = decodeURIComponent(encodedCommand);
-                    if (command.trim()) {
-                        // 发送消息
-                        await AppEvents.sendStreamMessageDirect("> " + command);
-                        AppEvents.showNotification("已发送命令", "success");
-                    }
-                }
-            });
+            }
         });
     });
 }
@@ -705,7 +630,6 @@ function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): 
 export {
     applyHighlight,
     completeStreamRendering,
-    schedulePostHighlightTasks,
     handleSpecialApiCall,
     processApiCallResult,
 };

@@ -1977,3 +1977,99 @@ chat-messages a:active {
 [data-theme="dark"] .mermaid-source .code-content {
     background-color: rgba(255, 255, 255, 0.05);
 }
+
+
+/* Typst 文档容器样式 */
+.typst-container {
+    background-color: #ffffff;
+    border-radius: 8px;
+    margin: 15px 0;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow: auto;
+}
+
+/* Typst 文档加载状态 */
+.typst-loading {
+    padding: 20px;
+    text-align: center;
+    color: #666;
+    font-style: italic;
+}
+
+/* Typst 文档 SVG 容器 */
+.typst-document-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 10px;
+}
+
+/* Typst 文档 SVG 样式 */
+.typst-document-container svg {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Typst 源代码容器 */
+.typst-source {
+    background-color: #f7f7f7;
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: 8px;
+    max-height: 300px;
+    overflow: auto;
+}
+
+/* Typst 错误信息 */
+.typst-error {
+    color: #d32f2f;
+    background-color: #ffebee;
+    padding: 10px;
+    border-radius: 4px;
+    margin: 10px 0;
+    border-left: 4px solid #d32f2f;
+}
+
+.typst-source-error {
+    margin-top: 10px;
+    opacity: 0.7;
+}
+
+/* Typst API 调用卡片样式 */
+.typst-api-call {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 15px 0;
+    background-color: #fff;
+}
+
+.typst-api-call .api-call-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 15px;
+    background-color: #f5f5f5;
+    border-bottom: 1px solid #e0e0e0;
+    font-weight: 500;
+}
+
+.typst-api-call .api-call-icon {
+    margin-right: 8px;
+    color: #555;
+}
+
+.typst-api-call .api-call-footer {
+    border-top: 1px solid #e0e0e0;
+    padding: 8px 15px;
+    background-color: #f9f9f9;
+    font-size: 0.9em;
+}
+
+.typst-api-call .api-call-code {
+    margin-top: 8px;
+    background-color: #f5f5f5;
+    padding: 8px;
+    border-radius: 4px;
+    max-height: 200px;
+    overflow: auto;
+}
