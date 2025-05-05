@@ -1,4 +1,5 @@
 use comrak::{markdown_to_html, ComrakOptions};
+use ammonia::clean;
 
 pub fn convert_markdown_with_latex(markdown: &str) -> String {
     // 将输入的 markdown 按照特殊标记分割成思考过程和最终回答
@@ -25,11 +26,12 @@ pub fn convert_markdown_with_latex(markdown: &str) -> String {
     if !thinking_parts.is_empty() {
         let thinking_content = thinking_parts.join("<|start_header|>typeset_and_respond<|end_header|>");
         let html_thinking = markdown_to_html(&thinking_content, &options);
+        let sanitized_html_thinking = clean(&html_thinking); // 清理HTML，进行转义
 
         result.push_str("<details class=\"thinking-details\">\n");
         result.push_str("<summary class=\"thinking-summary\">点击查看思考过程</summary>\n");
         result.push_str("<div class=\"thinking-content\">\n");
-        result.push_str(&html_thinking);
+        result.push_str(&sanitized_html_thinking); // 使用清理后的HTML
         result.push_str("\n</div>\n");
         result.push_str("</details>\n\n");
 

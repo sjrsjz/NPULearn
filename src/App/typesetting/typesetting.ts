@@ -2,11 +2,24 @@
 import hljs from 'highlight.js/lib/core';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
-import { handleMermaidRender, renderMermaidDiagrams, setupMermaidRefresh } from './mermaidRenderer';
+import { handleMermaidRender } from './mermaidRenderer';
 import { isStreaming, AppEvents } from '../eventBus';
-import { handleTypstRender, renderTypstContainer } from './typstRenderer';
-import { handleHTMLRender, renderHTMLContainers } from './htmlRenderer';
+import { handleTypstRender } from './typstRenderer';
+import { handleHTMLRender } from './htmlRenderer';
 
+/**
+ * HTML转义函数，防止XSS攻击
+ * @param str 需要转义的字符串
+ * @returns 转义后的安全字符串
+ */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // 主函数：应用代码高亮和处理各种特殊代码块
 async function applyHighlight(container: HTMLElement): Promise<HTMLElement> {
@@ -27,13 +40,13 @@ async function applyHighlight(container: HTMLElement): Promise<HTMLElement> {
     };
 
     // 收集所有需要高亮的代码块
-    collectCodeHighlight(codeElements, batch);
+    await collectCodeHighlight(codeElements, batch);
 
     // 收集所有需要处理的工具代码块
-    collectToolCodeBlocks(codeElements, batch);
+    await collectToolCodeBlocks(codeElements, batch);
 
     // 收集所有需要添加复制按钮的代码块
-    collectCodeBlockActions(codeElements, batch);
+    await collectCodeBlockActions(codeElements, batch);
 
     // 应用所有批次操作到HTML (一次性更新以减少抖动)
     await applyBatchOperations(batch);
@@ -46,7 +59,7 @@ async function applyHighlight(container: HTMLElement): Promise<HTMLElement> {
 }
 
 // 收集需要高亮的代码元素
-function collectCodeHighlight(codeElements: NodeListOf<Element>, batch: any): void {
+async function collectCodeHighlight(codeElements: NodeListOf<Element>, batch: any): Promise<void> {
     for (const el of codeElements) {
         const preElement = el.parentElement as HTMLPreElement | null;
         if (!preElement) continue;
@@ -57,7 +70,7 @@ function collectCodeHighlight(codeElements: NodeListOf<Element>, batch: any): vo
 }
 
 // 收集需要处理的工具代码块
-function collectToolCodeBlocks(codeElements: NodeListOf<Element>, batch: any): void {
+async function collectToolCodeBlocks(codeElements: NodeListOf<Element>, batch: any): Promise<void> {
     for (const el of codeElements) {
         // 跳过非tool_code代码块
         if (!el.classList.contains('language-tool_code')) continue;
@@ -94,7 +107,7 @@ function collectToolCodeBlocks(codeElements: NodeListOf<Element>, batch: any): v
 }
 
 // 收集需要添加复制按钮的代码块
-function collectCodeBlockActions(codeElements: NodeListOf<Element>, batch: any): void {
+async function collectCodeBlockActions(codeElements: NodeListOf<Element>, batch: any): Promise<void> {
     for (const el of codeElements) {
         const preElement = el.parentElement;
         // 跳过已经处理过的或特殊类型的代码块
@@ -114,7 +127,6 @@ function collectCodeBlockActions(codeElements: NodeListOf<Element>, batch: any):
 async function applyBatchOperations(batch: any): Promise<void> {
     // 1. 首先执行代码高亮 (这不会改变DOM结构)
     for (const el of batch.highlightElements) {
-
         hljs.highlightElement(el);
     }
 
@@ -125,7 +137,7 @@ async function applyBatchOperations(batch: any): Promise<void> {
 
     // 3. 为常规代码块添加复制按钮
     for (const item of batch.actionElements) {
-        addCopyButtonToCodeBlock(item.element, item.content);
+        await addCopyButtonToCodeBlock(item.element, item.content);
     }
 
     // 4. 现在处理所有工具代码块内容
@@ -135,7 +147,7 @@ async function applyBatchOperations(batch: any): Promise<void> {
         try {
             await processToolCode(item.replacement, item.content);
         } catch (error) {
-            handleToolCodeError(item.replacement, error, item.content);
+            await handleToolCodeError(item.replacement, error, item.content);
         }
     }));
 }
@@ -163,11 +175,11 @@ async function processToolCode(toolCodeContainer: HTMLDivElement, encodedContent
           </svg>
           <span>API功能将在消息完整接收后处理</span>
         </div>
-        <pre class="tool-code-original"><code>${codeContent}</code></pre>
+        <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
         `;
 
         // 高亮显示AST和原始代码
-        highlightToolCodeElements(toolCodeContainer);
+        await highlightToolCodeElements(toolCodeContainer);
         return;
     }
 
@@ -177,38 +189,38 @@ async function processToolCode(toolCodeContainer: HTMLDivElement, encodedContent
 
     // 解析AST JSON并处理
     const astJson = JSON.parse(astResult);
-    const apiInfo = parseApiCall(astJson);
+    const apiInfo = await parseApiCall(astJson);
 
     if (apiInfo) {
-        toolCodeContainer.innerHTML = processApiCallResult(apiInfo, astJson, codeContent);
+        toolCodeContainer.innerHTML = await processApiCallResult(apiInfo, astJson, codeContent);
     } else {
         // 解析失败时显示原始AST结果
-        toolCodeContainer.innerHTML = createToolCodeFallbackView(astResult, codeContent);
+        toolCodeContainer.innerHTML = await createToolCodeFallbackView(astResult, codeContent);
         // 高亮显示AST和原始代码
-        highlightToolCodeElements(toolCodeContainer);
+        await highlightToolCodeElements(toolCodeContainer);
     }
 }
 
 // 创建工具代码的备用视图（解析失败时）
-function createToolCodeFallbackView(astResult: string, codeContent: string): string {
+async function createToolCodeFallbackView(astResult: string, codeContent: string): Promise<string> {
     return `
     <div class="tool-code-header">工具代码 AST:</div>
-    <pre class="tool-code-ast"><code>${JSON.stringify(JSON.parse(astResult), null, 2)}</code></pre>
+    <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(JSON.parse(astResult), null, 2))}</code></pre>
     <div class="tool-code-header original-header">原始代码:</div>
-    <pre class="tool-code-original"><code>${codeContent}</code></pre>
+    <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
   `;
 }
 
 // 处理工具代码错误
-function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unknown, codeContent: string): void {
+async function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unknown, codeContent: string): Promise<void> {
     console.error("解析 tool_code 失败:", error);
 
     // 显示错误信息
     toolCodeContainer.innerHTML = `
     <div class="tool-code-error">解析工具代码失败:</div>
-    <pre class="tool-code-error-message">${error instanceof Error ? error.message : String(error)}</pre>
+    <pre class="tool-code-error-message">${escapeHtml(error instanceof Error ? error.message : String(error))}</pre>
     <div class="tool-code-header original-header">原始代码:</div>
-    <pre class="tool-code-original"><code>${codeContent}</code></pre>
+    <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
   `;
 
     // 确保原始代码也被高亮
@@ -219,7 +231,7 @@ function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unknown, 
 }
 
 // 高亮工具代码元素
-function highlightToolCodeElements(container: HTMLDivElement): void {
+async function highlightToolCodeElements(container: HTMLDivElement): Promise<void> {
     // 对AST结果应用高亮
     const astCodeElement = container.querySelector('.tool-code-ast code');
     if (astCodeElement) {
@@ -235,7 +247,7 @@ function highlightToolCodeElements(container: HTMLDivElement): void {
 
 
 // 为代码块添加复制按钮
-function addCopyButtonToCodeBlock(preElement: Element, codeContent: string): void {
+async function addCopyButtonToCodeBlock(preElement: Element, codeContent: string): Promise<void> {
     // 创建复制按钮
     const copyButton = document.createElement('button');
     copyButton.className = 'code-copy-button';
@@ -284,74 +296,12 @@ function addCopyButtonToCodeBlock(preElement: Element, codeContent: string): voi
 }
 
 
-function completeStreamRendering(container: HTMLElement): Promise<void> {
-    console.log("流式传输完成，执行延迟的渲染任务");
-
-    // 标记需要重新渲染的Mermaid容器
-    container.querySelectorAll('.mermaid-container:not(.loaded)').forEach(container => {
-        container.removeAttribute('data-last-rendered');
-        // 添加一个标志，防止重复处理
-        container.setAttribute('data-pending-render', 'true');
-    });
-
-    // 处理工具代码块
-    container.querySelectorAll('.tool-code-container').forEach(async container => {
-        const originalCodeElem = container.querySelector('.tool-code-original code');
-        if (originalCodeElem && originalCodeElem.textContent) {
-            let codeContent = originalCodeElem.textContent.trim();
-
-            // 检查是否是Base64编码的内容
-            const isEncoded = (originalCodeElem.parentElement as HTMLElement).getAttribute('data-encoded') === 'true';
-            if (isEncoded) {
-                try {
-                    codeContent = decodeURIComponent(atob(codeContent));
-                } catch (error) {
-                    console.error("Base64解码失败:", error);
-                }
-            }
-
-            // 重新处理工具代码
-            try {
-                // 如果是Base64编码，需要重新编码后传递
-                const contentToProcess = !isEncoded ?
-                    btoa(encodeURIComponent(codeContent)) : codeContent;
-                await processToolCode(container as HTMLDivElement, contentToProcess);
-            } catch (error) {
-                console.error("重新处理工具代码失败:", error);
-                handleToolCodeError(container as HTMLDivElement, error, codeContent);
-            }
-        }
-    });
-
-    // 处理Typst容器 
-    container.querySelectorAll('.typst-container:not(.loaded)').forEach(async container => {
-        try {
-            await renderTypstContainer(container as HTMLElement);
-        } catch (error) {
-            console.error("渲染Typst文档失败:", error);
-        }
-    });
-
-    // 处理HTML容器
-    renderHTMLContainers(container);
-
-    // 返回一个Promise，当所有渲染完成时解析
-    return new Promise((resolve) => {
-        console.log("开始Mermaid图表渲染");
-        // 第一轮渲染
-        renderMermaidDiagrams(0, 5, container).then(() => {
-            setupMermaidRefresh(container);
-            setupInteractiveButtons(container);
-            resolve();
-        });
-    });
-}
 /**
  * 解析工具代码AST，提取API调用的关键信息
  * @param ast 解析后的AST JSON对象
  * @returns 包含API调用信息的对象，如果解析失败则返回null
  */
-function parseApiCall(ast: any) {
+async function parseApiCall(ast: any) {
     try {
         // 检查根节点是否为LambdaCall类型
         if (ast.node_type !== "LambdaCall") {
@@ -480,7 +430,7 @@ function parseApiCall(ast: any) {
  * @param apiInfo 解析出的API调用信息
  * @returns 处理后的HTML内容，如果无法处理则返回null
  */
-function handleSpecialApiCall(apiInfo: any): string | null {
+async function handleSpecialApiCall(apiInfo: any): Promise<string | null> {
     // 只处理default_api的调用
     if (apiInfo.api_name !== 'default_api') {
         return null;
@@ -489,13 +439,13 @@ function handleSpecialApiCall(apiInfo: any): string | null {
     // 根据函数名分发到不同的处理函数
     switch (apiInfo.function_name) {
         case 'mermaid_render':
-            return handleMermaidRender(apiInfo);
+            return await handleMermaidRender(apiInfo);
         case 'interactive_button':
-            return handleInteractiveButton(apiInfo);
+            return await handleInteractiveButton(apiInfo);
         case 'typst_render':
-            return handleTypstRender(apiInfo);
+            return await handleTypstRender(apiInfo);
         case 'html_render':
-            return handleHTMLRender(apiInfo);
+            return await handleHTMLRender(apiInfo);
         // 在这里可以方便地添加新的函数处理
         default:
             return null; // 不认识的函数调用，返回null使用默认显示
@@ -507,7 +457,7 @@ function handleSpecialApiCall(apiInfo: any): string | null {
  * @param apiInfo API调用信息
  * @returns 生成的HTML内容
  */
-function handleInteractiveButton(apiInfo: any): string {
+async function handleInteractiveButton(apiInfo: any): Promise<string> {
     // 获取参数
     const message = apiInfo.arguments.message || '点击发送';
     const command = apiInfo.arguments.command || '';
@@ -531,13 +481,13 @@ function handleInteractiveButton(apiInfo: any): string {
         <span class="api-call-title">交互按钮</span>
       </div>
       <div class="interactive-button-container">
-        <button class="markdown-button interactive-command-button" data-command="${encodedCommand}">${message}</button>
+        <button class="markdown-button interactive-command-button" data-command="${encodedCommand}">${escapeHtml(message)}</button>
       </div>
       <div class="api-call-footer">
         <details>
           <summary>查看按钮配置</summary>
-          <pre class="api-call-code"><code>消息: ${message}
-命令: ${command}</code></pre>
+          <pre class="api-call-code"><code>消息: ${escapeHtml(message)}
+命令: ${escapeHtml(command)}</code></pre>
         </details>
       </div>
     </div>
@@ -547,7 +497,7 @@ function handleInteractiveButton(apiInfo: any): string {
 
 
 // 添加此函数用于设置交互按钮的点击事件
-function setupInteractiveButtons(container: HTMLElement): void {
+async function setupInteractiveButtons(container: HTMLElement): Promise<void> {
     container.querySelectorAll('.interactive-command-button').forEach(button => {
         if (button.hasAttribute('data-event-attached')) return; // 避免重复添加事件
 
@@ -575,9 +525,9 @@ function setupInteractiveButtons(container: HTMLElement): void {
 }
 
 // 修改原有的解析逻辑，整合特殊API处理
-function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): string {
+async function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): Promise<string> {
     // 尝试处理特殊API调用
-    const specialApiHtml = handleSpecialApiCall(apiInfo);
+    const specialApiHtml = await handleSpecialApiCall(apiInfo);
 
     if (specialApiHtml) {
         // 如果成功生成了特殊API的HTML，返回带有原始代码和AST的完整结构
@@ -588,18 +538,18 @@ function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): 
         <div class="api-details">
           <h4>API调用信息</h4>
           <div class="tool-api-info">
-            <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
-            <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
+            <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${escapeHtml(apiInfo.api_name)}</span></div>
+            <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${escapeHtml(apiInfo.function_name)}</span></div>
             ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
+            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${escapeHtml(String(value))}</span></div>`
         ).join('')}
           </div>
           
           <h4>AST详情</h4>
-          <pre class="tool-code-ast"><code>${JSON.stringify(astJson, null, 2)}</code></pre>
+          <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
           
           <h4>原始代码</h4>
-          <pre class="tool-code-original"><code>${codeContent}</code></pre>
+          <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
         </div>
       </details>
     `;
@@ -609,19 +559,19 @@ function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): 
       <div class="tool-code-header">工具代码解析结果:</div>
       <div class="tool-code-result">
         <div class="tool-api-info">
-          <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${apiInfo.api_name}</span></div>
-          <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${apiInfo.function_name}</span></div>
+          <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${escapeHtml(apiInfo.api_name)}</span></div>
+          <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${escapeHtml(apiInfo.function_name)}</span></div>
           ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${value}</span></div>`
+            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${escapeHtml(String(value))}</span></div>`
         ).join('')}
         </div>
       </div>
       <details class="tool-code-details">
         <summary>查看AST详情</summary>
-        <pre class="tool-code-ast"><code>${JSON.stringify(astJson, null, 2)}</code></pre>
+        <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
       </details>
       <div class="tool-code-header original-header">原始代码:</div>
-      <pre class="tool-code-original"><code>${codeContent}</code></pre>
+      <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
     `;
     }
 }
@@ -629,7 +579,7 @@ function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): 
 
 export {
     applyHighlight,
-    completeStreamRendering,
     handleSpecialApiCall,
     processApiCallResult,
+    setupInteractiveButtons, // 将此函数也导出
 };

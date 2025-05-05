@@ -37,3 +37,4 @@ reqwest = { version = "0.11", features = ["json", "stream"] }
 base64 = "0.21.0"
 futures-util = "0.3.31"
 xlang_frontend = "0.1.2"
+ammonia = "4.1.0"

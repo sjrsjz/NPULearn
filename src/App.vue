@@ -17,7 +17,7 @@ import { loadMathJax, renderMathInElement } from "./App/mathjax.ts";
 import { createNewChat, loadChatHistory, selectHistory } from "./App/chatHistory.ts";
 import { initMermaid } from "./App/typesetting/mermaidRenderer.ts";
 import { changeMermaidTheme } from "./App/typesetting/mermaidRenderer.ts";
-import { applyHighlight, completeStreamRendering } from "./App/typesetting/typesetting.ts";
+import { applyHighlight } from "./App/typesetting/typesetting.ts";
 import { chatHistory, eventBus, isLoading, isStreaming } from "./App/eventBus.ts";
 import { ChatHistory, ChatMessage } from "./App/types.ts";
 
@@ -838,18 +838,6 @@ function updateChatContent(messages: ChatMessage[]) {
     // 滚动到底部
     scrollToBottom(true);
 
-    if (!isStreaming.value) {
-      console.log("消息更新完成，开始处理延迟的渲染任务");
-      // 使用处理后的容器渲染其他内容
-      completeStreamRendering(highlightedElement as HTMLElement).then(() => {
-        console.log("延迟渲染任务完成");
-        processedChatContent.value = highlightedElement.innerHTML;
-      }).catch((error) => {
-        console.error("延迟渲染任务失败:", error);
-        showNotification("延迟渲染任务失败", "error");
-        processedChatContent.value = highlightedElement.innerHTML;
-      });
-    }
     processedChatContent.value = highlightedElement.innerHTML;
 
   });

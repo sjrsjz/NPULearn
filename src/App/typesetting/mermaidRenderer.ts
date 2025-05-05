@@ -1,7 +1,7 @@
 import mermaid from 'mermaid'; // 导入Mermaid.js库
 import { nextTick } from "vue";
 
-import { AppEvents } from '../eventBus';
+import { AppEvents, isStreaming } from '../eventBus';
 
 // 初始化Mermaid.js配置
 function initMermaid() {
@@ -326,9 +326,10 @@ function changeMermaidTheme(theme: string) {
 /**
  * 处理mermaid_render API调用
  * @param apiInfo API调用信息
+ * @param ifStreaming 是否正在流式传输，如果为false则立即渲染图表
  * @returns 生成的HTML内容
  */
-function handleMermaidRender(apiInfo: any): string {
+async function handleMermaidRender(apiInfo: any) {
     // 获取mermaid代码参数
     const mermaidCode = apiInfo.arguments.mermaid_code || '';
     console.log("处理mermaid_render:", mermaidCode);
@@ -337,6 +338,48 @@ function handleMermaidRender(apiInfo: any): string {
 
     // 编码内容，以便在属性中安全存储
     const encodedContent = encodeURIComponent(mermaidCode);
+
+    // 准备初始内容
+    let initialContent = '<div class="mermaid-loading">UML图表加载中...</div>';
+    let isLoaded = false;
+    
+    // 如果不是流式传输，则立即渲染图表
+    if (!isStreaming.value && mermaidCode) {
+        try {
+            // 初始化mermaid确保渲染环境正确
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+                (document.documentElement.getAttribute('data-theme') === 'system' && 
+                window.matchMedia('(prefers-color-scheme: dark)').matches);
+            
+            mermaid.initialize({
+                theme: isDark ? 'dark' : 'default',
+                securityLevel: 'loose',
+                startOnLoad: false
+            });
+            
+            // 立即渲染图表
+            const renderResult = await mermaid.render(diagramId, mermaidCode);
+            const svgContent = renderResult.svg;
+            initialContent = svgContent;
+            isLoaded = true;
+        } catch (error) {
+            console.error("立即渲染图表失败:", error);
+            initialContent = `
+                <div class="mermaid-error">
+                    <p>UML图表渲染失败</p>
+                    <pre class="error-message">${error}</pre>
+                    <div class="mermaid-source">
+                    <details>
+                        <summary>查看原始图表代码</summary>
+                        <div class="code-container">
+                        <pre class="code-content">${mermaidCode}</pre>
+                        </div>
+                    </details>
+                    </div>
+                </div>
+            `;
+        }
+    }
 
     // 构建HTML
     return `
@@ -350,8 +393,8 @@ function handleMermaidRender(apiInfo: any): string {
         </span>
         <span class="api-call-title">Mermaid 图表</span>
       </div>
-      <div class="mermaid-container" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}">
-        <div class="mermaid-loading">UML图表加载中...</div>
+      <div class="mermaid-container ${isLoaded ? 'loaded' : ''}" data-diagram-id="${diagramId}" data-diagram-content="${encodedContent}" ${isLoaded ? `data-last-rendered="${encodedContent}"` : ''}>
+        ${initialContent}
       </div>
       <div class="api-call-footer">
         <details>

@@ -3,14 +3,14 @@
  * 参考 mermaidRenderer.ts 的实现方式，确保 HTML 渲染与其他渲染器保持一致
  */
 import { nextTick } from "vue";
-import { AppEvents } from '../eventBus';
+import { AppEvents, isStreaming } from '../eventBus';
 
 /**
  * 渲染所有 HTML 容器
  * 无条件强制渲染所有HTML容器，不使用缓存机制
  * @param container 容器元素，默认为document.body
  */
-async function renderHTMLContainers(container: HTMLElement = document.body): Promise<void> {
+async function renderHTMLContainers(container: HTMLElement): Promise<void> {
     try {
         // 查找所有HTML元素，无论是否已加载
         const htmlElements = container.querySelectorAll('.html-container');
@@ -79,20 +79,31 @@ async function renderHTMLContainers(container: HTMLElement = document.body): Pro
                                             `;
                                         }
                                         
-                                        // 构建完整的HTML文档
+                                        // 构建完整的HTML文档，增强样式隔离
                                         const htmlDoc = `
                                             <!DOCTYPE html>
                                             <html>
                                             <head>
                                                 <meta charset="UTF-8">
                                                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                                <base target="_blank">
                                                 <style>
-                                                    body {
+                                                    /* 重置所有样式，防止溢出 */
+                                                    html, body {
                                                         margin: 0;
                                                         padding: 10px;
                                                         font-family: system-ui, -apple-system, sans-serif;
                                                         color: #333;
                                                         background-color: transparent;
+                                                        width: 100%;
+                                                        height: auto;
+                                                        overflow-x: hidden;
+                                                    }
+                                                    
+                                                    /* 限制所有元素最大宽度 */
+                                                    * {
+                                                        max-width: 100%;
+                                                        box-sizing: border-box;
                                                     }
                                                     
                                                     img, video {
@@ -105,6 +116,15 @@ async function renderHTMLContainers(container: HTMLElement = document.body): Pro
                                                         background-color: #f5f5f5;
                                                         padding: 10px;
                                                         border-radius: 5px;
+                                                        max-width: 100%;
+                                                        white-space: pre-wrap;
+                                                    }
+                                                    
+                                                    /* 防止内容溢出 */
+                                                    table {
+                                                        max-width: 100%;
+                                                        overflow-x: auto;
+                                                        display: block;
                                                     }
                                                 </style>
                                             </head>
@@ -250,7 +270,7 @@ function setupHTMLRefresh(container: HTMLElement = document.body): void {
  * @param apiInfo API 调用信息
  * @returns 生成的 HTML 容器结构
  */
-function handleHTMLRender(apiInfo: any): string {
+async function handleHTMLRender(apiInfo: any) {
     // 获取参数（可能是 html 或 html_content）
     const htmlContent = apiInfo.arguments.html || '<p>无内容</p>';
     const title = apiInfo.arguments.title || 'HTML 内容';
@@ -258,19 +278,16 @@ function handleHTMLRender(apiInfo: any): string {
     const height = apiInfo.arguments.height || 'auto';
 
     // 处理混合内容，检查是否包含样式或代码片段
-    // 这段代码允许用户输入不完整的HTML或混合内容，如纯文本和CSS
     let processedContent = htmlContent;
     
-    processedContent = htmlContent
-
     console.log("处理 html_render:", processedContent.substring(0, 50) + (processedContent.length > 50 ? '...' : ''));
 
     // 对 HTML 内容进行编码，以便安全地存储在 data-* 属性中
     const encodedContent = encodeURIComponent(processedContent);
 
-    // 构建 HTML 容器结构
-    return `
-    <div class="special-api-call html-container" data-html-content="${encodedContent}" data-width="${width}" data-height="${height}">
+    // 基本HTML容器结构开始
+    let htmlStructure = `
+    <div class="special-api-call html-container ${!isStreaming.value ? 'loaded' : ''}" data-html-content="${encodedContent}" data-width="${width}" data-height="${height}">
       <div class="api-call-header">
         <span class="api-call-icon">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -281,7 +298,112 @@ function handleHTMLRender(apiInfo: any): string {
         <span class="api-call-title">${title}</span>
       </div>
       <div class="html-content-wrapper">
-        <div class="html-content"></div>
+        <div class="html-content">`;
+    
+    if (isStreaming.value) {
+        // 流式传输模式：添加加载占位符
+        htmlStructure += `<div class="html-loading">HTML内容加载中...（流式传输完成后将自动渲染）</div>`;
+    } else {
+        // 非流式传输模式：直接渲染内容
+        // 检测输入内容是否为HTML
+        const isHTML = /<[a-z][\s\S]*>/i.test(processedContent);
+        
+        // 为非HTML内容构建基本HTML结构
+        if (!isHTML) {
+            processedContent = `
+                <div style="white-space: pre-wrap; font-family: system-ui, -apple-system, sans-serif;">
+                    ${processedContent}
+                </div>
+            `;
+        }
+        
+        // 构建完整的HTML文档，增强样式隔离
+        const htmlDoc = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <base target="_blank">
+                <style>
+                    /* 重置所有样式，防止溢出 */
+                    html, body {
+                        margin: 0;
+                        padding: 10px;
+                        font-family: system-ui, -apple-system, sans-serif;
+                        color: #333;
+                        background-color: transparent;
+                        width: 100%;
+                        height: auto;
+                        overflow-x: hidden;
+                    }
+                    
+                    /* 限制所有元素最大宽度 */
+                    * {
+                        max-width: 100%;
+                        box-sizing: border-box;
+                    }
+                    
+                    img, video {
+                        max-width: 100%;
+                        height: auto;
+                    }
+                    
+                    pre {
+                        overflow-x: auto;
+                        background-color: #f5f5f5;
+                        padding: 10px;
+                        border-radius: 5px;
+                        max-width: 100%;
+                        white-space: pre-wrap;
+                    }
+                    
+                    /* 防止内容溢出 */
+                    table {
+                        max-width: 100%;
+                        overflow-x: auto;
+                        display: block;
+                    }
+                </style>
+            </head>
+            <body>${processedContent}</body>
+            </html>
+        `;
+        
+        // 添加iframe以渲染HTML内容
+        htmlStructure += `<iframe class="html-iframe" sandbox="allow-scripts" style="width: 100%; border: none; overflow: hidden;" title="隔离的HTML内容" srcdoc="${htmlDoc.replace(/"/g, '&quot;')}" onload="setTimeout(() => {
+            try {
+                if (this.contentDocument && this.contentDocument.body) {
+                    this.style.height = (this.contentDocument.body.scrollHeight + 20) + 'px';
+                    
+                    const resizeObserver = new ResizeObserver(() => {
+                        if (this.contentDocument && this.contentDocument.body) {
+                            this.style.height = (this.contentDocument.body.scrollHeight + 20) + 'px';
+                        }
+                    });
+                    
+                    resizeObserver.observe(this.contentDocument.body);
+                    
+                    const mutationObserver = new MutationObserver(() => {
+                        if (this.contentDocument && this.contentDocument.body) {
+                            this.style.height = (this.contentDocument.body.scrollHeight + 20) + 'px';
+                        }
+                    });
+                    
+                    mutationObserver.observe(this.contentDocument.body, {
+                        childList: true,
+                        subtree: true
+                    });
+                }
+            } catch (error) {
+                console.error('设置iframe高度失败:', error);
+            }
+        }, 100);"></iframe>`;
+    }
+
+    // 完成HTML结构
+    htmlStructure += `
+        </div>
       </div>
       <div class="api-call-footer">
         <details>
@@ -290,7 +412,9 @@ function handleHTMLRender(apiInfo: any): string {
         </details>
       </div>
     </div>
-  `;
+    `;
+
+    return htmlStructure;
 }
 
 export { handleHTMLRender, renderHTMLContainers, setupHTMLRefresh };

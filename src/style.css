@@ -423,7 +423,7 @@ body {
 
 .history-time {
     font-size: var(--font-size-sm);
-    color: var (--text-secondary);
+    color: var(--text-secondary);
     margin-top: 2px;
 }
 
@@ -720,7 +720,7 @@ chat-messages .scoped-content {
     font-family: inherit;
     box-shadow: var(--shadow-sm);
     background-color: var(--card-bg);
-    color: var (--text-color);
+    color: var(--text-color);
     resize: none;
     /* 禁止用户手动调整大小 */
     overflow-y: auto;
@@ -2072,4 +2072,14 @@ chat-messages a:active {
     border-radius: 4px;
     max-height: 200px;
     overflow: auto;
+}
+
+.typst-api-call .api-call-title {
+    font-weight: 600;
+    color: #333;
+}
+
+.typst-api-call .api-call-footer {
+    font-weight: 600;
+    color: #333;
 }
