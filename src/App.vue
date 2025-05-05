@@ -2097,5 +2097,40 @@ function confirmDeleteChat() {
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
 </style>
+<style>
+.history-sidebar {
+  width: var(--sidebar-width);
+  background-color: var(--card-bg);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  position: fixed;
+  /* 检测是否有标题栏， 有就设置top为32px*/
+  --titlebar-height: v-bind("isMobile ? '0px' : '32px'");
+  height: calc(100vh - var(--titlebar-height));
+  /* 默认留出标题栏高度 */
+  left: 0;
+  bottom: 0;
+  z-index: 100;
+  transform: translateX(-100%);
+  box-shadow: var(--shadow);
+}
 
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  transition: margin-left 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  margin-left: 0;
+  min-height: 0;
+  /* 检测是否有标题栏， 有就设置top为32px*/
+  --titlebar-height: v-bind("isMobile ? '0px' : '32px'");
+  height: calc(100vh - var(--titlebar-height));
+  /* 默认减去标题栏高度 */
+  overflow: hidden;
+}
+</style>
 <style src="./style.css"></style>
+
