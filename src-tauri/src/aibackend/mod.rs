@@ -2,3 +2,4 @@ pub mod apikey;
 pub mod interface;
 pub mod gemini;
 pub mod template;
+pub mod openai_types;

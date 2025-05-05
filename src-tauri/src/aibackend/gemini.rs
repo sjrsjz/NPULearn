@@ -1,10 +1,11 @@
 use crate::aibackend::interface::AIChat;
+use crate::aibackend::openai_types::{
+    ChatCompletionMessage, Content, JSONSchemaType, MessageRole, Tool,
+};
 use crate::aibackend::template::{self, gemini_chat_instruction};
 use crate::{ChatHistory, ChatMessage, ChatMessageType};
 use base64::Engine;
 use futures_util::StreamExt;
-use openai_api_rs::v1::chat_completion::{self, Content, MessageRole};
-use openai_api_rs::v1::types;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -59,13 +60,13 @@ pub struct GeminiChat {
     base_url: String, // Note: This base_url seems unused for direct Gemini calls
     model: String,
     system_prompt: String,
-    messages: Vec<chat_completion::ChatCompletionMessage>,
+    messages: Vec<ChatCompletionMessage>,
     temperature: f32,
     max_tokens: Option<u32>,
     top_p: Option<f32>,
     top_k: Option<u32>,
     last_prompt: Option<String>,
-    tools: Vec<chat_completion::Tool>, // Consider if this needs to be stored if tools are passed per call
+    tools: Vec<Tool>, // Consider if this needs to be stored if tools are passed per call
 
     chat_id: u32,  // 用于唯一标识聊天会话
     title: String, // 聊天标题
@@ -94,7 +95,7 @@ fn build_gemini_stream_url(model: &str, api_key: &str) -> String {
 }
 
 /// 转换 OpenAI 工具为 Gemini 格式
-fn convert_tools_to_gemini_format(tools: &[chat_completion::Tool]) -> Value {
+fn convert_tools_to_gemini_format(tools: &[Tool]) -> Value {
     let function_declarations: Vec<Value> = tools
         .iter()
         .map(|tool| {
@@ -104,11 +105,11 @@ fn convert_tools_to_gemini_format(tools: &[chat_completion::Tool]) -> Value {
             if let Some(props) = &func.parameters.properties {
                 for (param_name, param_def) in props {
                     let param_type = match param_def.schema_type {
-                        Some(types::JSONSchemaType::String) => "STRING",
-                        Some(types::JSONSchemaType::Number) => "NUMBER",
-                        Some(types::JSONSchemaType::Boolean) => "BOOLEAN",
-                        Some(types::JSONSchemaType::Object) => "OBJECT",
-                        Some(types::JSONSchemaType::Array) => "ARRAY",
+                        Some(JSONSchemaType::String) => "STRING",
+                        Some(JSONSchemaType::Number) => "NUMBER",
+                        Some(JSONSchemaType::Boolean) => "BOOLEAN",
+                        Some(JSONSchemaType::Object) => "OBJECT",
+                        Some(JSONSchemaType::Array) => "ARRAY",
                         _ => "UNKNOWN", // Or handle more gracefully
                     };
 
@@ -502,13 +503,14 @@ impl GeminiChat {
     /// 转换OpenAI格式的消息为Gemini格式的请求体
     fn build_gemini_request_body(
         &self,
-        messages: &[chat_completion::ChatCompletionMessage],
-        tools: Option<&[chat_completion::Tool]>,
+        messages: &[ChatCompletionMessage],
+        tools: Option<&[Tool]>,
     ) -> Result<Value, Box<dyn Error>> {
         let mut gemini_messages: Vec<Value> = messages
             .iter()
             .filter_map(|message| {
-                if let Content::Text(content) = &message.content {
+                let Content::Text(content) = &message.content;
+                {
                     if !content.is_empty() {
                         let role = match message.role {
                             MessageRole::assistant => "model",
@@ -567,8 +569,6 @@ impl GeminiChat {
                     } else {
                         None
                     }
-                } else {
-                    None // 忽略非文本内容的消息
                 }
             })
             .collect();
@@ -669,8 +669,8 @@ impl GeminiChat {
     async fn chat_stream<F>(
         &self,
         api_key: &str,
-        messages: &[chat_completion::ChatCompletionMessage],
-        tools: Option<&[chat_completion::Tool]>,
+        messages: &[ChatCompletionMessage],
+        tools: Option<&[Tool]>,
         use_streaming: bool,
         callback: F,
     ) -> Result<String, Box<dyn Error>>
@@ -695,8 +695,8 @@ impl GeminiChat {
     async fn chat_gemini(
         &self,
         api_key: &str,
-        messages: &[chat_completion::ChatCompletionMessage],
-        tools: Option<&[chat_completion::Tool]>,
+        messages: &[ChatCompletionMessage],
+        tools: Option<&[Tool]>,
     ) -> Result<String, Box<dyn Error>> {
         // 使用流式接口，但禁用实际的流式传输
         let full_response = Arc::new(std::sync::Mutex::new(String::new()));
@@ -728,8 +728,8 @@ impl GeminiChat {
     async fn parse_tool_calls(
         &self,
         api_key: &str,
-        messages: &[chat_completion::ChatCompletionMessage],
-        tools: &[chat_completion::Tool],
+        messages: &[ChatCompletionMessage],
+        tools: &[Tool],
     ) -> Result<(Option<String>, Vec<ToolCall>), Box<dyn Error>> {
         // 使用chat_gemini获取响应，然后解析工具调用
         let request_body = self.build_gemini_request_body(messages, Some(tools))?;
@@ -753,8 +753,8 @@ impl GeminiChat {
     async fn chat_gemini_with_tools(
         &self,
         api_key: &str,
-        messages: &[chat_completion::ChatCompletionMessage],
-        tools: &[chat_completion::Tool],
+        messages: &[ChatCompletionMessage],
+        tools: &[Tool],
         tool_call_processor: impl Fn(
                 String,
                 HashMap<String, Value>,
@@ -773,7 +773,7 @@ impl GeminiChat {
             // 添加模型的回复（可能包含思考过程或函数调用请求）
             let mut current_messages = messages.to_vec(); // 克隆消息列表
             if let Some(text) = initial_response_text {
-                current_messages.push(chat_completion::ChatCompletionMessage {
+                current_messages.push(ChatCompletionMessage {
                     role: MessageRole::assistant, // 'model'
                     content: Content::Text(text), // 模型可能的回应文本
                     name: None,
@@ -788,7 +788,7 @@ impl GeminiChat {
                     tool_call_processor(tool_call.name.clone(), tool_call.args.clone()).await?;
 
                 // 4. 构建工具结果消息 (Function Response)
-                tool_result_messages.push(chat_completion::ChatCompletionMessage {
+                tool_result_messages.push(ChatCompletionMessage {
                     role: MessageRole::tool,            // 'function' role in Gemini
                     content: Content::Text(result),     // 工具执行结果
                     name: Some(tool_call.name.clone()), // 必须提供工具名称
@@ -836,7 +836,6 @@ impl AIChat for GeminiChat {
                 // 获取用户消息的内容
                 let content = match &last_message.content {
                     Content::Text(text) => text.clone(),
-                    _ => "".to_string(),
                 };
 
                 // 移除这条用户消息
@@ -850,7 +849,6 @@ impl AIChat for GeminiChat {
                     .find(|m| m.role == MessageRole::user)
                     .and_then(|m| match &m.content {
                         Content::Text(text) => Some(text.clone()),
-                        _ => None,
                     });
 
                 return Ok(content);
@@ -951,7 +949,7 @@ impl AIChat for GeminiChat {
         }
 
         // 创建用户消息
-        let user_message = chat_completion::ChatCompletionMessage {
+        let user_message = ChatCompletionMessage {
             role: MessageRole::user,
             content: Content::Text(prompt.clone()),
             name: None,
@@ -978,7 +976,7 @@ impl AIChat for GeminiChat {
             .await?;
 
         // 创建助手消息并添加到历史
-        let assistant_message = chat_completion::ChatCompletionMessage {
+        let assistant_message = ChatCompletionMessage {
             role: MessageRole::assistant,
             content: Content::Text(response.clone()),
             name: None,
@@ -1015,7 +1013,7 @@ impl AIChat for GeminiChat {
         self.messages = chat_history
             .content
             .iter()
-            .map(|msg| chat_completion::ChatCompletionMessage {
+            .map(|msg| ChatCompletionMessage {
                 role: match msg.msgtype {
                     ChatMessageType::User => MessageRole::user,
                     ChatMessageType::Assistant => MessageRole::assistant,
@@ -1048,7 +1046,6 @@ impl AIChat for GeminiChat {
                     },
                     content: match &msg.content {
                         Content::Text(text) => text.clone(),
-                        _ => "".to_string(), // 其他类型的内容可以根据需要处理
                     },
                     time: msg.name.clone().unwrap_or_default(), // 假设名称作为时间戳
                 })
