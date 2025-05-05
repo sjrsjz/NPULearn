@@ -132,7 +132,8 @@ export async function renderTypstToSVG(
 #set text(
   font: (
     "Noto Sans SC",
-  )
+  ),
+  size: 16pt
 )
 #set page(width: auto, height: auto)
 

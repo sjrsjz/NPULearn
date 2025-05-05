@@ -2124,3 +2124,12 @@ chat-messages a:active {
 .mini-tech-details[open] summary .detail-chevron {
     transform: rotate(0deg);
 }
+
+.api-call-icon {
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 2px;
+}
