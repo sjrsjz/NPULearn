@@ -152,6 +152,7 @@ pub fn gemini_chat_instruction() -> String {
 
 # **Never output other functions which not in your instructions in your respond** (you should never consider them as `tool_code` in the output because they are not typesetting format, if previous tool calls were failed, you should consider the system may be in a wrong state)
 # Do not output MUTIPLE `print` in ONE `tool_code` in your respond, IT IS NOT PYTHON, you should only output ONE `print` in ONE `tool_code` in your respond.
+# ALWAYS output as `print(default_api.<function_name>(<args>)` in your respond, DO NOT output single `print` in your respond, it is not a function call, it is a normal text.
 "#,
     COT
     )

@@ -486,6 +486,16 @@ impl GeminiChat {
                     args.insert("show_border".to_string(), Value::Bool(true));
                     args
                 },
+            },
+            TypesetInfo {
+                name: "katex_render".to_string(),
+                description: "render mathematical formulas".to_string(),
+                detail: "render mathematical formulas by using katex renderer, should write down CORRECT latex code for successfully rendering mathematical formulas. No need to wrap by `$`. Be careful with backslashes: use double backslashes (\\\\) for commands like \\\\alpha instead of \\alpha, as single backslashes may be interpreted as escape characters (e.g., \\n becomes a newline).".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("katex_code".to_string(), Value::String("Katex code which you want to render. No need to wrap by `$`. Remember to escape backslashes properly.".to_string()));
+                    args
+                },
             }
         ], &self.system_prompt);
     }

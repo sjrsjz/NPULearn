@@ -342,21 +342,21 @@ async function handleMermaidRender(apiInfo: any) {
     // 准备初始内容
     let initialContent = '<div class="mermaid-loading">UML图表加载中...</div>';
     let isLoaded = false;
-    
+
     // 如果不是流式传输，则立即渲染图表
     if (!isStreaming.value && mermaidCode) {
         try {
             // 初始化mermaid确保渲染环境正确
             const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-                (document.documentElement.getAttribute('data-theme') === 'system' && 
-                window.matchMedia('(prefers-color-scheme: dark)').matches);
-            
+                (document.documentElement.getAttribute('data-theme') === 'system' &&
+                    window.matchMedia('(prefers-color-scheme: dark)').matches);
+
             mermaid.initialize({
                 theme: isDark ? 'dark' : 'default',
                 securityLevel: 'loose',
                 startOnLoad: false
             });
-            
+
             // 立即渲染图表
             const renderResult = await mermaid.render(diagramId, mermaidCode);
             const svgContent = renderResult.svg;
@@ -382,8 +382,8 @@ async function handleMermaidRender(apiInfo: any) {
     }
 
     // 构建HTML
-    return `
-    <div class="special-api-call mermaid-api-call">
+    const html = `
+    <div class="special-api-call mermaid-api-call" id="${diagramId}-container">
       <div class="api-call-header">
         <span class="api-call-icon">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -404,6 +404,108 @@ async function handleMermaidRender(apiInfo: any) {
       </div>
     </div>
   `;
+
+    // 非流式传输下，为刚渲染的图表绑定事件
+    if (!isStreaming.value && isLoaded) {
+        setTimeout(() => {
+            const container = document.getElementById(`${diagramId}-container`);
+            if (container) {
+                // 给这个图表容器添加按钮和事件绑定
+                const diagramContainer = container.querySelector('.mermaid-container');
+                if (diagramContainer && !diagramContainer.querySelector('.refresh-diagram-button')) {
+                    // 添加刷新按钮
+                    const refreshButton = document.createElement('button');
+                    refreshButton.className = 'refresh-diagram-button';
+                    refreshButton.innerHTML = `
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M23 4v6h-6"></path>
+                        <path d="M1 20v-6h6"></path>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+                        <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
+                      </svg>
+                    `;
+                    refreshButton.title = "刷新图表";
+
+                    refreshButton.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const targetButton = e.currentTarget as HTMLElement;
+                        const clickedContainer = targetButton.closest('.mermaid-container');
+
+                        if (clickedContainer) {
+                            clickedContainer.classList.remove('loaded');
+                            clickedContainer.removeAttribute('data-last-rendered');
+                            targetButton.classList.add('refreshing');
+                            AppEvents.showNotification("正在刷新图表...", "info");
+
+                            setTimeout(async () => {
+                                await renderMermaidDiagrams(0, 3, container);
+                                targetButton.classList.remove('refreshing');
+                            }, 100);
+                        }
+                    });
+
+                    diagramContainer.appendChild(refreshButton);
+
+                    // 添加放大按钮(如果图表渲染成功)
+                    const zoomButton = document.createElement('button');
+                    zoomButton.className = 'zoom-diagram-button';
+                    zoomButton.innerHTML = `
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        <line x1="11" y1="8" x2="11" y2="14"></line>
+                        <line x1="8" y1="11" x2="14" y2="11"></line>
+                      </svg>
+                    `;
+                    zoomButton.title = "放大查看";
+
+                    zoomButton.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        const clickedContainer = (e.currentTarget as HTMLElement).closest('.mermaid-container') as HTMLElement;
+                        if (clickedContainer) {
+                            const svgElement = clickedContainer.querySelector('svg');
+                            const contentElement = clickedContainer.getAttribute('data-diagram-content');
+
+                            if (svgElement && contentElement) {
+                                const svgContent = svgElement.outerHTML;
+                                const diagramContent = decodeURIComponent(contentElement);
+                                AppEvents.openChartViewer(svgContent, diagramContent);
+                            }
+                        }
+                    });
+
+                    diagramContainer.appendChild(zoomButton);
+
+                    // 添加点击事件以打开查看器
+                    if (!diagramContainer.hasAttribute('data-has-click-listener')) {
+                        diagramContainer.setAttribute('data-has-click-listener', 'true');
+                        diagramContainer.classList.add('clickable-container');
+
+                        diagramContainer.addEventListener('click', (e) => {
+                            // 点击按钮时不触发
+                            if ((e.target as HTMLElement).closest('.refresh-diagram-button, .zoom-diagram-button')) {
+                                return;
+                            }
+
+                            const svgElement = diagramContainer.querySelector('svg');
+                            const contentElement = diagramContainer.getAttribute('data-diagram-content');
+
+                            if (svgElement && contentElement) {
+                                const svgContent = svgElement.outerHTML;
+                                const diagramContent = decodeURIComponent(contentElement);
+                                AppEvents.openChartViewer(svgContent, diagramContent);
+                            }
+                        });
+                    }
+                }
+            }
+        }, 0);  // 使用setTimeout确保HTML先被添加到DOM
+    }
+
+    return html;
 }
 
 export { initMermaid, renderMermaidDiagrams, setupMermaidRefresh, setupRetryButtons, changeMermaidTheme, handleMermaidRender };

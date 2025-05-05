@@ -1,27 +1,106 @@
 import { $typst } from '@myriaddreamin/typst.ts/dist/esm/contrib/snippet.mjs';
+
 import { isStreaming } from '../eventBus';
+
+// 在文件顶部添加接口定义
+interface FontConfig {
+    fontPaths?: string[];
+    fontBlobs?: ArrayBuffer[];
+}
+
+interface WebFontConfig {
+    url: string;
+    name: string;
+}
+
+const webFonts = [] as WebFontConfig[]; // 这里可以添加网络字体配置，例如：
+const fontConfig = {
+    fontPaths: [
+        "assets/fonts",
+    ]
+} as FontConfig; // 这里可以添加本地字体配置，例如：
+
+// 添加网络字体加载函数
+async function loadWebFont(fontConfig: WebFontConfig): Promise<ArrayBuffer> {
+    try {
+        const response = await fetch(fontConfig.url);
+        if (!response.ok) {
+            throw new Error(`Failed to load font ${fontConfig.name}: ${response.statusText}`);
+        }
+        return await response.arrayBuffer();
+    } catch (error) {
+        console.error(`加载字体 ${fontConfig.name} 失败:`, error);
+        throw error;
+    }
+}
+
+// 添加批量加载网络字体的函数
+async function loadWebFonts(webFonts: WebFontConfig[]): Promise<FontConfig> {
+    const fontBlobs: ArrayBuffer[] = [];
+
+    try {
+        const loadPromises = webFonts.map(font => loadWebFont(font));
+        const loadedFonts = await Promise.all(loadPromises);
+        fontBlobs.push(...loadedFonts);
+
+        return {
+            fontBlobs
+        };
+    } catch (error) {
+        console.error("加载网络字体失败:", error);
+        throw error;
+    }
+}
 
 // 初始化 typst 渲染器
 let initialized = false;
 
-async function initializeTypst() {
+async function initializeTypst(fontConfig?: FontConfig) {
     if (initialized) return;
 
     try {
+        const compilerOptions: any = {
+            getModule: () =>
+                'https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm',
+        };
+
+        // 添加字体配置
+        if (fontConfig) {
+            compilerOptions.fontArgs = [];
+            if (fontConfig.fontPaths) {
+                compilerOptions.fontArgs.push({ fontPaths: fontConfig.fontPaths });
+            }
+            if (fontConfig.fontBlobs) {
+                compilerOptions.fontArgs.push({ fontBlobs: fontConfig.fontBlobs });
+            }
+        }
+
+        $typst.setCompilerInitOptions(compilerOptions);
+
+        const rendererOptions: any = {
+            getModule: () =>
+                'https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm'
+        };
+
+        // 添加字体配置
+        if (fontConfig) {
+            rendererOptions.fontArgs = [];
+            if (fontConfig.fontPaths) {
+                rendererOptions.fontArgs.push({ fontPaths: fontConfig.fontPaths });
+            }
+            if (fontConfig.fontBlobs) {
+                rendererOptions.fontArgs.push({ fontBlobs: fontConfig.fontBlobs });
+            }
+        }
+
+        $typst.setRendererInitOptions(rendererOptions);
+
         initialized = true;
         console.log("Typst 渲染器初始化成功");
     } catch (error) {
         console.error("Typst 渲染器初始化失败:", error);
         throw error;
     }
-    $typst.setCompilerInitOptions({
-        getModule: () =>
-            'https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm',
-    });
-    $typst.setRendererInitOptions({
-        getModule: () =>
-            'https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm',
-    });
 }
 
 /**
@@ -29,17 +108,44 @@ async function initializeTypst() {
  * @param content Typst 代码内容
  * @returns 渲染后的 SVG 字符串
  */
-export async function renderTypstToSVG(content: string): Promise<string> {
-    await initializeTypst();
+export async function renderTypstToSVG(
+    content: string,
+    fontConfig?: FontConfig,
+    webFonts?: WebFontConfig[]
+): Promise<string> {
+    // 如果提供了网络字体配置，先加载网络字体
+    if (webFonts && webFonts.length > 0) {
+        const webFontConfig = await loadWebFonts(webFonts);
+        // 合并字体配置
+        fontConfig = {
+            fontPaths: [...(fontConfig?.fontPaths || [])],
+            fontBlobs: [
+                ...(webFontConfig.fontBlobs || []),
+                ...(fontConfig?.fontBlobs || [])
+            ]
+        };
+    }
+    await initializeTypst(fontConfig);
     try {
-        const svg = await $typst.svg({ mainContent: content });
+        // 添加默认字体设置到content前
+        const contentWithFontFallback = `
+#set text(
+  font: (
+    "Noto Sans SC",
+  )
+)
+#set page(width: auto, height: auto)
+
+${content}`;
+
+        let svg = await $typst.svg({ mainContent: contentWithFontFallback });
+
         return svg;
     } catch (error) {
         console.error("Typst 渲染失败:", error);
         throw error;
     }
 }
-
 /**
  * 处理typst_render API调用
  * @param apiInfo API调用信息
@@ -53,15 +159,17 @@ export async function handleTypstRender(apiInfo: any): Promise<string> {
 
     // 创建唯一ID
     const typstId = `typst-doc-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-    
+
     // 编码内容，以便在属性中安全存储
     const encodedContent = encodeURIComponent(typstCode);
 
     // 如果不是流式输出，直接渲染Typst代码
     if (!isStreaming.value) {
         try {
-            const svg = await renderTypstToSVG(typstCode);
-            
+            const svg = await renderTypstToSVG(typstCode, fontConfig, webFonts);
+
+
+
             // 构建包含已渲染SVG的HTML
             return `
             <div class="special-api-call typst-api-call">

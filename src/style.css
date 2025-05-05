@@ -2083,3 +2083,44 @@ chat-messages a:active {
     font-weight: 600;
     color: #333;
 }
+
+.special-api-call {
+    padding: 10px 15px;
+}
+
+.mini-tech-details {
+    width: auto;
+    border: none;
+    position: relative;
+}
+
+.mini-tech-details summary {
+    height: 8px;
+    cursor: pointer;
+    list-style: none;
+    text-align: center;
+    padding: 0;
+    margin: 0;
+    position: relative;
+    font-size: 0;
+}
+
+.mini-tech-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.mini-tech-details summary .detail-chevron {
+    font-size: 12px;
+    line-height: 0px;
+    color: #888;
+    display: inline-block;
+    user-select: none;
+    position: relative;
+    top: -2px;
+    transform: rotate(180deg);
+    transition: transform 0.3s ease;
+}
+
+.mini-tech-details[open] summary .detail-chevron {
+    transform: rotate(0deg);
+}

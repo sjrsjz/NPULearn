@@ -816,16 +816,6 @@ function updateChatContent(messages: ChatMessage[]) {
     // 重新渲染后再执行其他操作
     if (!highlightedElement) return;
 
-    // 为消息添加右键菜单事件
-    highlightedElement.querySelectorAll('.message-content[data-message-index]').forEach(messageElement => {
-      messageElement.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const messageIndex = parseInt((messageElement as HTMLElement).dataset.messageIndex || '0', 10);
-        openMessageContextMenu(e as MouseEvent, messageIndex);
-      });
-    });
-
     // 渲染数学公式
     renderMathInElement();
 
@@ -840,6 +830,25 @@ function updateChatContent(messages: ChatMessage[]) {
 
     processedChatContent.value = highlightedElement.innerHTML;
 
+
+    // 在下一个tick中，当DOM更新后，添加事件监听
+    nextTick(() => {
+      // 为真实DOM中的消息添加右键菜单事件
+      document.querySelectorAll('.chat-messages .message-content[data-message-index]').forEach(messageElement => {
+        messageElement.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const messageIndex = parseInt((messageElement as HTMLElement).dataset.messageIndex || '0', 10);
+          openMessageContextMenu(e as MouseEvent, messageIndex);
+        });
+      });
+
+      // 其他需要在DOM更新后执行的代码...
+      renderMathInElement();
+      setupExternalLinks();
+      setupActionButtons();
+      scrollToBottom(true);
+    });
   });
 
 }

@@ -6,7 +6,8 @@ import { handleMermaidRender } from './mermaidRenderer';
 import { isStreaming, AppEvents } from '../eventBus';
 import { handleTypstRender } from './typstRenderer';
 import { handleHTMLRender } from './htmlRenderer';
-
+import { handleInteractiveButton } from './interactiveButton';
+import { handleKaTeXRender } from './katexRenderer';
 /**
  * HTML转义函数，防止XSS攻击
  * @param str 需要转义的字符串
@@ -446,83 +447,14 @@ async function handleSpecialApiCall(apiInfo: any): Promise<string | null> {
             return await handleTypstRender(apiInfo);
         case 'html_render':
             return await handleHTMLRender(apiInfo);
+        case 'katex_render':
+            return await handleKaTeXRender(apiInfo);
         // 在这里可以方便地添加新的函数处理
         default:
             return null; // 不认识的函数调用，返回null使用默认显示
     }
 }
 
-/**
- * 处理interactive_button API调用
- * @param apiInfo API调用信息
- * @returns 生成的HTML内容
- */
-async function handleInteractiveButton(apiInfo: any): Promise<string> {
-    // 获取参数
-    const message = apiInfo.arguments.message || '点击发送';
-    const command = apiInfo.arguments.command || '';
-
-    // 编码命令，用于button属性
-    const encodedCommand = encodeURIComponent(command);
-
-    // 构建HTML - 使用与button://链接处理相同的类和属性
-    return `
-    <div class="special-api-call interactive-button-api-call">
-      <div class="api-call-header">
-        <span class="api-call-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <path d="M7 11v2"></path>
-            <path d="M11 7h2"></path>
-            <path d="M11 15h2"></path>
-            <path d="M15 11v2"></path>
-          </svg>
-        </span>
-        <span class="api-call-title">交互按钮</span>
-      </div>
-      <div class="interactive-button-container">
-        <button class="markdown-button interactive-command-button" data-command="${encodedCommand}">${escapeHtml(message)}</button>
-      </div>
-      <div class="api-call-footer">
-        <details>
-          <summary>查看按钮配置</summary>
-          <pre class="api-call-code"><code>消息: ${escapeHtml(message)}
-命令: ${escapeHtml(command)}</code></pre>
-        </details>
-      </div>
-    </div>
-  `;
-}
-
-
-
-// 添加此函数用于设置交互按钮的点击事件
-async function setupInteractiveButtons(container: HTMLElement): Promise<void> {
-    container.querySelectorAll('.interactive-command-button').forEach(button => {
-        if (button.hasAttribute('data-event-attached')) return; // 避免重复添加事件
-
-        button.setAttribute('data-event-attached', 'true');
-        button.addEventListener('click', async (e) => {
-            e.preventDefault();
-
-            // 如果正在流式输出消息，禁止发送新消息
-            if (isStreaming.value) {
-                AppEvents.showNotification("请等待当前消息输出完成", "error");
-                return;
-            }
-
-            const encodedCommand = (button as HTMLElement).getAttribute('data-command');
-            if (encodedCommand) {
-                const command = decodeURIComponent(encodedCommand);
-                if (command.trim()) {
-                    // 发送消息
-                    await AppEvents.sendStreamMessageDirect("> " + command);
-                    AppEvents.showNotification("已发送命令", "success");
-                }
-            }
-        });
-    });
-}
 
 // 修改原有的解析逻辑，整合特殊API处理
 async function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): Promise<string> {
@@ -533,25 +465,27 @@ async function processApiCallResult(apiInfo: any, astJson: any, codeContent: str
         // 如果成功生成了特殊API的HTML，返回带有原始代码和AST的完整结构
         return `
       ${specialApiHtml}
-      <details class="tool-code-details">
-        <summary>查看技术详情</summary>
-        <div class="api-details">
-          <h4>API调用信息</h4>
-          <div class="tool-api-info">
-            <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${escapeHtml(apiInfo.api_name)}</span></div>
-            <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${escapeHtml(apiInfo.function_name)}</span></div>
-            ${Object.entries(apiInfo.arguments).map(([key, value]) =>
+      <div class="mini-details-container">
+        <details class="mini-tech-details">
+          <summary aria-label="查看技术详情"><span class="detail-chevron">▲</span></summary>
+          <div class="api-details">
+            <h4>API调用信息</h4>
+            <div class="tool-api-info">
+              <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${escapeHtml(apiInfo.api_name)}</span></div>
+              <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${escapeHtml(apiInfo.function_name)}</span></div>
+              ${Object.entries(apiInfo.arguments).map(([key, value]) =>
             `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${escapeHtml(String(value))}</span></div>`
         ).join('')}
+            </div>
+            
+            <h4>AST详情</h4>
+            <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
+            
+            <h4>原始代码</h4>
+            <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
           </div>
-          
-          <h4>AST详情</h4>
-          <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
-          
-          <h4>原始代码</h4>
-          <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
-        </div>
-      </details>
+        </details>
+      </div>
     `;
     } else {
         // 如果不是特殊API或处理失败，返回默认的结构化结果
@@ -566,20 +500,20 @@ async function processApiCallResult(apiInfo: any, astJson: any, codeContent: str
         ).join('')}
         </div>
       </div>
-      <details class="tool-code-details">
-        <summary>查看AST详情</summary>
-        <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
-      </details>
+      <div class="mini-details-container">
+        <details class="mini-tech-details">
+          <summary aria-label="查看AST详情"><span class="detail-chevron">▲</span></summary>
+          <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
+        </details>
+      </div>
       <div class="tool-code-header original-header">原始代码:</div>
       <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
     `;
     }
 }
 
-
 export {
     applyHighlight,
     handleSpecialApiCall,
     processApiCallResult,
-    setupInteractiveButtons, // 将此函数也导出
 };
