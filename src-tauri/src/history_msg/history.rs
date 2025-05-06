@@ -37,6 +37,7 @@ impl ChatMessage {
         };
     }
     pub(crate) fn markdown_to_html_vec(messages : &Vec<Self>) -> Vec<Self> {
+        println!("messages: {:?}", messages);
         let mut html_messages = Vec::new();
         for message in messages {
             html_messages.push(message.markdown_to_html());
