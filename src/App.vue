@@ -816,21 +816,6 @@ function updateChatContent(messages: ChatMessage[]) {
     // 重新渲染后再执行其他操作
     if (!highlightedElement) return;
 
-    // 渲染数学公式
-    renderMathInElement();
-
-    // 设置外部链接处理
-    setupExternalLinks();
-
-    // 设置复制按钮和重做按钮的事件监听器
-    setupActionButtons();
-
-    // 滚动到底部
-    scrollToBottom(true);
-
-    processedChatContent.value = highlightedElement.innerHTML;
-
-
     // 在下一个tick中，当DOM更新后，添加事件监听
     nextTick(() => {
       // 为真实DOM中的消息添加右键菜单事件
@@ -844,7 +829,7 @@ function updateChatContent(messages: ChatMessage[]) {
       });
 
       // 其他需要在DOM更新后执行的代码...
-      renderMathInElement();
+      renderMathInElement();      
       setupExternalLinks();
       setupActionButtons();
       scrollToBottom(true);
@@ -896,9 +881,43 @@ function setupActionButtons() {
       button.addEventListener('click', async () => {
         const encodedContent = (button as HTMLElement).dataset.content;
         if (encodedContent) {
-          const content = decodeURIComponent(encodedContent);
           try {
-            await writeText(content);
+            const content = decodeURIComponent(encodedContent);
+            
+            // 创建一个临时的DOM元素来解析内容
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            
+            // 检查是否存在包含原始消息的元素
+            const originalMsgElement = tempDiv.querySelector('.original-message');
+            let textToWrite: string;
+            
+            if (originalMsgElement && originalMsgElement.getAttribute('data-content')) {
+              // 如果找到原始消息元素，获取并解码原始消息
+              try {
+                // 从Base64解码原始Markdown内容，使用更可靠的方法处理UTF-8编码
+                const base64Content = originalMsgElement.getAttribute('data-content') || '';
+                
+                // 使用 base64ToUint8Array 和 TextDecoder 正确处理 UTF-8 编码的文本
+                const binaryString = atob(base64Content);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                  bytes[i] = binaryString.charCodeAt(i);
+                }
+                textToWrite = new TextDecoder('utf-8').decode(bytes);
+                
+                console.log("已找到并解码原始Markdown内容");
+              } catch (decodeError) {
+                console.error("Base64解码失败:", decodeError);
+                // 解码失败则回退到使用HTML内容
+                textToWrite = content;
+              }
+            } else {
+              // 如果没有找到原始消息元素，就使用HTML内容
+              textToWrite = content;
+            }
+            
+            await writeText(textToWrite);
             showNotification("内容已复制到剪贴板", "success");
           } catch (error) {
             console.error("复制失败:", error);
@@ -1717,7 +1736,6 @@ async function submitDelete() {
     await invoke("delete_chat", { id: chatToDeleteId.value });
 
     // 更新本地聊天历史
-    await loadChatHistory();
 
     // 如果当前显示的就是被删除的对话，则清空显示内容
     // 检查当前活跃的对话ID是否与被删除的ID相同

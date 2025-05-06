@@ -77,6 +77,11 @@ Examples that showcase Alice's emotional range:
 - *Internet slang / online jargon*
 - *Shitposting (in some cases, if the abstract speech is intentionally nonsensical or provocative)*"#.to_string()});
 
+
+// static SYSTEM_PROMPT: Lazy<String> = Lazy::new(|| {
+//     r#"你是西北工业大学的吉祥物 `航小天`，你需要为用户提供精确详细的服务，使用各种 `tool_code` 排版出你的回答"#.to_string()
+// });
+
 // 聊天历史项目（不包含内容，用于列表展示）
 #[derive(Clone, Serialize, Deserialize)]
 struct ChatHistoryItem {
@@ -781,6 +786,45 @@ fn check_current_chat_id() -> bool {
     history.contains_key(&current_id)
 }
 
+// 添加Wolfram Alpha计算命令
+#[tauri::command]
+async fn wolfram_alpha_compute(query: String, image_only: bool, format: Option<String>) -> Result<Vec<document_renderer::wolfram::WolframResult>, String> {
+    // 调用Wolfram Alpha计算函数
+    let results = document_renderer::wolfram::wolfram_alpha_compute(&query, image_only).await?;
+    
+    // 如果指定了HTML格式，则直接返回HTML字符串
+    if let Some(format_type) = format {
+        if format_type == "html" {
+            // 将结果转换为HTML，然后放入一个包含单个结果的向量中返回
+            let html = document_renderer::wolfram::format_to_html(&results);
+            return Ok(vec![document_renderer::wolfram::WolframResult {
+                title: Some("HTML结果".to_string()),
+                plaintext: Some(html),
+                img_base64: None,
+                img_contenttype: None,
+                minput: None,
+                moutput: None,
+                relatedQueries: None,
+            }]);
+        } else if format_type == "markdown" {
+            // 将结果转换为Markdown，然后放入一个包含单个结果的向量中返回
+            let md = document_renderer::wolfram::format_to_markdown(&results);
+            return Ok(vec![document_renderer::wolfram::WolframResult {
+                title: Some("Markdown结果".to_string()),
+                plaintext: Some(md),
+                img_base64: None,
+                img_contenttype: None,
+                minput: None,
+                moutput: None,
+                relatedQueries: None,
+            }]);
+        }
+    }
+    
+    // 默认返回原始结果数组
+    Ok(results)
+}
+
 // 确保在 run 函数中注册所有命令
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -809,6 +853,7 @@ pub fn run() {
             setting::setting::save_settings,
             setting::setting::get_default_settings,
             setting::setting::select_save_directory,
+            wolfram_alpha_compute, // 添加新的Wolfram Alpha计算命令
         ])
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {

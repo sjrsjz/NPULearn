@@ -12,6 +12,7 @@ pub fn convert_markdown_with_latex(markdown: &str) -> String {
     options.extension.autolink = true;
     options.extension.tasklist = true;
     options.render.unsafe_ = true; // 允许原始 HTML
+    options.render.hardbreaks = true; // 将单个换行符视为硬断行（实际换行）
 
     // 如果没有特殊标记或只有一个部分，直接转换整个 markdown
     if parts.len() <= 1 {

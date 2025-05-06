@@ -497,7 +497,22 @@ impl GeminiChat {
                     args.insert("katex_code".to_string(), Value::String("Katex code which you want to render. No need to wrap by `$`. Remember to escape backslashes properly.".to_string()));
                     args
                 },
-            }
+            },
+            TypesetInfo {
+                name: "wolfram_alpha_compute".to_string(),
+                description: "compute queries using Wolfram Alpha".to_string(),
+                detail: r#"compute mathematical expressions, solve equations, convert units, and answer factual questions using Wolfram Alpha's computational engine
+    - `query`: the query to compute (e.g., mathematical expressions, word problems, unit conversions)
+    - `image_only`: optional boolean to return only image result (default: false)
+    - `format`: optional format for results, only `html` avaliable"#.to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("query".to_string(), Value::String("1+1".to_string()));
+                    args.insert("image_only".to_string(), Value::Bool(false));
+                    args.insert("format".to_string(), Value::String("html".to_string()));
+                    args
+                },
+            },
         ], &self.system_prompt);
     }
     /// 转换OpenAI格式的消息为Gemini格式的请求体

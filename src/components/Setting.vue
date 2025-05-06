@@ -197,13 +197,41 @@ async function addApiKey() {
     showNotification("API 密钥已添加", "success");
 }
 
-// 删除 API Key
-async function deleteApiKey(key: ApiKey) {
-    if (confirm(`确定要删除 ${key.name} 吗?`)) {
-        apiKeys.value.removeKey(key);
+// 添加用于API密钥删除确认的状态
+const showConfirmDeleteKey = ref(false);
+const keyToDelete = ref<ApiKey | null>(null);
+
+// 修改为显示删除确认对话框
+function confirmDeleteApiKey(key: ApiKey) {
+    keyToDelete.value = key;
+    showConfirmDeleteKey.value = true;
+}
+
+// 执行真正的删除操作
+async function submitDeleteApiKey() {
+    if (!keyToDelete.value) {
+        showNotification("无效的 API 密钥", "error");
+        return;
+    }
+
+    try {
+        apiKeys.value.removeKey(keyToDelete.value);
         await saveApiKeyList(apiKeyConfigFile, apiKeys.value);
         showNotification("API 密钥已删除", "info");
+    } catch (error) {
+        console.error("删除 API 密钥失败:", error);
+        showNotification("删除 API 密钥失败", "error");
+    } finally {
+        // 关闭对话框并清除状态
+        showConfirmDeleteKey.value = false;
+        keyToDelete.value = null;
     }
+}
+
+// 取消删除操作
+function cancelDeleteApiKey() {
+    showConfirmDeleteKey.value = false;
+    keyToDelete.value = null;
 }
 // 保存设置
 async function saveSettings() {
@@ -485,7 +513,8 @@ onMounted(() => {
                                 <div class="api-key-value">{{ key.key.substring(0, 4) + '••••••••' +
                                     key.key.substring(key.key.length - 4) }}</div>
                             </div>
-                            <button class="delete-key-button" @click="deleteApiKey(key)">
+                            <!-- 在API密钥列表中修改删除按钮 -->
+                            <button class="delete-key-button" @click="confirmDeleteApiKey(key)">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
                                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                     stroke-linejoin="round">
@@ -497,6 +526,30 @@ onMounted(() => {
                                     <line x1="14" y1="11" x2="14" y2="17"></line>
                                 </svg>
                             </button>
+
+                            <!-- 添加API密钥删除确认对话框 -->
+                            <div v-if="showConfirmDeleteKey" class="modal-overlay" @click.self="cancelDeleteApiKey">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h3>删除API密钥</h3>
+                                        <button class="modal-close" @click="cancelDeleteApiKey">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                stroke-linecap="round" stroke-linejoin="round">
+                                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <p>确定要删除 "{{ keyToDelete?.name }}" 吗？此操作不可撤销。</p>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button class="modal-button cancel" @click="cancelDeleteApiKey">取消</button>
+                                        <button class="modal-button delete" @click="submitDeleteApiKey">删除</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
