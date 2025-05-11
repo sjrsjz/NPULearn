@@ -20,10 +20,11 @@ function loadMathJax(timeout = 5000) {
             window.MathJax = {
                 tex: {
                     inlineMath: [['$', '$'], ['\\(', '\\)']],
-                    displayMath: [['$$', '$$'], ['\\[', '\\]']]
+                    displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                    processEscapes: true,
                 },
                 svg: {
-                    fontCache: 'global'
+                    fontCache: 'global',
                 }
             };
         }
@@ -45,10 +46,11 @@ function loadMathJax(timeout = 5000) {
 }
 
 // 在需要时渲染数学公式
-function renderMathInElement(selector = '.chat-messages') {
+function renderMathInElement() {
+    console.log('开始渲染 MathJax 公式...');
     try {
         if (window.MathJax && window.MathJax.typesetPromise) {
-            const element = document.querySelector(selector) as HTMLElement;
+            const element = document.querySelectorAll('.chat-messages');
             if (element) {
                 window.MathJax.typesetPromise([element])
                     .catch((err: Error) => {

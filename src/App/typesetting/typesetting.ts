@@ -8,18 +8,19 @@ import { handleTypstRender } from './typstRenderer';
 import { handleHTMLRender } from './htmlRenderer';
 import { handleInteractiveButton } from './interactiveButton';
 import { handleKaTeXRender } from './katexRenderer';
+import { handleWolframRender } from './wolframRenderer';
 /**
  * HTML转义函数，防止XSS攻击
  * @param str 需要转义的字符串
  * @returns 转义后的安全字符串
  */
 function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 // 主函数：应用代码高亮和处理各种特殊代码块
@@ -154,13 +155,24 @@ async function applyBatchOperations(batch: any): Promise<void> {
     }));
 }
 
+
 // 处理工具代码的逻辑
 async function processToolCode(toolCodeContainer: HTMLDivElement, encodedContent: string): Promise<void> {
     // 解码Base64编码的内容
     const codeContent = decodeURIComponent(atob(encodedContent));
+    // 将原始代码包裹在可折叠的 details 元素中
+    const originalCodeHtml = `
+      <div class="mini-details-container">
+        <details class="mini-tech-details">
+          <summary-all aria-label="查看原始代码"></summary-all>
+          <p>原始代码:</p>
+          <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
+        </details>
+      </div>
+    `;
 
     if (isStreaming.value) {
-        // 直接显示原始代码和流式传输提示
+        // 直接显示流式传输提示和折叠的原始代码
         toolCodeContainer.innerHTML = `
         <div class="tool-code-header">工具代码解析结果:</div>
         <div class="tool-code-result">
@@ -177,47 +189,125 @@ async function processToolCode(toolCodeContainer: HTMLDivElement, encodedContent
           </svg>
           <span>API功能将在消息完整接收后处理</span>
         </div>
-        <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
-        `;
+        ${originalCodeHtml}
+        `; // 使用包含 details 的 originalCodeHtml
 
-        // 高亮显示AST和原始代码
+        // 高亮显示原始代码 (在 details 内部)
         await highlightToolCodeElements(toolCodeContainer);
         return;
     }
 
-    // 调用后端解析代码
-    const astResult = await invoke<string>("parse_code", { code: codeContent });
-    console.log("AST 解析结果:", astResult);
+    try { // 添加 try-catch 以处理解析和调用错误
+        // 调用后端解析代码
+        const astResult = await invoke<string>("parse_code", { code: codeContent });
+        console.log("AST 解析结果:", astResult);
 
-    // 解析AST JSON并处理
-    const astJson = JSON.parse(astResult);
-    const apiInfo = await parseApiCall(astJson);
+        // 解析AST JSON
+        const astJson = JSON.parse(astResult);
 
-    if (apiInfo) {
-        toolCodeContainer.innerHTML = await processApiCallResult(apiInfo, astJson, codeContent);
-    } else {
-        // 解析失败时显示原始AST结果
-        toolCodeContainer.innerHTML = await createToolCodeFallbackView(astResult, codeContent);
-        // 高亮显示AST和原始代码
+        let finalHtml = '';
+
+        // 检查根节点是否为 "Expressions" 类型
+        if (astJson.node_type === "Expressions" && Array.isArray(astJson.children)) {
+            // 处理多个表达式
+            let combinedResultsHtml = '';
+            for (const childAst of astJson.children) {
+                // 对每个子 AST 进行处理
+                const apiInfo = await parseApiCall(childAst);
+                if (apiInfo) {
+                    // 成功解析为 API 调用，传入子 AST 和原始代码内容
+                    // processApiCallResult 现在不包含原始代码块
+                    combinedResultsHtml += await processApiCallResult(apiInfo, childAst, codeContent);
+                } else {
+                    // 子 AST 解析失败，显示该子 AST 的备用视图
+                    // createToolCodeFallbackView 现在不包含原始代码块
+                    combinedResultsHtml += await createToolCodeFallbackView(JSON.stringify(childAst, null, 2));
+                }
+                // 在每个处理结果之间添加分隔符
+                combinedResultsHtml += '<hr class="expression-separator">';
+            }
+            // 移除最后一个分隔符
+            if (combinedResultsHtml.endsWith('<hr class="expression-separator">')) {
+                combinedResultsHtml = combinedResultsHtml.slice(0, -'<hr class="expression-separator">'.length);
+            }
+
+            // 组合结果和唯一的、可折叠的原始代码块
+            finalHtml = combinedResultsHtml + originalCodeHtml;
+
+        } else {
+            // 处理单个表达式或非 "Expressions" 根节点 (原始逻辑)
+            const apiInfo = await parseApiCall(astJson);
+            let resultHtml = '';
+            if (apiInfo) {
+                // processApiCallResult 现在不包含原始代码块
+                resultHtml = await processApiCallResult(apiInfo, astJson, codeContent);
+            } else {
+                // 解析失败时显示原始AST结果
+                // createToolCodeFallbackView 现在不包含原始代码块
+                resultHtml = await createToolCodeFallbackView(astResult);
+            }
+            // 组合结果和可折叠的原始代码块
+            finalHtml = resultHtml + originalCodeHtml;
+        }
+
+        // 添加Wolfram相关查询的全局事件监听器
+        if (!document.querySelector('#wolfram-query-handler')) {
+            registerWolframQueryEventHandler();
+        }
+
+        toolCodeContainer.innerHTML = finalHtml;
+        // 对容器内所有新添加的代码块进行高亮 (包括 details 内部的)
         await highlightToolCodeElements(toolCodeContainer);
+
+    } catch (error) {
+        // 处理 invoke 或 JSON.parse 可能出现的错误
+        await handleToolCodeError(toolCodeContainer, error, codeContent); // 传递原始 codeContent
     }
 }
 
-// 创建工具代码的备用视图（解析失败时）
-async function createToolCodeFallbackView(astResult: string, codeContent: string): Promise<string> {
+// 注册Wolfram相关查询的事件处理器
+function registerWolframQueryEventHandler() {
+    // 创建一个标记元素，表示已经注册了事件处理器
+    const marker = document.createElement('div');
+    marker.id = 'wolfram-query-handler';
+    marker.style.display = 'none';
+    document.body.appendChild(marker);
+
+    // 监听自定义事件
+    window.addEventListener('send-wolfram-query', async (e: any) => {
+        if (e.detail && e.detail.query) {
+            // 如果正在流式输出消息，禁止发送新消息
+            if (isStreaming.value) {
+                AppEvents.showNotification("请等待当前消息输出完成", "error");
+                return;
+            }
+
+            const query = e.detail.query;
+            if (query.trim()) {
+                // 发送消息，在查询前添加"wolfram:"前缀以便可以识别这是Wolfram查询
+                await AppEvents.sendStreamMessageDirect("> wolfram: " + query);
+                AppEvents.showNotification("已发送Wolfram Alpha查询", "success");
+            }
+        }
+    });
+
+    console.log("Wolfram相关查询事件处理器已注册");
+}
+
+// 创建工具代码的备用视图（解析失败时） - 移除原始代码部分
+async function createToolCodeFallbackView(astResult: string): Promise<string> {
+    // 注意：这里不再包含原始代码块
     return `
     <div class="tool-code-header">工具代码 AST:</div>
     <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(JSON.parse(astResult), null, 2))}</code></pre>
-    <div class="tool-code-header original-header">原始代码:</div>
-    <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
   `;
 }
 
-// 处理工具代码错误
+// 处理工具代码错误 - 确保仍然显示原始代码
 async function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unknown, codeContent: string): Promise<void> {
     console.error("解析 tool_code 失败:", error);
 
-    // 显示错误信息
+    // 显示错误信息，并包含原始代码
     toolCodeContainer.innerHTML = `
     <div class="tool-code-error">解析工具代码失败:</div>
     <pre class="tool-code-error-message">${escapeHtml(error instanceof Error ? error.message : String(error))}</pre>
@@ -230,9 +320,15 @@ async function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unk
     if (originalCodeElement) {
         hljs.highlightElement(originalCodeElement as HTMLElement);
     }
+    // 高亮错误消息中的代码（如果需要）
+    const errorMessageElement = toolCodeContainer.querySelector('.tool-code-error-message');
+    if (errorMessageElement) {
+        // 尝试高亮，如果不是代码则忽略
+        try { hljs.highlightElement(errorMessageElement as HTMLElement); } catch (e) { }
+    }
 }
 
-// 高亮工具代码元素
+// 高亮工具代码元素 (保持不变)
 async function highlightToolCodeElements(container: HTMLDivElement): Promise<void> {
     // 对AST结果应用高亮
     const astCodeElement = container.querySelector('.tool-code-ast code');
@@ -246,7 +342,6 @@ async function highlightToolCodeElements(container: HTMLDivElement): Promise<voi
         hljs.highlightElement(originalCodeElement as HTMLElement);
     }
 }
-
 
 // 为代码块添加复制按钮
 async function addCopyButtonToCodeBlock(preElement: Element, codeContent: string): Promise<void> {
@@ -401,7 +496,14 @@ async function parseApiCall(ast: any) {
                         paramValue = child.children[1].start_token.token as number;
                     } else if (child.children[1].node_type.startsWith("Boolean(")) {
                         paramValue = child.children[1].start_token.token === "True" ? true : false;
-                    } else {
+                    } else if (child.children[1].node_type === "Variable(\"None\")") {
+                        paramValue = null; // None类型处理
+                    } else if (child.children[1].node_type === "Variable(\"True\")") {
+                        paramValue = true; // True类型处理
+                    } else if (child.children[1].node_type === "Variable(\"False\")") {
+                        paramValue = false; // False类型处理
+                    }
+                    else {
                         // 其他类型的处理逻辑可以在这里添加
                         console.warn("未知参数类型:", child.children[1].node_type);
                         paramValue = child.children[1].start_token.token;
@@ -450,20 +552,20 @@ async function handleSpecialApiCall(apiInfo: any): Promise<string | null> {
             return await handleHTMLRender(apiInfo);
         case 'katex_render':
             return await handleKaTeXRender(apiInfo);
+        case 'wolfram_alpha_compute':
+            return await handleWolframRender(apiInfo);
         // 在这里可以方便地添加新的函数处理
         default:
             return null; // 不认识的函数调用，返回null使用默认显示
     }
 }
 
-
-// 修改原有的解析逻辑，整合特殊API处理
 async function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): Promise<string> {
     // 尝试处理特殊API调用
     const specialApiHtml = await handleSpecialApiCall(apiInfo);
 
     if (specialApiHtml) {
-        // 如果成功生成了特殊API的HTML，返回带有原始代码和AST的完整结构
+        // 如果成功生成了特殊API的HTML，返回带有原始代码和AST的完整结构 (在details内部)
         return `
       ${specialApiHtml}
       <div class="mini-details-container">
@@ -478,10 +580,10 @@ async function processApiCallResult(apiInfo: any, astJson: any, codeContent: str
             `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${escapeHtml(String(value))}</span></div>`
         ).join('')}
             </div>
-            
+
             <h4>AST详情</h4>
             <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
-            
+
             <h4>原始代码</h4>
             <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
           </div>
@@ -489,7 +591,7 @@ async function processApiCallResult(apiInfo: any, astJson: any, codeContent: str
       </div>
     `;
     } else {
-        // 如果不是特殊API或处理失败，返回默认的结构化结果
+        // 如果不是特殊API或处理失败，返回默认的结构化结果 (不包含原始代码块)
         return `
       <div class="tool-code-header">工具代码解析结果:</div>
       <div class="tool-code-result">
@@ -507,11 +609,10 @@ async function processApiCallResult(apiInfo: any, astJson: any, codeContent: str
           <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
         </details>
       </div>
-      <div class="tool-code-header original-header">原始代码:</div>
-      <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
-    `;
+    `; // 移除了末尾的原始代码块
     }
 }
+
 
 export {
     applyHighlight,

@@ -41,3 +41,6 @@ ammonia = "4.1.0"
 tokio-tungstenite = { version = "0.20", features = ["rustls-tls-native-roots"] }
 reqwest = { version = "0.12.15", features = ["json", "stream", "rustls-tls"], default-features = false }
 tauri-plugin-http = "2.4.3"
+tokio-tungstenite = { version = "0.21.0", features = ["rustls-tls-webpki-roots"] }
+html-escape = "0.2.13"
+log = "0.4.20"

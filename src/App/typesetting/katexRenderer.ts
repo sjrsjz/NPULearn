@@ -24,7 +24,7 @@ export async function handleKaTeXRender(apiInfo: any): Promise<string> {
             output: 'mathml'  // 使用 MathML 输出
         })}</div>`;
 
-        // 返回包含渲染结果的 HTML
+        // 返回包含渲染结果的 HTML，添加溢出处理和居中样式
         return `
         <div class="special-api-call katex-api-call">
             <div class="api-call-header">
@@ -37,7 +37,7 @@ export async function handleKaTeXRender(apiInfo: any): Promise<string> {
                 <span class="api-call-title">KaTeX 渲染</span>
             </div>
             <div class="katex-container loaded" data-render-id="${renderId}" data-render-content="${encodedContent}">
-                <div class="katex-rendered-content">${renderedHTML}</div>
+                <div class="katex-rendered-content" style="overflow-x: auto; max-width: 100%; text-align: center;">${renderedHTML}</div>
             </div>
             <div class="api-call-footer">
                 <details>
