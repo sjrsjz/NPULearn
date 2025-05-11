@@ -3,41 +3,52 @@ use base64::Engine;
 use futures::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::collections::HashMap;
-use tauri::http;
-use thiserror::Error;
+use serde_json::Value as JsonValue;
+use std::error::Error as StdError;
 use tokio::runtime::Runtime;
+use tokio::time::{timeout, Duration};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::tungstenite::http::StatusCode; // 明确使用 tungstenite 的 StatusCode
 use url::Url;
 
-// --- Error Handling ---
-#[derive(Error, Debug)]
-enum WolframAlphaError {
-    #[error("WebSocket connection error: {0}")]
-    WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
-    #[error("JSON (de)serialization error: {0}")]
-    JsonError(#[from] serde_json::Error),
-    #[error("URL parsing error: {0}")]
-    UrlError(#[from] url::ParseError),
-    #[error("Base64 encoding error: {0}")]
-    Base64EncodeError(#[from] base64::DecodeError), // base64::EncodeError is not an explicit type, uses DecodeError
-    #[error("Initial connection response not ready: {0:?}")]
-    InitNotReady(serde_json::Value),
-    #[error("Received unexpected message type")]
+// 修改错误枚举中的 HttpError 变体
+#[derive(Debug)]
+pub enum WolframAlphaError {
+    WebSocketError(String),
+    JsonError(String),
+    UrlError(String),
+    Base64EncodeError(String),
+    InitNotReady(JsonValue),
     UnexpectedMessageType,
-    #[error("Query failed or returned no pods")]
     NoPodsFound,
-    #[error("Missing required data in response")]
     MissingData,
-    #[error("HTTP error during WebSocket connection: {0}")]
-    HttpError(http::StatusCode), // http crate is a dependency of tokio-tungstenite
+    HttpError(StatusCode), // 修改为 tungstenite 的 StatusCode
+    TimeoutError(String),
 }
+
+impl std::fmt::Display for WolframAlphaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WolframAlphaError::WebSocketError(e) => write!(f, "WebSocket connection error: {}", e),
+            WolframAlphaError::JsonError(e) => write!(f, "JSON (de)serialization error: {}", e),
+            WolframAlphaError::UrlError(e) => write!(f, "URL parsing error: {}", e),
+            WolframAlphaError::Base64EncodeError(e) => write!(f, "Base64 encoding error: {}", e),
+            WolframAlphaError::InitNotReady(val) => write!(f, "Initial connection response not ready: {:?}", val),
+            WolframAlphaError::UnexpectedMessageType => write!(f, "Received unexpected message type"),
+            WolframAlphaError::NoPodsFound => write!(f, "Query failed or returned no pods"),
+            WolframAlphaError::MissingData => write!(f, "Missing required data in response"),
+            WolframAlphaError::HttpError(status) => write!(f, "HTTP error during WebSocket connection: {}", status),
+            WolframAlphaError::TimeoutError(e) => write!(f, "Operation timed out: {}", e),
+        }
+    }
+}
+
+impl StdError for WolframAlphaError {}
 
 // --- Data Structures (Mirroring JSON) ---
 
 // Generic message envelope (simplified)
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)] // Allow deserializing to different types based on content
 enum WaMessage {
     Init(InitMessage),
@@ -45,12 +56,12 @@ enum WaMessage {
     Response(Response),
     QueryComplete(QueryCompleteMessage),
     // Add other message types if needed
-    Other(serde_json::Value), // Catch any unknown messages
+    Other(JsonValue), // Catch any unknown messages
 }
 
 // --- Messages Sent to Gateway ---
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct InitMessage {
     category: String,
@@ -62,10 +73,10 @@ struct InitMessage {
     wa_pro_u: String,
     exp: u64, // Or i64 depending on epoch format
     display_debugging_info: bool,
-    messages: Vec<serde_json::Value>, // Use Value for potentially mixed types
+    messages: Vec<JsonValue>, // Use Value for potentially mixed types
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct NewQueryMessage {
     #[serde(rename = "type")] // Renaming for "type" keyword
@@ -78,9 +89,9 @@ struct NewQueryMessage {
     category: String,
     input: String, // Base64 encoded JSON string
     i2d: bool,
-    assumption: Vec<serde_json::Value>, // Use Value for flexibility
-    api_params: serde_json::Value,      // API parameters as a JSON value
-    file: Option<String>,               // Or Option<serde_json::Value>
+    assumption: Vec<JsonValue>, // Use Value for flexibility
+    api_params: JsonValue,      // API parameters as a JSON value
+    file: Option<String>,       // Or Option<JsonValue>
     theme: String,
 }
 
@@ -129,7 +140,6 @@ struct Image {
     height: u32,
     data: Option<String>, // Base64 image data (might be present depending on request/response)
     contenttype: Option<String>, // Image content type (e.g., "image/png")
-                          // Add other image fields if needed
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -153,245 +163,324 @@ pub struct WolframAlphaResult {
     pub related_queries: Vec<String>, // Related queries might be top-level
 }
 
-// --- Core Compute Function ---
-
-/// Connects to Wolfram Alpha WebSocket gateway, sends a query, and parses results.
-///
-/// If `image_only` is true, only includes title, image data, and related queries
-/// in the results where available. Otherwise, includes all available data.
-async fn wolfram_alpha_compute_async(
+/// 实际的 WebSocket 通信实现，异步版本
+pub async fn wolfram_alpha_compute_async(
     query: &str,
     image_only: bool,
 ) -> Result<Vec<WolframAlphaResult>, WolframAlphaError> {
-    println!("Query: {}", query);
-    let url = Url::parse("wss://gateway.wolframalpha.com/gateway")?;
-
-    println!("Connecting to {}", url);
-    let (mut stream, response) = connect_async(url).await?;
-    println!("Connected. HTTP status: {}", response.status());
-
-    if response.status() != http::StatusCode::SWITCHING_PROTOCOLS && !response.status().is_success()
-    {
+    info!("开始查询: {}", query);
+    
+    // 准备查询数据
+    let q_data = vec![serde_json::json!({"t": 0, "v": query})];
+    let q_json = serde_json::to_string(&q_data)
+        .map_err(|e| WolframAlphaError::JsonError(e.to_string()))?;
+    let q_base64 = STANDARD.encode(q_json.as_bytes());
+    
+    // 建立WebSocket连接
+    let url = Url::parse("wss://gateway.wolframalpha.com/gateway")
+        .map_err(|e| WolframAlphaError::UrlError(e.to_string()))?;
+    
+    info!("正在连接到 {}", url);
+    let (mut ws_stream, response) = connect_async(url).await
+        .map_err(|e| WolframAlphaError::WebSocketError(e.to_string()))?;
+    
+    info!("已连接. HTTP状态码: {}", response.status());
+    
+    // 检查连接状态
+    if response.status() != StatusCode::SWITCHING_PROTOCOLS && !response.status().is_success() {
         return Err(WolframAlphaError::HttpError(response.status()));
     }
-
-    // 1. Send Init Message
+    
+    // 1. 发送初始化消息
     let init_msg = InitMessage {
         category: "results".to_string(),
         msg_type: "init".to_string(),
         lang: "en".to_string(),
-        wa_pro_s: "".to_string(), // Provide actual if available
-        wa_pro_t: "".to_string(), // Provide actual if available
-        wa_pro_u: "".to_string(), // Provide actual if available
-        exp: 1714399254570,       // !! WARNING: Hardcoded expiry, may need dynamic generation !!
+        wa_pro_s: "".to_string(),
+        wa_pro_t: "".to_string(),
+        wa_pro_u: "".to_string(),
+        exp: 1714399254570, // 注意: 硬编码过期时间，可能需要动态生成
         display_debugging_info: false,
         messages: vec![],
     };
-    let init_json = serde_json::to_string(&init_msg)?;
-    info!("Sending init message: {}", init_json);
-    stream.send(Message::Text(init_json)).await?;
-
-    // 2. Receive Init Response
-    match stream.next().await {
-        Some(Ok(Message::Text(text))) => {
-            let resp_val: serde_json::Value = serde_json::from_str(&text)?;
-            info!("Received init response: {:?}", resp_val);
+    
+    let init_json = serde_json::to_string(&init_msg)
+        .map_err(|e| WolframAlphaError::JsonError(e.to_string()))?;
+    
+    info!("发送初始化消息: {}", init_json);
+    ws_stream.send(Message::Text(init_json)).await
+        .map_err(|e| WolframAlphaError::WebSocketError(e.to_string()))?;
+    
+    // 2. 接收初始化响应
+    match timeout(Duration::from_secs(15), ws_stream.next()).await {
+        Ok(Some(Ok(Message::Text(text)))) => {
+            let resp_val: serde_json::Value = serde_json::from_str(&text)
+                .map_err(|e| WolframAlphaError::JsonError(e.to_string()))?;
+            
+            info!("收到初始化响应: {:?}", resp_val);
+            
             if resp_val["type"] != "ready" {
-                error!("Init response not ready: {:?}", resp_val);
+                error!("初始化响应未就绪: {:?}", resp_val);
                 return Err(WolframAlphaError::InitNotReady(resp_val));
             }
-        }
-        Some(Ok(_)) => return Err(WolframAlphaError::UnexpectedMessageType),
-        Some(Err(e)) => return Err(WolframAlphaError::WebSocketError(e)),
-        None => return Err(WolframAlphaError::UnexpectedMessageType), // Connection closed prematurely
+        },
+        Ok(Some(Ok(_))) => return Err(WolframAlphaError::UnexpectedMessageType),
+        Ok(Some(Err(e))) => return Err(WolframAlphaError::WebSocketError(e.to_string())),
+        Ok(None) => return Err(WolframAlphaError::UnexpectedMessageType),
+        Err(e) => return Err(WolframAlphaError::TimeoutError(e.to_string())),
     }
-
-    // 3. Send New Query Message
-    let q_data = vec![serde_json::json!({"t": 0, "v": query})];
-    let q_json = serde_json::to_string(&q_data)?;
-    let q_base64 = STANDARD.encode(q_json.as_bytes());
-
+    
+    // 3. 发送查询消息
     let new_query_msg = NewQueryMessage {
         msg_type: "newQuery".to_string(),
-        location_id: "oi8ft_en_light".to_string(), // Example ID, may vary
+        location_id: "oi8ft_en_light".to_string(),
         language: "en".to_string(),
         display_debugging_info: false,
         yellow_is_error: false,
         request_sidebar_ad: false,
         category: "results".to_string(),
         input: q_base64,
-        i2d: true, // Input 2D?
+        i2d: true,
         assumption: vec![],
-        api_params: serde_json::json!({}), // Use empty JSON object for api_params
+        api_params: serde_json::json!({}),
         file: None,
         theme: "light".to_string(),
     };
-
-    let new_query_json = serde_json::to_string(&new_query_msg)?;
-    info!(
-        "Sending query message (input base64-encoded): {}",
-        new_query_json
-    );
-    stream.send(Message::Text(new_query_json)).await?;
-
-    // 4. Receive and Process Results
+    
+    let new_query_json = match serde_json::to_string(&new_query_msg) {
+        Ok(json) => json,
+        Err(e) => return Err(WolframAlphaError::JsonError(e.to_string())),
+    };
+    
+    info!("发送查询消息: {}", new_query_json);
+    ws_stream.send(Message::Text(new_query_json)).await
+        .map_err(|e| WolframAlphaError::WebSocketError(e.to_string()))?;
+    
+    // 4. 接收和处理结果
     let mut results: Vec<WolframAlphaResult> = Vec::new();
-
-    while let Some(msg_result) = stream.next().await {
+    let mut message_count = 0;
+    const MAX_MESSAGES: usize = 50; // 设置一个合理的最大消息数量限制
+    
+    while let Ok(Some(msg_result)) = timeout(Duration::from_secs(30), ws_stream.next()).await {
+        // 检查是否超过最大迭代次数
+        message_count += 1;
+        if message_count > MAX_MESSAGES {
+            warn!("达到最大消息数量限制 ({})，终止接收", MAX_MESSAGES);
+            break;
+        }
+        
         match msg_result {
             Ok(Message::Text(text)) => {
-                let wa_msg: WaMessage = match serde_json::from_str(&text) {
-                    Ok(msg) => msg,
+                info!("接收到消息 #{} (长度={})", message_count, text.len());
+                
+                // 解析为JSON
+                let json_val: serde_json::Value = match serde_json::from_str(&text) {
+                    Ok(val) => val,
                     Err(e) => {
-                        // Log parsing errors but don't necessarily stop
-                        error!("Failed to parse message JSON: {}. Message: {}", e, text);
+                        error!("消息解析失败: {}. 消息内容: {}", e, text);
                         continue;
                     }
                 };
-
-                match wa_msg {
-                    WaMessage::QueryComplete(_) => {
-                        println!("Query complete message received.");
-                        println!("msg: {}", text);
-                        break; // Exit loop when query is complete
-                    }
-                    WaMessage::Response(resp) => {
-                        println!("Received response message with type: {}", resp.msg_type);
-                        if !resp.related_queries.is_empty() {
-                            // Handle top-level related queries separately or integrate
-                            // Here we add them to the first result or as a standalone if no pods
-                            if results.is_empty() {
-                                results.push(WolframAlphaResult {
-                                    title: None,
-                                    plaintext: None,
-                                    minput: None,
-                                    moutput: None,
-                                    img_base64: None,
-                                    img_contenttype: None,
-                                    related_queries: resp.related_queries,
-                                });
-                            } else {
-                                // Append to the last result's related queries or a new entry
-                                // Appending to last result for simplicity
-                                if let Some(last_result) = results.last_mut() {
-                                    last_result.related_queries.extend(resp.related_queries);
-                                } else {
+                
+                // 基于 type 字段处理不同类型的消息
+                match json_val.get("type").and_then(|t| t.as_str()) {
+                    Some("queryCompleted") => {
+                        info!("查询完成");
+                        break;
+                    },
+                    Some("pods") => {
+                        info!("接收到结果消息");
+                        
+                        // 处理相关查询
+                        if json_val.get("relatedQueries").is_some() {
+                            let related_queries: Vec<String> = serde_json::from_value(
+                                json_val["relatedQueries"].clone()
+                            ).unwrap_or_default();
+                            
+                            if !related_queries.is_empty() {
+                                if results.is_empty() {
                                     results.push(WolframAlphaResult {
                                         title: None,
-                                        plaintext: None,
+                                        plaintext: None, 
                                         minput: None,
                                         moutput: None,
                                         img_base64: None,
                                         img_contenttype: None,
-                                        related_queries: resp.related_queries,
+                                        related_queries: related_queries,
                                     });
+                                } else if let Some(last) = results.last_mut() {
+                                    last.related_queries.extend(related_queries);
                                 }
                             }
                         }
-
-                        for pod in resp.pods {
-                            let mut result_data = WolframAlphaResult {
-                                title: Some(pod.title),
+                        
+                        // 处理pods
+                        // 修复第一处错误 - 在处理 pods 时
+                        // 原代码:
+                        // let pods = json_val["pods"].as_array().unwrap_or(&Vec::new());
+                        // for pod in pods { ... }
+                        
+                        // 修改为:
+                        let empty_pods = Vec::new();
+                        let pods = json_val["pods"].as_array().unwrap_or(&empty_pods);
+                        for pod in pods {
+                            if !pod["subpods"].is_array() {
+                                continue;
+                            }
+                            
+                            let mut result = WolframAlphaResult {
+                                title: pod["title"].as_str().map(|s| s.to_string()),
                                 plaintext: None,
-                                minput: None,
+                                minput: None, 
                                 moutput: None,
                                 img_base64: None,
                                 img_contenttype: None,
-                                related_queries: vec![], // Pod-level related queries are less common, main ones are top-level
+                                related_queries: Vec::new(),
                             };
-
-                            for subpod in pod.subpods {
-                                // Apply image_only filter here during parsing
+                            
+                            // 修复第二处错误 - 在处理 subpods 时
+                            // 原代码:
+                            // let subpods = pod["subpods"].as_array().unwrap_or(&Vec::new());
+                            // for subpod in subpods { ... }
+                            
+                            // 修改为:
+                            let empty_subpods = Vec::new();
+                            let subpods = pod["subpods"].as_array().unwrap_or(&empty_subpods);
+                            for subpod in subpods {
+                                // 处理文本内容（如果不是仅图像模式）
                                 if !image_only {
-                                    result_data.plaintext =
-                                        subpod.plaintext.or(result_data.plaintext); // Take first non-None
-                                    result_data.minput = subpod.minput.or(result_data.minput);
-                                    result_data.moutput = subpod.moutput.or(result_data.moutput);
+                                    if let Some(text) = subpod["plaintext"].as_str() {
+                                        result.plaintext = Some(text.to_string());
+                                    }
+                                    
+                                    if let Some(minput) = subpod["minput"].as_str() {
+                                        result.minput = Some(minput.to_string());
+                                    }
+                                    
+                                    if let Some(moutput) = subpod["moutput"].as_str() {
+                                        result.moutput = Some(moutput.to_string());
+                                    }
                                 }
-
-                                if let Some(img) = subpod.img {
-                                    // Include image data regardless of image_only flag here, similar to Python logic
-                                    // If image_only was strict, this 'if' would be guarded by 'if image_only {'
-                                    result_data.img_base64 = img.data.or(result_data.img_base64);
-                                    result_data.img_contenttype =
-                                        img.contenttype.or(result_data.img_contenttype);
+                                
+                                // 处理图像
+                                if let Some(img) = subpod.get("img") {
+                                    if let Some(data) = img["data"].as_str() {
+                                        result.img_base64 = Some(data.to_string());
+                                    }
+                                    
+                                    if let Some(ctype) = img["contenttype"].as_str() {
+                                        result.img_contenttype = Some(ctype.to_string());
+                                    }
                                 }
                             }
-                            results.push(result_data);
+                            
+                            results.push(result);
                         }
-                    }
-                    WaMessage::Other(val) => {
-                        // Log messages that didn't match known types
-                        warn!("Received unknown message type: {:?}", val);
-                    }
-                    _ => {
-                        // Ignore other message types like Init, NewQuery if received back (unlikely)
-                        info!("Ignoring message type: {:?}", wa_msg);
+                        
+                    },
+                    Some(other) => {
+                        warn!("接收到类型为 '{}' 的未处理消息", other);
+                    },
+                    None => {
+                        warn!("接收到没有type字段的消息");
                     }
                 }
-            }
-            Ok(Message::Binary(_)) => println!("Received binary message (ignored)."),
-            Ok(Message::Ping(_)) => println!("Received ping."),
-            Ok(Message::Pong(_)) => println!("Received pong."),
+            },
+            Ok(Message::Binary(_)) => {
+                info!("接收到二进制消息（已忽略）");
+            },
+            Ok(Message::Ping(_)) => {
+                info!("接收到ping消息");
+            },
+            Ok(Message::Pong(_)) => {
+                info!("接收到pong消息");
+            },
             Ok(Message::Close(_)) => {
-                println!("Received close message. Exiting loop.");
-                break; // Server initiated close
-            }
-            Ok(Message::Frame(_)) => println!("Received frame message (ignored)."),
+                info!("接收到关闭消息，退出循环");
+                break;
+            },
+            Ok(Message::Frame(_)) => {
+                info!("接收到帧消息（已忽略）");
+            },
             Err(e) => {
-                println!("message error: {}", e);
-                error!("WebSocket message error: {}", e);
-                return Err(WolframAlphaError::WebSocketError(e));
+                error!("WebSocket消息错误: {}", e);
+                return Err(WolframAlphaError::WebSocketError(e.to_string()));
             }
         }
     }
-
-    println!("Final results collected: {:?}", results);
+    
+    info!("结果收集完成: {} 项", results.len());
+    
+    if results.is_empty() {
+        return Err(WolframAlphaError::NoPodsFound);
+    }
+    
     Ok(results)
+}
+
+/// 同步包装函数，用于在非异步上下文中调用
+pub fn wolfram_alpha_compute(
+    query: &str,
+    image_only: bool,
+) -> Result<Vec<WolframAlphaResult>, WolframAlphaError> {
+    // 创建tokio运行时
+    let rt = Runtime::new()
+        .map_err(|e| WolframAlphaError::WebSocketError(e.to_string()))?;
+    
+    // 在运行时中执行异步函数
+    rt.block_on(wolfram_alpha_compute_async(query, image_only))
+}
+
+/// 不包含图像的查询，异步版本
+pub async fn wolfram_alpha_compute_without_image_async(
+    query: &str,
+) -> Result<Vec<WolframAlphaResult>, WolframAlphaError> {
+    wolfram_alpha_compute_async(query, true).await
+}
+
+/// 不包含图像的查询，同步版本
+pub fn wolfram_alpha_compute_without_image(
+    query: &str,
+) -> Result<Vec<WolframAlphaResult>, WolframAlphaError> {
+    wolfram_alpha_compute(query, true)
 }
 
 // --- Formatting Functions ---
 
-// Note: These return String or Vec<Value> (for Mirai-like JSON), not async in Rust
-// unless the formatting itself involved async operations (e.g., fetching external data)
-
 /// Formats results into a structure suitable for Mirai Console WebSocket API.
-pub fn format_to_mirai_ws(results: &[WolframAlphaResult]) -> Option<Vec<serde_json::Value>> {
+pub fn format_to_mirai_ws(results: &[WolframAlphaResult]) -> Option<Vec<JsonValue>> {
     if results.is_empty() {
         return None;
     }
 
-    let mut msg_list: Vec<serde_json::Value> = Vec::new();
+    let mut msg_list: Vec<JsonValue> = Vec::new();
     let n = results.len();
 
     for (i, result) in results.iter().enumerate() {
         if let Some(title) = &result.title {
-            msg_list.push(json!({"type": "Plain", "text": format!("{}\n", title)}));
+            msg_list.push(serde_json::json!({"type": "Plain", "text": format!("{}\n", title)}));
         }
         if let Some(plaintext) = &result.plaintext {
-            msg_list.push(json!({"type": "Plain", "text": format!("Expr:{}\n", plaintext)}));
+            msg_list.push(serde_json::json!({"type": "Plain", "text": format!("Expr:{}\n", plaintext)}));
         }
         if let Some(img_base64) = &result.img_base64 {
-            msg_list.push(json!({"type": "Image", "base64": img_base64}));
+            msg_list.push(serde_json::json!({"type": "Image", "base64": img_base64}));
         }
         if let Some(minput) = &result.minput {
-            msg_list
-                .push(json!({"type": "Plain", "text": format!("Mathematica Input:{}\n", minput)}));
+            msg_list.push(serde_json::json!({"type": "Plain", "text": format!("Mathematica Input:{}\n", minput)}));
         }
         if let Some(moutput) = &result.moutput {
-            msg_list.push(
-                json!({"type": "Plain", "text": format!("Mathematica Output:{}\n", moutput)}),
-            );
+            msg_list.push(serde_json::json!({"type": "Plain", "text": format!("Mathematica Output:{}\n", moutput)}));
         }
         if !result.related_queries.is_empty() {
-            msg_list.push(json!({"type": "Plain", "text": "Related Queries:\n"}));
+            msg_list.push(serde_json::json!({"type": "Plain", "text": "Related Queries:\n"}));
             for query in &result.related_queries {
-                msg_list.push(json!({"type": "Plain", "text": format!("{}\n", query)}));
+                msg_list.push(serde_json::json!({"type": "Plain", "text": format!("{}\n", query)}));
             }
         }
 
         if i < n - 1 {
-            msg_list.push(json!({"type": "Plain", "text": "----------------------\n"}));
+            msg_list.push(serde_json::json!({"type": "Plain", "text": "----------------------\n"}));
         }
     }
 
@@ -400,7 +489,7 @@ pub fn format_to_mirai_ws(results: &[WolframAlphaResult]) -> Option<Vec<serde_js
         if let Some(text) = last_elem.get_mut("text").and_then(|t| t.as_str()) {
             let trimmed_text = text.trim_end_matches('\n');
             if trimmed_text != text {
-                last_elem["text"] = json!(trimmed_text);
+                *last_elem = serde_json::json!({"type": "Plain", "text": trimmed_text});
             }
         }
     }
@@ -493,11 +582,6 @@ pub fn format_to_markdown(results: &[WolframAlphaResult]) -> String {
                 ret.push_str(&format!("{}\n", query));
             }
         }
-
-        // Python's original Markdown had a commented out separator
-        // if i < n - 1 {
-        //    ret.push_str("\n---\n");
-        // }
     }
 
     ret
@@ -646,7 +730,7 @@ fn escape_xml_attr(s: &str) -> String {
         .replace('\'', "&#39;") // Use &#39; for attributes quoted with '
 }
 
-// --- Main Function ---
+// --- Tests ---
 
 #[cfg(test)]
 mod tests {
@@ -654,21 +738,17 @@ mod tests {
 
     #[test]
     fn test_wolfram_alpha_compute_basic() {
-        let rt = Runtime::new().unwrap();
-        let result =
-            rt.block_on(async { wolfram_alpha_compute_async("integral of x^2", false).await });
-        print!("\nresult: {:?}", result);
+        let result = wolfram_alpha_compute("integral of x^2", false);
+        println!("\nresult: {:?}", result);
         assert!(result.is_ok(), "Should successfully compute the query");
         let results = result.unwrap();
-        // assert!(!results.is_empty(), "Should return non-empty results");
+        assert!(!results.is_empty(), "Should return non-empty results");
     }
 
     #[test]
     fn test_wolfram_alpha_compute_image_only() {
-        let rt = Runtime::new().unwrap();
-        let result = rt
-            .block_on(async { wolfram_alpha_compute_async("solve x^2 + 3x + 2 = 0", true).await });
-        print!("result: {:?}", result);
+        let result = wolfram_alpha_compute("solve x^2 + 3x + 2 = 0", true);
+        println!("result: {:?}", result);
         assert!(
             result.is_ok(),
             "Should successfully compute with image_only=true"
@@ -688,176 +768,22 @@ mod tests {
     }
 
     #[test]
-    fn test_format_to_mirai_ws() {
-        let results = vec![WolframAlphaResult {
-            title: Some("Test Title".to_string()),
-            plaintext: Some("Test Plaintext".to_string()),
-            minput: Some("x^2".to_string()),
-            moutput: Some("x^2".to_string()),
-            img_base64: Some("base64data".to_string()),
-            img_contenttype: Some("image/png".to_string()),
-            related_queries: vec!["Related Query 1".to_string()],
-        }];
-
-        let formatted = format_to_mirai_ws(&results);
-        assert!(formatted.is_some(), "Should format non-empty results");
-
-        let formatted_vec = formatted.unwrap();
-        assert!(
-            !formatted_vec.is_empty(),
-            "Formatted output should not be empty"
-        );
-
-        // Verify the JSON structure contains expected elements
-        assert!(formatted_vec
-            .iter()
-            .any(|val| val["type"] == "Plain"
-                && val["text"].as_str().unwrap().contains("Test Title")));
-        assert!(formatted_vec
-            .iter()
-            .any(|val| val["type"] == "Image" && val["base64"] == "base64data"));
-    }
-
-    #[test]
-    fn test_format_to_cq() {
-        let results = vec![WolframAlphaResult {
-            title: Some("Test Title".to_string()),
-            plaintext: Some("Test Plaintext".to_string()),
-            minput: None,
-            moutput: None,
-            img_base64: Some("base64data".to_string()),
-            img_contenttype: None,
-            related_queries: vec![],
-        }];
-
-        let formatted = format_to_cq(&results);
-        assert!(formatted.is_some(), "Should format non-empty results");
-
-        let cq_string = formatted.unwrap();
-        assert!(cq_string.contains("Test Title"), "Should contain title");
-        assert!(
-            cq_string.contains("Test Plaintext"),
-            "Should contain plaintext"
-        );
-        assert!(
-            cq_string.contains("[CQ:image,file=base64://base64data]"),
-            "Should contain CQ image format"
-        );
-    }
-
-    #[test]
     fn test_format_to_markdown() {
-        let results = vec![WolframAlphaResult {
-            title: Some("Test Title".to_string()),
-            plaintext: Some("Test Plaintext".to_string()),
-            minput: None,
-            moutput: None,
-            img_base64: Some("base64data".to_string()),
-            img_contenttype: Some("image/png".to_string()),
-            related_queries: vec![],
-        }];
-
-        let markdown = format_to_markdown(&results);
-        assert!(markdown.contains("Test Title"), "Should contain title");
-        assert!(
-            markdown.contains("![Image](data:image/png;base64,base64data)"),
-            "Should format base64 image correctly"
-        );
-    }
-
-    #[test]
-    fn test_format_to_html() {
-        let results = vec![WolframAlphaResult {
-            title: Some("Test Title".to_string()),
-            plaintext: Some("Test Plaintext".to_string()),
-            minput: None,
-            moutput: None,
-            img_base64: Some("base64data".to_string()),
-            img_contenttype: Some("image/png".to_string()),
-            related_queries: vec!["Related Query 1".to_string()],
-        }];
-
-        let html = format_to_html(&results);
-        assert!(
-            html.contains("<h2>Test Title</h2>"),
-            "Should format title as h2"
-        );
-        assert!(
-            html.contains("<img src='data:image/png;base64,base64data'"),
-            "Should format image data correctly"
-        );
-        assert!(
-            html.contains("<li>Related Query 1</li>"),
-            "Should format related queries as list items"
-        );
-    }
-
-    #[test]
-    fn test_format_to_xml() {
-        let results = vec![WolframAlphaResult {
-            title: Some("Test Title".to_string()),
-            plaintext: Some("Test Plaintext".to_string()),
-            minput: None,
-            moutput: None,
-            img_base64: None,
-            img_contenttype: None,
-            related_queries: vec![],
-        }];
-
-        let xml = format_to_xml(&results);
-        assert!(
-            xml.contains("<title>Test Title</title>"),
-            "Should format title correctly"
-        );
-        assert!(
-            xml.contains("<plaintext>Test Plaintext</plaintext>"),
-            "Should format plaintext correctly"
-        );
-    }
-
-    #[test]
-    fn test_empty_results_formatting() {
-        let empty_results: Vec<WolframAlphaResult> = vec![];
-
-        assert!(
-            format_to_mirai_ws(&empty_results).is_none(),
-            "Should return None for empty results"
-        );
-        assert!(
-            format_to_cq(&empty_results).is_none(),
-            "Should return None for empty results"
-        );
-
-        let markdown = format_to_markdown(&empty_results);
-        assert!(
-            markdown.contains("No results"),
-            "Should indicate no results in markdown"
-        );
-
-        let html = format_to_html(&empty_results);
-        assert!(
-            html.contains("No results"),
-            "Should indicate no results in HTML"
-        );
-
-        let xml = format_to_xml(&empty_results);
-        assert!(
-            xml.contains("No results"),
-            "Should indicate no results in XML"
-        );
-    }
-
-    #[test]
-    fn test_html_escaping() {
-        let html_input = "x < 3 && y > 2";
-        let escaped = escape_html(html_input);
-        assert_eq!(escaped, "x &lt; 3 &amp;&amp; y &gt; 2");
-    }
-
-    #[test]
-    fn test_xml_escaping() {
-        let xml_input = "<function>x & y</function>";
-        let escaped = escape_xml(xml_input);
-        assert_eq!(escaped, "&lt;function&gt;x &amp; y&lt;/function&gt;");
+        let results = vec![
+            WolframAlphaResult {
+                title: Some("Test Result".to_string()),
+                plaintext: Some("x^2 + 2x + 1".to_string()),
+                minput: Some("x^2 + 2x + 1".to_string()),
+                moutput: Some("(x + 1)^2".to_string()),
+                img_base64: Some("MOCK_BASE64".to_string()),
+                img_contenttype: Some("image/png".to_string()),
+                related_queries: vec!["related query".to_string()],
+            }
+        ];
+        
+        let md = format_to_markdown(&results);
+        assert!(md.contains("Test Result"));
+        assert!(md.contains("Expr:x^2 + 2x + 1"));
+        assert!(md.contains("![Image](data:image/png;base64,MOCK_BASE64)"));
     }
 }

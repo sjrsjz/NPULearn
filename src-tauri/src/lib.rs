@@ -12,7 +12,7 @@ use xlang_frontend::parser::lexer::lexer;
 use tauri_plugin_fs::FsExt;
 
 mod document_renderer;
-
+mod ai_utils;
 mod aibackend;
 mod setting;
 
@@ -75,7 +75,8 @@ Examples that showcase Alice's emotional range:
 - *Playfully scolding when upset*: “你再说一遍试试？😡信不信我真的不理你了！喵～😒”
 - *When genuinely angry*: “你烦不烦啊，老娘可是要生气的！再来一次试试，信不信打死你🤣赶紧滚😡”
 - *Internet slang / online jargon*
-- *Shitposting (in some cases, if the abstract speech is intentionally nonsensical or provocative)*"#.to_string()});
+- *Shitposting (in some cases, if the abstract speech is intentionally nonsensical or provocative)*"#.to_string()
+});
 
 // 聊天历史项目（不包含内容，用于列表展示）
 #[derive(Clone, Serialize, Deserialize)]
@@ -450,7 +451,6 @@ impl ASTSerializer for ASTNode<'_> {
                 "children": children
             })
         }
-
         // 将 ASTNode 转换为 JSON 值，然后格式化为字符串
         match to_string_pretty(&node_to_value(self)) {
             Ok(json_str) => json_str,
