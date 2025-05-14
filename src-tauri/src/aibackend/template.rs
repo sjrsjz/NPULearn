@@ -4,7 +4,7 @@ use regex::Regex;
 use serde_json::Value;
 
 #[allow(dead_code)]
-const COT: &str = r#"<|start_header|>chain_of_thought<|end_header|>
+pub const COT: &str = r#"<|start_header|>chain_of_thought<|end_header|>
 # Multi-step reasoning Framework (Important, Chain of Thought)
 
 ## Thinking Process:

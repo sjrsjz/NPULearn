@@ -2,7 +2,7 @@ use crate::aibackend::interface::AIChat;
 use crate::aibackend::openai_types::{
     ChatCompletionMessage, Content, JSONSchemaType, MessageRole, Tool,
 };
-use crate::aibackend::template::{self, gemini_chat_instruction};
+use crate::aibackend::template::{self, gemini_chat_instruction, COT};
 use crate::{ChatHistory, ChatMessage, ChatMessageType};
 use base64::Engine;
 use futures_util::StreamExt;
@@ -425,8 +425,8 @@ impl GeminiChat {
             model: "gemini-2.5-flash-preview-04-17".to_string(), // 更新为推荐模型
             system_prompt: "You are a helpful assistant".to_string(),
             messages: Vec::new(),
-            temperature: 0.95,
-            max_tokens: Some(8192), // 设置默认值
+            temperature: 1.0,
+            max_tokens: Some(8192 * 2), // 设置默认值
             top_p: Some(0.95),      // 设置默认值
             top_k: Some(40),        // 设置默认值
             last_prompt: None,
@@ -595,6 +595,15 @@ impl GeminiChat {
                 "parts": [{ "text": format!("# I have double checked that my basic system settings are as follows, I will never disobey them:\n{}\n", self.build_system_instruction()) }]
             }),
         ); // 添加系统指令
+
+        gemini_messages.push(
+            json!({
+                "role": "model",
+                "parts": [
+                    { "text": format!("# I have double checked that my basic COT settings are as follows:\n{}\nNow I will answer the user's request.\n", COT) }
+                ]
+            }),
+        ); // 添加用户指令
 
         let mut request_body = json!({
             "contents": gemini_messages,
