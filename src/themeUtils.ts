@@ -441,6 +441,9 @@ function overrideMediaQueryStyles(isDark: boolean): void {
             .notification.warning svg { color: #fbbf24 ; }
             .mermaid-container { background-color: #1e293b ; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4) ; border: 1px solid #334155 ; }
             .mermaid-container:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) ; }
+            .pintora-container { background-color: #1e293b ; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4) ; border: 1px solid #334155 ; }
+            .pintora-container:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) ; }
+            .pintora-error { background-color: rgba(239, 68, 68, 0.2) ; border-left-color: #ef4444 ; }
             chat-messages a { color: #6366f1 ; border-bottom-color: #6366f1 ; }
             .history-item:hover { background-color: rgba(255, 255, 255, 0.05) ; border-color: #475569 ; }
             .close-history:hover, .toggle-history:hover { background-color: rgba(255, 255, 255, 0.1) ; }

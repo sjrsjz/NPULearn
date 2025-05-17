@@ -9,6 +9,7 @@ import { handleHTMLRender } from './htmlRenderer';
 import { handleInteractiveButton } from './interactiveButton';
 import { handleKaTeXRender } from './katexRenderer';
 import { handleWolframRender } from './wolframRenderer';
+import { handlePintoraRender } from './pintoraRenderer';
 /**
  * HTML转义函数，防止XSS攻击
  * @param str 需要转义的字符串
@@ -294,14 +295,170 @@ function registerWolframQueryEventHandler() {
     console.log("Wolfram相关查询事件处理器已注册");
 }
 
+// 将 JSON 对象转换为交互式树形 HTML
+function convertJsonToTreeView(json: any, isRoot: boolean = true): string {
+    if (json === null) return '<span class="json-null">null</span>';
+    if (json === undefined) return '<span class="json-undefined">undefined</span>';
+    
+    // 处理基本类型
+    if (typeof json !== 'object') {
+      if (typeof json === 'string') {
+        return `<span class="json-string">"${escapeHtml(json)}"</span>`;
+      }
+      if (typeof json === 'number') {
+        return `<span class="json-number">${json}</span>`;
+      }
+      if (typeof json === 'boolean') {
+        return `<span class="json-boolean">${json}</span>`;
+      }
+      return escapeHtml(String(json));
+    }
+    
+    // 处理数组
+    if (Array.isArray(json)) {
+      if (json.length === 0) return '<span class="json-array">[]</span>';
+      
+      const items = json.map((item, index) => {
+        return `
+          <li class="json-array-item">
+            <span class="json-array-index">[${index}]</span>
+            <div class="json-array-value">${convertJsonToTreeView(item, false)}</div>
+          </li>
+        `;
+      }).join('');
+      
+      return `
+        <details class="json-details" ${isRoot ? 'open' : ''}>
+          <summary class="json-array-summary">Array[${json.length}]</summary>
+          <ul class="json-array-list">${items}</ul>
+        </details>
+      `;
+    }
+    
+    // 处理对象
+    const keys = Object.keys(json);
+    if (keys.length === 0) return '<span class="json-object">{}</span>';
+    
+    const items = keys.map(key => {
+      // 特殊处理一些常见的AST属性，使树形视图更易读
+      let keyDisplay = key;
+      let collapsedByDefault = false;
+      
+      // 对一些较大的属性默认折叠
+      if (['children', 'body', 'expressions', 'statements'].includes(key)) {
+        collapsedByDefault = true;
+      }
+      
+      // 对于节点类型，使用不同颜色
+      if (key === 'node_type') {
+        return `
+          <li class="json-property">
+            <span class="json-property-key">${keyDisplay}:</span>
+            <span class="json-property-value json-node-type">${escapeHtml(String(json[key]))}</span>
+          </li>
+        `;
+      }
+      
+      return `
+        <li class="json-property">
+          <span class="json-property-key">${keyDisplay}:</span>
+          <div class="json-property-value">${convertJsonToTreeView(json[key], false && !collapsedByDefault)}</div>
+        </li>
+      `;
+    }).join('');
+    
+    return `
+      <details class="json-details" ${isRoot ? 'open' : ''}>
+        <summary class="json-object-summary">Object{${keys.length}}</summary>
+        <ul class="json-object-list">${items}</ul>
+      </details>
+    `;
+  }
+
 // 创建工具代码的备用视图（解析失败时） - 移除原始代码部分
 async function createToolCodeFallbackView(astResult: string): Promise<string> {
-    // 注意：这里不再包含原始代码块
-    return `
-    <div class="tool-code-header">工具代码 AST:</div>
-    <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(JSON.parse(astResult), null, 2))}</code></pre>
-  `;
-}
+    try {
+      const parsedAst = JSON.parse(astResult);
+      
+      return `
+      <div class="tool-code-header">工具代码 AST:</div>
+      <div class="ast-tree-view">${convertJsonToTreeView(parsedAst)}</div>
+      <div class="mini-details-container">
+        <details class="mini-tech-details">
+          <summary aria-label="查看原始JSON"><span class="detail-chevron">▲</span></summary>
+          <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(parsedAst, null, 2))}</code></pre>
+        </details>
+      </div>
+      `;
+    } catch (e) {
+      // 解析失败时回退到原始文本显示
+      return `
+      <div class="tool-code-header">工具代码 AST:</div>
+      <pre class="tool-code-ast"><code>${escapeHtml(astResult)}</code></pre>
+      `;
+    }
+  }
+
+async function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): Promise<string> {
+    // 尝试处理特殊API调用
+    const specialApiHtml = await handleSpecialApiCall(apiInfo);
+  
+    if (specialApiHtml) {
+      // 如果成功生成了特殊API的HTML，返回带有原始代码和AST的完整结构 (在details内部)
+      return `
+        ${specialApiHtml}
+        <div class="mini-details-container">
+          <details class="mini-tech-details">
+            <summary aria-label="查看技术详情"><span class="detail-chevron">▲</span></summary>
+            <div class="api-details">
+              <h4>API调用信息</h4>
+              <div class="tool-api-info">
+                <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${escapeHtml(apiInfo.api_name)}</span></div>
+                <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${escapeHtml(apiInfo.function_name)}</span></div>
+                ${Object.entries(apiInfo.arguments).map(([key, value]) =>
+          `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${escapeHtml(String(value))}</span></div>`
+        ).join('')}
+              </div>
+  
+              <h4>AST详情</h4>
+              <div class="ast-tree-view">${convertJsonToTreeView(astJson)}</div>
+              <details class="mini-tech-details">
+                <summary aria-label="查看原始JSON"><span class="detail-chevron">▲</span></summary>
+                <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
+              </details>
+  
+              <h4>原始代码</h4>
+              <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
+            </div>
+          </details>
+        </div>
+      `;
+    } else {
+      // 如果不是特殊API或处理失败，返回默认的结构化结果 (不包含原始代码块)
+      return `
+        <div class="tool-code-header">工具代码解析结果:</div>
+        <div class="tool-code-result">
+          <div class="tool-api-info">
+            <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${escapeHtml(apiInfo.api_name)}</span></div>
+            <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${escapeHtml(apiInfo.function_name)}</span></div>
+            ${Object.entries(apiInfo.arguments).map(([key, value]) =>
+          `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${escapeHtml(String(value))}</span></div>`
+        ).join('')}
+          </div>
+        </div>
+        <div class="mini-details-container">
+          <details class="mini-tech-details">
+            <summary aria-label="查看AST详情"><span class="detail-chevron">▲</span></summary>
+            <div class="ast-tree-view">${convertJsonToTreeView(astJson)}</div>
+            <details class="mini-tech-details ast-raw-json">
+              <summary aria-label="查看原始JSON"><span class="detail-chevron">▲</span></summary>
+              <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
+            </details>
+          </details>
+        </div>
+      `;
+    }
+  }
 
 // 处理工具代码错误 - 确保仍然显示原始代码
 async function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unknown, codeContent: string): Promise<void> {
@@ -328,20 +485,32 @@ async function handleToolCodeError(toolCodeContainer: HTMLDivElement, error: unk
     }
 }
 
-// 高亮工具代码元素 (保持不变)
+// 高亮工具代码元素 - 修改为同时支持树形视图
 async function highlightToolCodeElements(container: HTMLDivElement): Promise<void> {
     // 对AST结果应用高亮
     const astCodeElement = container.querySelector('.tool-code-ast code');
     if (astCodeElement) {
-        hljs.highlightElement(astCodeElement as HTMLElement);
+      hljs.highlightElement(astCodeElement as HTMLElement);
     }
-
+  
     // 对原始代码应用高亮
     const originalCodeElement = container.querySelector('.tool-code-original code');
     if (originalCodeElement) {
-        hljs.highlightElement(originalCodeElement as HTMLElement);
+      hljs.highlightElement(originalCodeElement as HTMLElement);
     }
-}
+    
+    // 添加树形视图的交互功能
+    const jsonDetails = container.querySelectorAll('.json-details');
+    jsonDetails.forEach(detail => {
+      const summary = detail.querySelector('summary');
+      if (summary) {
+        summary.addEventListener('click', (e) => {
+          // 防止默认的 details 展开/折叠行为冒泡
+          e.stopPropagation();
+        });
+      }
+    });
+  }
 
 // 为代码块添加复制按钮
 async function addCopyButtonToCodeBlock(preElement: Element, codeContent: string): Promise<void> {
@@ -400,9 +569,24 @@ async function addCopyButtonToCodeBlock(preElement: Element, codeContent: string
  */
 async function parseApiCall(ast: any) {
     try {
-        // 检查根节点是否为LambdaCall类型
-        if (ast.node_type !== "LambdaCall") {
-            console.warn("根节点不是LambdaCall类型");
+        // 检查根节点类型
+        if (!ast.node_type) {
+            console.warn("AST 节点缺少 node_type 属性");
+            return null;
+        }
+        
+        // 处理 Expressions 类型的根节点（表示多个表达式）
+        if (ast.node_type === "Expressions") {
+            if (ast.children && ast.children.length > 0) {
+                // 尝试解析第一个表达式（通常是一个 LambdaCall）
+                return await parseApiCall(ast.children[0]);
+            }
+            return null;
+        }
+        
+        // 检查是否为 LambdaCall 类型
+        if (ast.node_type !== "LambdaCall" && ast.node_type !== "Tuple") {
+            console.warn(`根节点不是支持的类型: ${ast.node_type}`);
             return null;
         }
 
@@ -412,7 +596,7 @@ async function parseApiCall(ast: any) {
             print_call: boolean;
             api_name: string | null;
             function_name: string | null;
-            arguments: Record<string, string>;
+            arguments: Record<string, any>;
         } = {
             type: "api_call",
             print_call: false,
@@ -421,34 +605,45 @@ async function parseApiCall(ast: any) {
             arguments: {}
         };
 
-        // 检查是否是print调用
+        // 检查是否是 print 调用
         if (ast.children && ast.children.length >= 1 &&
             ast.children[0].node_type === "Variable(\"print\")") {
             result.print_call = true;
         }
 
-        // 查找API调用部分(GetAttr节点)
+        // 查找 API 调用部分 (GetAttr 节点)
         let apiCallNode = null;
+        let argsNode = null;
 
-        // 如果是print调用，API调用节点在第二个子节点的子节点里
-        if (result.print_call && ast.children.length >= 2 && ast.children[1].children) {
-            const tupleNode = ast.children[1];
-            if (tupleNode.children.length > 0) {
-                const firstChild = tupleNode.children[0];
-                if (firstChild.node_type === "LambdaCall" && firstChild.children.length > 0) {
-                    apiCallNode = firstChild.children[0]; // 应该是GetAttr节点
+        if (result.print_call) {
+            // 处理 print(default_api.function_name(...)) 格式
+            if (ast.children.length >= 2) {
+                // 从 Tuple 节点中提取 LambdaCall
+                const tupleNode = ast.children[1];
+                if (tupleNode.node_type === "Tuple" && tupleNode.children && tupleNode.children.length > 0) {
+                    const firstChild = tupleNode.children[0];
+                    if (firstChild.node_type === "LambdaCall" && firstChild.children && firstChild.children.length > 0) {
+                        apiCallNode = firstChild.children[0]; // GetAttr 节点
+                        if (firstChild.children.length > 1) {
+                            argsNode = firstChild.children[1]; // 参数节点
+                        }
+                    }
                 }
             }
-        } else if (!result.print_call) {
-            // 直接API调用情况(没有print)
-            // 根据实际结构调整查找逻辑
-            apiCallNode = ast.children[0]; // 可能直接是GetAttr
+        } else {
+            // 处理直接 API 调用: default_api.function_name(...)
+            if (ast.children && ast.children.length > 0) {
+                apiCallNode = ast.children[0]; // 第一个子节点应该是 GetAttr
+                if (ast.children.length > 1) {
+                    argsNode = ast.children[1]; // 第二个子节点是参数节点
+                }
+            }
         }
 
-        // 提取API名称和函数名
+        // 提取 API 名称和函数名
         if (apiCallNode && apiCallNode.node_type === "GetAttr") {
-            // 提取API名称(第一个子节点)
-            if (apiCallNode.children.length > 0 &&
+            // 提取 API 名称 (第一个子节点)
+            if (apiCallNode.children && apiCallNode.children.length > 0 &&
                 apiCallNode.children[0].node_type &&
                 apiCallNode.children[0].node_type.startsWith("Variable(")) {
                 // 从 Variable("default_api") 中提取 default_api
@@ -458,65 +653,78 @@ async function parseApiCall(ast: any) {
                 }
             }
 
-            // 提取函数名(第二个子节点)
-            if (apiCallNode.children.length > 1 &&
-                apiCallNode.children[1].node_type &&
-                apiCallNode.children[1].node_type.startsWith("String(")) {
-                // 从 String("image_gen") 中提取 image_gen
-                const funcNameMatch = apiCallNode.children[1].node_type.match(/String\("(.+)"\)/);
-                if (funcNameMatch) {
-                    result.function_name = funcNameMatch[1];
+            // 提取函数名 (第二个子节点)
+            if (apiCallNode.children && apiCallNode.children.length > 1 &&
+                apiCallNode.children[1].node_type) {
+                // 处理函数名称，可能以 String("xxx") 或其他方式表示
+                if (apiCallNode.children[1].node_type.startsWith("String(")) {
+                    const funcNameMatch = apiCallNode.children[1].node_type.match(/String\("(.+)"\)/);
+                    if (funcNameMatch) {
+                        result.function_name = funcNameMatch[1];
+                    }
+                } else {
+                    // 直接从 token 中提取函数名
+                    result.function_name = apiCallNode.children[1].start_token?.token || null;
                 }
             }
         }
 
-        // 查找参数节点 - 通常在LambdaCall的第二个子节点
-        let argsNode = null;
-        if (result.print_call && ast.children.length >= 2 &&
-            ast.children[1].children && ast.children[1].children.length > 0) {
-            const lambdaCallNode = ast.children[1].children[0];
-            if (lambdaCallNode.children && lambdaCallNode.children.length > 1) {
-                argsNode = lambdaCallNode.children[1];
-            }
-        } else if (!result.print_call && ast.children.length > 1) {
-            argsNode = ast.children[1];
-        }
-
-        // 处理参数 - 在Tuple节点中查找Assign节点
-        if (argsNode && argsNode.node_type === "Tuple") {
+        // 处理参数
+        if (argsNode && argsNode.node_type === "Tuple" && argsNode.children) {
             for (const child of argsNode.children) {
-                if (child.node_type === "Assign" && child.children.length >= 2) {
-                    const paramName = child.children[0].node_type.match(/Variable\("(.+)"\)/)?.[1];
+                if (child.node_type === "Assign" && child.children && child.children.length >= 2) {
+                    // 提取参数名
+                    let paramName = null;
+                    if (child.children[0].node_type.startsWith("Variable(")) {
+                        const paramNameMatch = child.children[0].node_type.match(/Variable\("(.+)"\)/);
+                        if (paramNameMatch) {
+                            paramName = paramNameMatch[1];
+                        }
+                    }
 
-                    // 参数值可能是字符串或其他类型
+                    // 提取参数值
                     let paramValue = null;
-                    if (child.children[1].node_type.startsWith("String(")) {
-                        paramValue = child.children[1].start_token.token;
-                    } else if (child.children[1].node_type.startsWith("Number(")) {
-                        paramValue = child.children[1].start_token.token as number;
-                    } else if (child.children[1].node_type.startsWith("Boolean(")) {
-                        paramValue = child.children[1].start_token.token === "True" ? true : false;
-                    } else if (child.children[1].node_type === "Variable(\"None\")") {
-                        paramValue = null; // None类型处理
-                    } else if (child.children[1].node_type === "Variable(\"True\")") {
-                        paramValue = true; // True类型处理
-                    } else if (child.children[1].node_type === "Variable(\"False\")") {
-                        paramValue = false; // False类型处理
+                    const valueNode = child.children[1];
+                    
+                    if (!valueNode.node_type) {
+                        console.warn("参数值节点缺少 node_type");
+                        continue;
                     }
-                    else {
-                        // 其他类型的处理逻辑可以在这里添加
-                        console.warn("未知参数类型:", child.children[1].node_type);
-                        paramValue = child.children[1].start_token.token;
+                    
+                    if (valueNode.node_type.startsWith("String(")) {
+                        // 字符串类型
+                        paramValue = valueNode.start_token?.token || "";
+                    } else if (valueNode.node_type.startsWith("Number(")) {
+                        // 数字类型
+                        const numValue = valueNode.start_token?.token;
+                        paramValue = !isNaN(Number(numValue)) ? Number(numValue) : numValue;
+                    } else if (valueNode.node_type.startsWith("Boolean(")) {
+                        // 布尔类型
+                        paramValue = valueNode.start_token?.token === "True";
+                    } else if (valueNode.node_type === "Variable(\"None\")") {
+                        // None 类型
+                        paramValue = null;
+                    } else if (valueNode.node_type === "Variable(\"True\")") {
+                        // True 类型
+                        paramValue = true;
+                    } else if (valueNode.node_type === "Variable(\"False\")") {
+                        // False 类型
+                        paramValue = false;
+                    } else {
+                        // 其他类型或复杂表达式
+                        console.warn("未知参数类型:", valueNode.node_type);
+                        paramValue = valueNode.start_token?.token || null;
                     }
 
-                    if (paramName && paramValue !== null) {
+                    // 添加到参数列表
+                    if (paramName !== null && paramValue !== undefined) {
                         result.arguments[paramName] = paramValue;
                     }
                 }
             }
         }
 
-        // 检查是否解析到足够的信息
+        // 检查是否解析到必要的API信息
         if (!result.api_name || !result.function_name) {
             console.warn("未能提取完整的API调用信息");
             return null;
@@ -554,65 +762,13 @@ async function handleSpecialApiCall(apiInfo: any): Promise<string | null> {
             return await handleKaTeXRender(apiInfo);
         case 'wolfram_alpha_compute':
             return await handleWolframRender(apiInfo);
+        case 'pintora_render':
+            return await handlePintoraRender(apiInfo);
         // 在这里可以方便地添加新的函数处理
         default:
             return null; // 不认识的函数调用，返回null使用默认显示
     }
 }
-
-async function processApiCallResult(apiInfo: any, astJson: any, codeContent: string): Promise<string> {
-    // 尝试处理特殊API调用
-    const specialApiHtml = await handleSpecialApiCall(apiInfo);
-
-    if (specialApiHtml) {
-        // 如果成功生成了特殊API的HTML，返回带有原始代码和AST的完整结构 (在details内部)
-        return `
-      ${specialApiHtml}
-      <div class="mini-details-container">
-        <details class="mini-tech-details">
-          <summary aria-label="查看技术详情"><span class="detail-chevron">▲</span></summary>
-          <div class="api-details">
-            <h4>API调用信息</h4>
-            <div class="tool-api-info">
-              <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${escapeHtml(apiInfo.api_name)}</span></div>
-              <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${escapeHtml(apiInfo.function_name)}</span></div>
-              ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${escapeHtml(String(value))}</span></div>`
-        ).join('')}
-            </div>
-
-            <h4>AST详情</h4>
-            <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
-
-            <h4>原始代码</h4>
-            <pre class="tool-code-original"><code>${escapeHtml(codeContent)}</code></pre>
-          </div>
-        </details>
-      </div>
-    `;
-    } else {
-        // 如果不是特殊API或处理失败，返回默认的结构化结果 (不包含原始代码块)
-        return `
-      <div class="tool-code-header">工具代码解析结果:</div>
-      <div class="tool-code-result">
-        <div class="tool-api-info">
-          <div class="tool-api-row"><span class="tool-api-label">API:</span> <span class="tool-api-value">${escapeHtml(apiInfo.api_name)}</span></div>
-          <div class="tool-api-row"><span class="tool-api-label">函数:</span> <span class="tool-api-value">${escapeHtml(apiInfo.function_name)}</span></div>
-          ${Object.entries(apiInfo.arguments).map(([key, value]) =>
-            `<div class="tool-api-row"><span class="tool-api-label">参数 ${key}:</span> <span class="tool-api-value tool-api-param">${escapeHtml(String(value))}</span></div>`
-        ).join('')}
-        </div>
-      </div>
-      <div class="mini-details-container">
-        <details class="mini-tech-details">
-          <summary aria-label="查看AST详情"><span class="detail-chevron">▲</span></summary>
-          <pre class="tool-code-ast"><code>${escapeHtml(JSON.stringify(astJson, null, 2))}</code></pre>
-        </details>
-      </div>
-    `; // 移除了末尾的原始代码块
-    }
-}
-
 
 export {
     applyHighlight,

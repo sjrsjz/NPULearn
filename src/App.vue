@@ -291,8 +291,7 @@ function updateChatContent(messages: ChatMessage[]) {
         border-top-left-radius: 4px;
         color: ${isDark ? 'var(--message-color)' : 'var(--text-color)'};
       }
-      
-      /* Mermaid图表容器样式 - 移除动画效果 */
+        /* Mermaid图表容器样式 - 移除动画效果 */
       .mermaid-container {
         background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
         border-radius: 6px;
@@ -309,31 +308,33 @@ function updateChatContent(messages: ChatMessage[]) {
         text-align: center;
       }
       
-      /* 移除加载动画，使图表立即显示 */
+      /* Pintora图表容器样式 */
+      .pintora-container {
+        background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
+        border-radius: 6px;
+        margin: 16px 0;
+        padding: 16px;
+        overflow: hidden;
+        overflow-x: auto;
+        box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
+        border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+      }
+        /* 移除加载动画，使图表立即显示 */
       .mermaid-container.loaded {
         opacity: 1;
         transform: scale(1);
       }
       
-      .mermaid-loading {
+      .mermaid-loading, .pintora-loading {
         color: var(--text-secondary);
         font-size: 14px;
       }
-      
-      .mermaid-error {
-        color: #e53e3e;
-        padding: 12px;
-        text-align: left;
-      }
-      
-      .mermaid-error pre {
-        margin-top: 8px;
-        background-color: ${isDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.05)'};
-        padding: 8px;
-        border-radius: 4px;
-        overflow-x: auto;
-        font-size: 12px;
-      }
+
       
       /* Markdown 内容样式 - GitHub风格 */
       .markdown-body {
@@ -992,6 +993,25 @@ function setupActionButtons() {
                     } else {
                       // 如果没有 SVG，保留加载或错误状态
                       clonedMermaidContainers[index].innerHTML = originalContainer.innerHTML;
+                    }
+                  }
+                });
+                
+                // 确保克隆的文档中 Pintora 图表已渲染为 SVG
+                const originalPintoraContainers = messageContentElement.querySelectorAll('.pintora-container');
+                const clonedPintoraContainers = clonedDoc.querySelectorAll('.pintora-container');
+                originalPintoraContainers.forEach((originalContainer, index) => {
+                  if (clonedPintoraContainers[index]) {
+                    // 尝试直接复制 SVG 内容
+                    const svgElement = originalContainer.querySelector('.pintora-diagram svg');
+                    if (svgElement) {
+                      const diagramElement = clonedPintoraContainers[index].querySelector('.pintora-diagram');
+                      if (diagramElement) {
+                        diagramElement.innerHTML = svgElement.outerHTML;
+                      }
+                    } else {
+                      // 如果没有 SVG，保留加载或错误状态
+                      clonedPintoraContainers[index].innerHTML = originalContainer.innerHTML;
                     }
                   }
                 });

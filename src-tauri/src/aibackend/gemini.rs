@@ -450,6 +450,17 @@ impl GeminiChat {
                 },
             },
             TypesetInfo {
+                name: "pintora_render".to_string(),
+                description: "render pintora graph".to_string(),
+                detail: "render pintora graph by using pintora.js renderer, should write down CORRECT pintora code for sucessfully rendering".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("diagram".to_string(), Value::String("pintora code which you what to render".to_string()));
+                    args.insert("scale".to_string(), Value::Number(1.into()));
+                    args
+                },
+            },
+            TypesetInfo {
                 name: "interactive_button".to_string(),
                 description: "show a interactive button signed `message`, when user clicks on it, then you will receive `command` text".to_string(),
                 detail: r#"show a interactive button signed `message`, when user clicks on it, then you will receive `command` text

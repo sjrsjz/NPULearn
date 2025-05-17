@@ -1288,6 +1288,72 @@ chat-messages a:active {
     position: relative;
 }
 
+/* Pintora 图表容器样式 */
+.pintora-container {
+    position: relative;
+    margin: 1rem 0;
+    padding: 1rem;
+    background-color: var(--card-bg);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.pintora-container:hover {
+    transform: scale(1.01);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.pintora-diagram {
+    width: 100%;
+    min-height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pintora-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.pintora-error {
+    padding: 10px;
+    border: 1px solid #ff6b6b;
+    border-radius: 4px;
+    background-color: rgba(255, 107, 107, 0.1);
+    margin: 10px 0;
+}
+
+.pintora-error p {
+    color: #e74c3c;
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.pintora-error .error-message {
+    color: #e74c3c;
+    background-color: rgba(231, 76, 60, 0.05);
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    max-height: 500px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.pintora-rendered svg {
+    max-width: 100%;
+    height: auto;
+}
+
 .refresh-diagram-button,
 .zoom-diagram-button {
     position: absolute;
@@ -1865,6 +1931,7 @@ chat-messages a:active {
     background-color: rgba(0, 0, 0, 0.03);
     padding: 2px 4px;
     border-radius: 3px;
+    margin-left: 5px;
 }
 
 /* 暗色模式适配 */
@@ -1894,7 +1961,7 @@ chat-messages a:active {
     padding: 8px;
     border-radius: 4px;
     font-size: 12px;
-    max-height: 100px;
+    max-height: 500px;
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
@@ -2069,7 +2136,7 @@ chat-messages a:active {
     padding: 0;
     margin: 0;
     position: relative;
-    font-size: 0;
+
 }
 
 .mini-tech-details summary::-webkit-details-marker {
@@ -2187,7 +2254,6 @@ chat-messages a:active {
     padding: 12px;
     background-color: rgba(0, 0, 0, 0.02);
     border-radius: var(--radius-sm);
-    border-left: 3px solid var(--primary-color);
 }
 
 .wolfram-related-queries strong {
@@ -2209,7 +2275,7 @@ chat-messages a:active {
 }
 
 .wolfram-related-queries li:hover {
-    color: var(--primary-hover);
+    color: var (--primary-hover);
     text-decoration: underline;
 }
 
@@ -2295,4 +2361,187 @@ chat-messages a:active {
     /* 确保内容不被压缩 */
     display: inline-block;
     /* 保持公式在一行 */
+}
+
+/* AST 树形视图的样式 */
+.ast-tree-view {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 13px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin: 10px 0;
+    overflow: auto;
+    max-height: 500px;
+    box-shadow: var(--shadow-sm);
+    text-align: left;
+}
+
+/* JSON 结构相关样式 */
+.json-details {
+    text-align: left;
+    position: relative;
+    transition: var(--transition);
+}
+
+.json-details summary {
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+    color: var(--text-color);
+    font-weight: 500;
+    align-items: flex-start;
+    list-style: none;
+    vertical-align: middle;
+    display: flex;
+}
+
+.json-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.json-details summary::before {
+    content: '▶';
+    display: inline-block;
+    margin-right: 5px;
+    transition: transform 0.2s ease;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.json-details[open]>summary::before {
+    transform: rotate(90deg);
+}
+
+/* 基本类型样式 */
+.json-string {
+    color: #10b981;
+    /* 绿色 */
+}
+
+.json-number {
+    color: #f59e0b;
+    /* 橙色 */
+}
+
+.json-boolean {
+    color: #3b82f6;
+    /* 蓝色 */
+}
+
+.json-null,
+.json-undefined {
+    color: #ef4444;
+    /* 红色 */
+    font-style: italic;
+}
+
+.json-node-type {
+    color: var(--primary-color) !important;
+    font-weight: bold;
+}
+
+/* 列表和对象样式 */
+.json-array-list,
+.json-object-list {
+    padding-left: 18px;
+    margin: 0;
+    list-style-type: none;
+    border-left: 1px dashed var(--border-color);
+}
+
+.json-array-item,
+.json-property {
+    padding: 2px 0;
+    position: relative;
+}
+
+.json-array-index {
+    color: #ef4444;
+    margin-right: 5px;
+}
+
+.json-property-key {
+    color: #8b5cf6;
+    /* 紫色 */
+    margin-right: 5px;
+    vertical-align: top;
+}
+
+.json-array-summary,
+.json-object-summary {
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-align: left;
+    vertical-align: top;
+}
+
+/* 嵌套对象和数组的缩进 */
+.json-array-value,
+.json-property-value {
+    display: inline-block;
+    vertical-align: top;
+}
+
+/* 悬停效果 */
+.json-details summary:hover {
+    background-color: rgba(0, 0, 0, 0.03);
+    border-radius: var(--radius-sm);
+}
+
+/* 嵌套技术详情样式 */
+.ast-raw-json.mini-tech-details {
+    margin-top: 8px;
+    margin-left: 10px;
+}
+
+.ast-raw-json.mini-tech-details summary {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+/* 暗色主题适配 */
+:root[data-theme="dark"] .ast-tree-view,
+:root[data-theme="system"] .ast-tree-view {
+    background-color: var(--dark-card-bg);
+    border-color: var(--dark-border-color);
+}
+
+:root[data-theme="dark"] .json-details summary,
+:root[data-theme="system"] .json-details summary {
+    color: var(--dark-text-color);
+}
+
+:root[data-theme="dark"] .json-details summary::before,
+:root[data-theme="system"] .json-details summary::before {
+    color: var(--dark-text-secondary);
+}
+
+:root[data-theme="dark"] .json-array-list,
+:root[data-theme="dark"] .json-object-list,
+:root[data-theme="system"] .json-array-list,
+:root[data-theme="system"] .json-object-list {
+    border-left-color: var(--dark-border-color);
+}
+
+:root[data-theme="dark"] .json-details summary:hover,
+:root[data-theme="system"] .json-details summary:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* 添加交互动画效果 */
+.json-details summary {
+    transition: background-color 0.2s ease;
+}
+
+.json-details summary::before {
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 让节点类型更突出 */
+.json-property-value .json-node-type {
+    background-color: rgba(59, 130, 246, 0.1);
+    padding: 1px 4px;
+    border-radius: 3px;
 }
