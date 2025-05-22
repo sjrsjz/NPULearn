@@ -390,10 +390,11 @@ function setupActionButtons() {
           const backgroundColor = isDark ? '#1e293b' : '#ffffff'; // 根据主题设置背景色
 
           // 获取原始元素宽度
-          const originalWidth = messageContentElement.offsetWidth;
+          // const originalWidth = messageContentElement.offsetWidth;
 
           // 设置默认宽度（例如 800px）或使用原始宽度的最大值
-          const targetWidth = Math.min(Math.max(originalWidth, 800), 1200); // 宽度介于800-1200px之间
+          // const targetWidth = Math.min(Math.max(originalWidth, 800), 1200); // 宽度介于800-1200px之间
+          const targetWidth = 1080;
 
           // 创建一个包装容器以控制宽度
           const wrapperDiv = document.createElement('div');
@@ -437,6 +438,15 @@ function setupActionButtons() {
                 summary.remove();
               });
 
+              const miniDetailsContainers = clonedDoc.querySelectorAll('.mini-details-container');
+              miniDetailsContainers.forEach(container => {
+                container.remove();
+              });
+
+              const miniTechDetails = clonedDoc.querySelectorAll('.mini-tech-details');
+              miniTechDetails.forEach(container => {
+                container.remove();
+              });
 
               // 确保克隆的文档中 Mermaid 图表已渲染为 SVG
               const originalMermaidContainers = messageContentElement.querySelectorAll('.mermaid-container');
