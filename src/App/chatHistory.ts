@@ -35,7 +35,7 @@ async function selectHistory(id: number) {
     console.log(`加载对话 ${id}`);
 
     isLoading.value = true;
-    var chatContent = [] as ChatMessage[];
+    let chatContent = [] as ChatMessage[];
     try {
         // 调用 Rust 函数加载特定对话内容
         chatContent = await invoke("select_chat_by_id", { id }) as ChatMessage[];
