@@ -10,7 +10,7 @@ import { handleInteractiveButton } from './interactiveButton';
 import { handleKaTeXRender } from './katexRenderer';
 import { handleWolframRender } from './wolframRenderer';
 import { handlePintoraRender } from './pintoraRenderer';
-import { nextTick } from 'vue';
+
 /**
  * HTML转义函数，防止XSS攻击
  * @param str 需要转义的字符串
