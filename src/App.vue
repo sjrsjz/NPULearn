@@ -372,7 +372,6 @@ function setupActionButtons() {
       }
     });
   });
-
   // 设置渲染图片按钮事件监听
   document.querySelectorAll('.chat-messages .render-image-button').forEach(button => {
     button.addEventListener('click', async () => {
@@ -390,12 +389,55 @@ function setupActionButtons() {
               window.matchMedia('(prefers-color-scheme: dark)').matches);
           const backgroundColor = isDark ? '#1e293b' : '#ffffff'; // 根据主题设置背景色
 
-          const canvas = await html2canvas(messageContentElement, {
-            useCORS: true, // 允许加载跨域图片（如果需要）
+          // 获取原始元素宽度
+          const originalWidth = messageContentElement.offsetWidth;
+
+          // 设置默认宽度（例如 800px）或使用原始宽度的最大值
+          const targetWidth = Math.min(Math.max(originalWidth, 800), 1200); // 宽度介于800-1200px之间
+
+          // 创建一个包装容器以控制宽度
+          const wrapperDiv = document.createElement('div');
+          wrapperDiv.style.width = `${targetWidth}px`;
+          wrapperDiv.style.backgroundColor = backgroundColor;
+
+          // 克隆原始元素到包装容器中以便渲染
+          const clonedElement = messageContentElement.cloneNode(true) as HTMLElement;
+          wrapperDiv.appendChild(clonedElement);
+
+          // 临时添加到文档中（不可见），以便html2canvas能正确计算尺寸
+          wrapperDiv.style.position = 'absolute';
+          wrapperDiv.style.left = '-9999px';
+          document.body.appendChild(wrapperDiv);
+
+          const canvas = await html2canvas(clonedElement, {
+            useCORS: true, // 允许加载跨域图片
             scale: 2, // 提高分辨率
-            backgroundColor: backgroundColor, // 设置背景色
-            logging: true, // 开启日志以便调试
+            backgroundColor: backgroundColor,
+            logging: true,
+            width: targetWidth, // 指定宽度
             onclone: (clonedDoc) => {
+              // 移除不需要的元素
+              const apiFooters = clonedDoc.querySelectorAll('.api-call-footer');
+              apiFooters.forEach(footer => {
+                footer.remove();
+              });
+
+              const detailsElements = clonedDoc.querySelectorAll('details');
+              detailsElements.forEach(details => {
+                details.removeAttribute('open'); // 关闭所有折叠框
+              });
+
+              const codeCopyButtons = clonedDoc.querySelectorAll('.code-copy-button');
+              codeCopyButtons.forEach(button => {
+                button.remove();
+              });
+
+              const thinkSummary = clonedDoc.querySelectorAll('summary');
+              thinkSummary.forEach(summary => {
+                summary.remove();
+              });
+
+
               // 确保克隆的文档中 Mermaid 图表已渲染为 SVG
               const originalMermaidContainers = messageContentElement.querySelectorAll('.mermaid-container');
               const clonedMermaidContainers = clonedDoc.querySelectorAll('.mermaid-container');
@@ -432,6 +474,9 @@ function setupActionButtons() {
               });
             }
           });
+
+          // 渲染完成后移除临时元素
+          document.body.removeChild(wrapperDiv);
 
           // 创建下载链接
           const link = document.createElement('a');
