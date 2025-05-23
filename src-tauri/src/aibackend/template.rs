@@ -78,24 +78,14 @@ Your response should contains **at least one** `<|start_header|>typeset_and_resp
 <|start_header|>respond_example<|end_header|>
 
 ````Full output example
-<|start_header|>understand<|end_header|>
-@startuml
-...
-@enduml
+<|start_header|>understand<|end_header|>@startuml
 ...(your understanding, in `PlantUML` language)
-<|start_header|>think<|end_header|>
-@startuml
-...
-@enduml
+@enduml<|start_header|>think<|end_header|>@startuml
 ...(your thinking, in `PlantUML` language)
-<|start_header|>verify<|end_header|>
-...(your verify)
-...(many turns)
-<|start_header|>typeset_and_respond<|end_header|> (REQUIRED)
-(many typesetting format use `tool_code`)
-...
-(your response)
-...(in **简体中文**, only this part will be visible to the user)
+@enduml<|start_header|>verify<|end_header|>@startuml
+...(your verify, in `PlantUML` language)
+@enduml<|start_header|>typeset_and_respond<|end_header|> (REQUIRED)
+...(many typesetting format use `tool_code` and your response in **简体中文**, only this part will be visible to the user)
 ````"#;
 
 #[allow(dead_code)]

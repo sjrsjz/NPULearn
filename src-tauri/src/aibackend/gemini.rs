@@ -464,8 +464,10 @@ impl GeminiChat {
                 name: "interactive_button".to_string(),
                 description: "show a interactive button signed `message`, when user clicks on it, then you will receive `command` text".to_string(),
                 detail: r#"show a interactive button signed `message`, when user clicks on it, then you will receive `command` text
+    It is a good way for you to show a button for user to click when user learns something new
     - `message`: the text which you want to show on the button
     - `command`: the text which will be sent when user clicks the button
+    > You can use it to give some hints to user, like "click me to send `Hello!`" or "click me to send `Bye!`"
     "#.to_string(),
                 args: {
                     let mut args = HashMap::new();
