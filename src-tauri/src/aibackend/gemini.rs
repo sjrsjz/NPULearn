@@ -2,7 +2,7 @@ use crate::aibackend::interface::AIChat;
 use crate::aibackend::openai_types::{
     ChatCompletionMessage, Content, JSONSchemaType, MessageRole, Tool,
 };
-use crate::aibackend::template::{self, gemini_chat_instruction};
+use crate::aibackend::template::{self, gemini_chat_instruction, COT};
 use crate::{ChatHistory, ChatMessage, ChatMessageType};
 use base64::Engine;
 use futures_util::StreamExt;
@@ -425,8 +425,8 @@ impl GeminiChat {
             model: "gemini-2.5-flash-preview-04-17".to_string(), // 更新为推荐模型
             system_prompt: "You are a helpful assistant".to_string(),
             messages: Vec::new(),
-            temperature: 0.95,
-            max_tokens: Some(8192), // 设置默认值
+            temperature: 1.0,
+            max_tokens: Some(8192 * 2), // 设置默认值
             top_p: Some(0.95),      // 设置默认值
             top_k: Some(40),        // 设置默认值
             last_prompt: None,
@@ -450,11 +450,24 @@ impl GeminiChat {
                 },
             },
             TypesetInfo {
+                name: "pintora_render".to_string(),
+                description: "render pintora graph".to_string(),
+                detail: "render pintora graph by using pintora.js renderer, should write down CORRECT pintora code for sucessfully rendering".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("diagram".to_string(), Value::String("pintora code which you what to render".to_string()));
+                    args.insert("scale".to_string(), Value::Number(1.into()));
+                    args
+                },
+            },
+            TypesetInfo {
                 name: "interactive_button".to_string(),
                 description: "show a interactive button signed `message`, when user clicks on it, then you will receive `command` text".to_string(),
                 detail: r#"show a interactive button signed `message`, when user clicks on it, then you will receive `command` text
+    It is a good way for you to show a button for user to click when user learns something new
     - `message`: the text which you want to show on the button
     - `command`: the text which will be sent when user clicks the button
+    > You can use it to give some hints to user, like "click me to send `Hello!`" or "click me to send `Bye!`"
     "#.to_string(),
                 args: {
                     let mut args = HashMap::new();
@@ -595,6 +608,15 @@ impl GeminiChat {
                 "parts": [{ "text": format!("# I have double checked that my basic system settings are as follows, I will never disobey them:\n{}\n", self.build_system_instruction()) }]
             }),
         ); // 添加系统指令
+
+        gemini_messages.push(
+            json!({
+                "role": "model",
+                "parts": [
+                    { "text": format!("# I have double checked that my basic COT settings are as follows:\n{}\nNow I will answer the user's request.\n", COT) }
+                ]
+            }),
+        ); // 添加用户指令
 
         let mut request_body = json!({
             "contents": gemini_messages,

@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::{io::Read, path::PathBuf, sync::Mutex};
 
+use base64::{engine::general_purpose, Engine as _};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
-use base64::{Engine as _, engine::general_purpose};
 
 use crate::document_renderer::renderer::convert_markdown_with_latex;
 static APP_HANDLE: Lazy<Mutex<Option<Arc<Box<AppHandle>>>>> = Lazy::new(|| Mutex::new(None));
@@ -44,20 +44,20 @@ impl ChatMessage {
         // 使用 UTF-8 编码确保中文等非ASCII字符能正确编码
         let original_bytes = self.content.as_bytes();
         let original_base64 = general_purpose::STANDARD.encode(original_bytes);
-        
+
         let new_content = match self.msgtype {
             ChatMessageType::Assistant => {
                 let html_content = convert_markdown_with_latex(&self.content);
                 // 在 Assistant 消息中添加不可见标签保存原始消息
                 format!("{}<div class=\"original-message\" style=\"display:none;\" data-content=\"{}\"></div>", html_content, original_base64)
-            },
+            }
             _ => {
                 let escaped_content = Self::escape_html(&self.content);
                 // 在其他类型消息中也添加不可见标签
                 format!("{}<div class=\"original-message\" style=\"display:none;\" data-content=\"{}\"></div>", escaped_content, original_base64)
             }
         };
-        
+
         return Self {
             msgtype: self.msgtype.clone(),
             time: self.time.clone(),
@@ -65,7 +65,7 @@ impl ChatMessage {
         };
     }
 
-    pub(crate) fn markdown_to_html_vec(messages : &Vec<Self>) -> Vec<Self> {
+    pub(crate) fn markdown_to_html_vec(messages: &Vec<Self>) -> Vec<Self> {
         println!("messages: {:?}", messages);
         let mut html_messages = Vec::new();
         for message in messages {

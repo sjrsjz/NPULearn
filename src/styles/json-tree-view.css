@@ -1,0 +1,141 @@
+/* JSON 树形视图的样式 */
+.ast-tree-view {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 0.9em;
+  background-color: var(--code-bg, #f5f5f5);
+  border-radius: 6px;
+  padding: 0.8em;
+  overflow: auto;
+  max-height: 500px;
+  margin-bottom: 1em;
+}
+
+/* 树形视图的基础样式 */
+.json-details {
+  margin: 0;
+  padding-left: 1em;
+}
+
+.json-details summary {
+  cursor: pointer;
+  display: inline-block;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.json-details summary:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* 带有边线的列表 */
+.json-object-list, .json-array-list {
+  border-left: 1px dotted #ccc;
+  list-style: none;
+  margin-left: 0.5em;
+  padding-left: 1em;
+}
+
+/* 属性样式 */
+.json-property {
+  padding: 2px 0;
+}
+
+.json-property-key {
+  color: #881391;
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+/* 根据类型设置不同的颜色 */
+.json-string {
+  color: #22863a;
+}
+
+.json-number {
+  color: #005cc5;
+}
+
+.json-boolean {
+  color: #0467d7;
+  font-weight: bold;
+}
+
+.json-null, .json-undefined {
+  color: #999;
+  font-style: italic;
+}
+
+.json-node-type {
+  color: #e36209;
+  font-weight: bold;
+}
+
+/* 数组项样式 */
+.json-array-item {
+  padding: 2px 0;
+}
+
+.json-array-index {
+  color: #881391;
+  margin-right: 4px;
+  font-size: 0.9em;
+}
+
+/* 摘要样式 */
+.json-object-summary, .json-array-summary {
+  color: #444;
+  background-color: rgba(0, 0, 0, 0.03);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* 嵌套的JSON原始视图 */
+.ast-raw-json {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+}
+
+/* 深色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .ast-tree-view {
+    background-color: var(--code-bg, #1e1e1e);
+  }
+  
+  .json-details summary:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+  
+  .json-object-list, .json-array-list {
+    border-left-color: #444;
+  }
+  
+  .json-property-key {
+    color: #c586c0;
+  }
+  
+  .json-string {
+    color: #ce9178;
+  }
+  
+  .json-number {
+    color: #b5cea8;
+  }
+  
+  .json-boolean {
+    color: #569cd6;
+  }
+  
+  .json-node-type {
+    color: #dcdcaa;
+  }
+  
+  .json-object-summary, .json-array-summary {
+    color: #ccc;
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+  
+  .ast-raw-json {
+    border-top-color: #444;
+  }
+}

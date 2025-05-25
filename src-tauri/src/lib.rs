@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Window};
-use xlang_frontend::parser::ast::{build_ast, ASTNode};
+use xlang_frontend::parser::ast::{build_ast, ASTNode, ASTNodeType};
 use xlang_frontend::parser::lexer::lexer;
 
 use tauri_plugin_fs::FsExt;
@@ -77,7 +77,6 @@ Examples that showcase Alice's emotional range:
 - *Internet slang / online jargon*
 - *Shitposting (in some cases, if the abstract speech is intentionally nonsensical or provocative)*"#.to_string()
 });
-
 
 // static SYSTEM_PROMPT: Lazy<String> = Lazy::new(|| {
 //     r#"你是西北工业大学的吉祥物 `航小天`，你需要为用户提供精确详细的服务，使用各种 `tool_code` 排版出你的回答"#.to_string()
@@ -463,13 +462,109 @@ impl ASTSerializer for ASTNode<'_> {
         }
     }
 }
+
+// AST节点修正器
+struct ASTOptimizer;
+
+impl ASTOptimizer {
+    /// 修正AST节点，优化表达式结构
+    pub fn optimize(node: &mut ASTNode) {
+        while Self::optimize_recursive(node) {};
+    }
+
+    fn optimize_recursive(node: &mut ASTNode) -> bool {
+        // 首先递归处理所有子节点
+        let mut optimized = false;
+        for child in &mut node.children {
+            optimized |= Self::optimize_recursive(child);
+        }
+
+        // 然后处理当前节点的优化
+        match &node.node_type {
+            ASTNodeType::LambdaCall => {
+                optimized |= Self::optimize_lambda_call(node);
+            }
+            ASTNodeType::Expressions => {
+                optimized |=Self::optimize_expressions(node);
+            }
+            _ => {}
+        }
+        return optimized;
+    }
+
+    /// 优化Lambda调用节点
+    /// 处理 (expressions)() -> expressions() 的情况
+    fn optimize_lambda_call(node: &mut ASTNode) -> bool {
+        // 检查第一个子节点是否是表达式
+        if let Some(first_child) = node.children.get(0) {
+            if matches!(first_child.node_type, ASTNodeType::Expressions) {
+                // 如果是表达式，将表达式提升，并将表达式最后一个子节点作为lambda调用的第一个子节点
+                let expressions_node = &first_child.children;
+                let last_child = expressions_node.last().cloned();
+                if last_child.is_none() {
+                    return false;
+                }
+                let last_child = last_child.unwrap();
+                let mut nodes = expressions_node[..expressions_node.len() - 1].to_vec();
+                let mut children = vec![last_child];
+                children.extend_from_slice(&node.children[1..]);
+                let new_children = ASTNode {
+                    node_type: ASTNodeType::LambdaCall,
+                    start_token: node.start_token,
+                    end_token: node.end_token,
+                    children,
+                };
+                nodes.push(new_children);
+
+                let new_node = ASTNode {
+                    node_type: ASTNodeType::Expressions,
+                    start_token: node.start_token,
+                    end_token: node.end_token,
+                    children: nodes,
+                };
+
+                *node = new_node;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// 优化表达式节点
+    /// 处理 (expressions); xxx -> expressions; xxx 的情况
+    fn optimize_expressions(node: &mut ASTNode) -> bool {
+        if !matches!(node.node_type, ASTNodeType::Expressions) {
+            return false;
+        }
+
+        let mut optimized = false;
+
+        let mut flattened_children = Vec::new();
+
+        for child in &node.children {
+            if matches!(child.node_type, ASTNodeType::Expressions) {
+                // 如果子节点也是表达式，则展开其子节点
+                flattened_children.extend(child.children.clone());
+                optimized = true;
+            } else {
+                flattened_children.push(child.clone());
+            }
+        }
+
+        node.children = flattened_children;
+        return optimized;
+    }
+}
+
 #[tauri::command]
 fn parse_code(code: String) -> Result<String, String> {
     let tokens = lexer::tokenize(&code);
     let tokens = lexer::reject_comment(&tokens);
     let ast = build_ast(&tokens);
     match ast {
-        Ok(ast) => {
+        Ok(mut ast) => {
+            // 应用AST优化
+            ASTOptimizer::optimize(&mut ast);
             let serialized_ast = ast.serialize();
             Ok(serialized_ast)
         }
@@ -788,10 +883,14 @@ fn check_current_chat_id() -> bool {
 
 // 添加Wolfram Alpha计算命令
 #[tauri::command]
-async fn wolfram_alpha_compute(query: String, image_only: bool, format: Option<String>) -> Result<Vec<document_renderer::wolfram::WolframResult>, String> {
+async fn wolfram_alpha_compute(
+    query: String,
+    image_only: bool,
+    format: Option<String>,
+) -> Result<Vec<document_renderer::wolfram::WolframResult>, String> {
     // 调用Wolfram Alpha计算函数
     let results = document_renderer::wolfram::wolfram_alpha_compute(&query, image_only).await?;
-    
+
     // 如果指定了HTML格式，则直接返回HTML字符串
     if let Some(format_type) = format {
         if format_type == "html" {
@@ -820,7 +919,7 @@ async fn wolfram_alpha_compute(query: String, image_only: bool, format: Option<S
             }]);
         }
     }
-    
+
     // 默认返回原始结果数组
     Ok(results)
 }

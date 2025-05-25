@@ -17,7 +17,7 @@ import { loadMathJax, renderMathInElement } from "./App/mathjax.ts";
 import { createNewChat, loadChatHistory, selectHistory } from "./App/chatHistory.ts";
 import { initMermaid } from "./App/typesetting/mermaidRenderer.ts";
 import { changeMermaidTheme } from "./App/typesetting/mermaidRenderer.ts";
-import { applyHighlight } from "./App/typesetting/typesetting.ts";
+import { applyHighlight, setupAllCopyButtons } from "./App/typesetting/typesetting.ts";
 import { chatHistory, eventBus, isLoading, isStreaming } from "./App/eventBus.ts";
 import { ChatHistory, ChatMessage } from "./App/types.ts";
 
@@ -93,24 +93,22 @@ function handleResize() {
 
 // 修改链接处理函数
 function setupExternalLinks() {
-  nextTick(() => {
-    document.querySelectorAll('.chat-messages a').forEach(link => {
-      const href = link.getAttribute('href');
+  document.querySelectorAll('.chat-messages a').forEach(link => {
+    const href = link.getAttribute('href');
 
-      if (href) {
-        // 普通链接的处理保持不变
-        link.addEventListener('click', async (e) => {
-          e.preventDefault();
-          try {
-            await writeText(href);
-            showNotification(`链接已复制: ${href}`, 'success');
-          } catch (error) {
-            console.error('复制链接失败:', error);
-            showNotification('复制链接失败', 'error');
-          }
-        });
-      }
-    });
+    if (href) {
+      // 普通链接的处理保持不变
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try {
+          await writeText(href);
+          showNotification(`链接已复制: ${href}`, 'success');
+        } catch (error) {
+          console.error('复制链接失败:', error);
+          showNotification('复制链接失败', 'error');
+        }
+      });
+    }
   });
 }
 
@@ -187,619 +185,14 @@ function updateChatContent(messages: ChatMessage[]) {
   `;
   }
 
-  // 移除动画相关的类，保留fade-in以确保消息立即可见
-  var generatedHtml = `
+  // 移除动画相关的类，保留fade-in以确保消息立即可见  
+  let generatedHtml = `
   <div class="scoped-content fade-in" data-theme="${isDark ? 'dark' : 'light'}">
     ${messagesHtml}
-    <style>
-      .scoped-content {
-        opacity: 1; /* 直接设置为可见，移除过渡效果 */
-      }
-      
-      .scoped-content.fade-in {
-        opacity: 1;
-      }
-      
-      .message-wrapper {
-        display: flex;
-        margin-bottom: 28px;
-        position: relative;
-        gap: 12px;
-        opacity: 1;
-        transform: translateY(0);
-      }
-      
-      /* 移除所有消息出现的动画效果 */
-      
-      .message-avatar {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        margin-top: 4px;
-        flex-shrink: 0;
-        width: 42px;
-        transform: scale(1);
-        opacity: 1;
-      }
-      
-      /* 移除头像的动画效果 */
-      
-      .avatar-icon {
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background-color: var(--border-color);
-        color: var(--text-color);
-        overflow: hidden;
-        margin-bottom: 6px;
-        box-shadow: 0 2px 4px ${isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.1)'};
-      }
-      
-      .message-wrapper.user .avatar-icon {
-        background-color: var(--primary-color);
-        color: white;
-      }
-      
-      .message-wrapper.assistant .avatar-icon,
-      .message-wrapper.system .avatar-icon {
-        background-color: ${isDark ? '#4a5568' : '#e2e8f0'};
-        color: ${isDark ? '#e2e8f0' : '#475569'};
-      }
-      
-      .avatar-icon svg {
-        width: 22px;
-        height: 22px;
-      }
-      
-      .message-time {
-        font-size: 11px;
-        color: var(--text-secondary);
-        text-align: center;
-        white-space: nowrap;
-        margin-top: 2px;
-      }
-      
-      .message-bubble {
-        max-width: calc(85% - 42px);
-        display: flex;
-        flex-direction: column;
-        position: relative;
-        transform: translateY(16px);
-      }
-      
-      .message-content {
-        padding: 14px 18px;
-        border-radius: 18px;
-        overflow-wrap: break-word;
-        overflow: hidden;
-        box-shadow: 0 2px 8px ${isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.08)'};
-      }
-      
-      .message-wrapper.user .message-content {
-        background-color: var(--primary-color);
-        color: white;
-        border-top-right-radius: 4px;
-      }
-      
-      .message-wrapper.assistant .message-content,
-      .message-wrapper.system .message-content {
-        background-color: ${isDark ? 'var(--message-bg)' : 'var(--card-bg)'};
-        border: 1px solid ${isDark ? 'var(--message-border)' : 'var(--border-color)'};
-        border-top-left-radius: 4px;
-        color: ${isDark ? 'var(--message-color)' : 'var(--text-color)'};
-      }
-      
-      /* Mermaid图表容器样式 - 移除动画效果 */
-      .mermaid-container {
-        background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
-        border-radius: 6px;
-        margin: 16px 0;
-        padding: 16px;
-        overflow: hidden;
-        overflow-x: auto;
-        box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
-        border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
-        position: relative;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        text-align: center;
-      }
-      
-      /* 移除加载动画，使图表立即显示 */
-      .mermaid-container.loaded {
-        opacity: 1;
-        transform: scale(1);
-      }
-      
-      .mermaid-loading {
-        color: var(--text-secondary);
-        font-size: 14px;
-      }
-      
-      .mermaid-error {
-        color: #e53e3e;
-        padding: 12px;
-        text-align: left;
-      }
-      
-      .mermaid-error pre {
-        margin-top: 8px;
-        background-color: ${isDark ? 'rgba(0, 0, 0, 0.2)' : 'rgba(0, 0, 0, 0.05)'};
-        padding: 8px;
-        border-radius: 4px;
-        overflow-x: auto;
-        font-size: 12px;
-      }
-      
-      /* Markdown 内容样式 - GitHub风格 */
-      .markdown-body {
-        color: inherit;
-        font-size: var(--font-size-base);
-        line-height: 1.6;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
-      }
-      
-      .markdown-body h1,
-      .markdown-body h2,
-      .markdown-body h3,
-      .markdown-body h4,
-      .markdown-body h5,
-      .markdown-body h6 {
-        margin-top: 24px;
-        margin-bottom: 16px;
-        font-weight: 600;
-        line-height: 1.25;
-        color: ${isDark ? '#f1f5f9' : '#111827'};
-      }
-      
-      .markdown-body h1 {
-        font-size: 2em;
-        border-bottom: 1px solid ${isDark ? '#334155' : '#eaecef'};
-        padding-bottom: 0.3em;
-      }
-      
-      .markdown-body h2 {
-        font-size: 1.5em;
-        border-bottom: 1px solid ${isDark ? '#334155' : '#eaecef'};
-        padding-bottom: 0.3em;
-      }
-      
-      .markdown-body h3 {
-        font-size: 1.25em;
-      }
-      
-      .markdown-body h4 {
-        font-size: 1em;
-      }
- 
-      
-      .markdown-body a {
-        color: ${isDark ? '#58a6ff' : '#0366d6'};
-        text-decoration: none;
-        transition: color 0.2s;
-      }
-      
-      .markdown-body a:hover {
-        text-decoration: underline;
-      }
-      
-      .markdown-body img {
-        max-width: 100%;
-        display: block;
-        margin: 16px auto;
-        border-radius: 6px;
-        box-shadow: 0 4px 8px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.1)'};
-      }
-      
-      .markdown-body pre {
-        background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
-        border-radius: 6px;
-        margin: 16px 0;
-        padding: 16px;
-        overflow-x: auto; /* 确保代码块水平滚动 */
-        box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.08)'};
-        border: 1px solid ${isDark ? '#334155' : '#e1e4e8'};
-        position: relative;
-      }
-      
-      .markdown-body code {
-        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-        background-color: ${isDark ? 'rgba(71, 85, 105, 0.4)' : 'rgba(27, 31, 35, 0.05)'};
-        border-radius: 3px;
-        padding: 0.2em 0.4em;
-        font-size: 85%;
-        color: ${isDark ? '#f1f5f9' : '#24292e'};
-      }
-      
-      .markdown-body pre code {
-        background-color: transparent;
-        padding: 0;
-        border-radius: 0;
-        color: inherit;
-        font-size: 85%;
-        line-height: 1.45;
-        display: block;
-      }
-      
-      .markdown-body pre code .hljs-keyword {
-        color: ${isDark ? '#c792ea' : '#d73a49'};
-        font-weight: ${isDark ? 'normal' : 'bold'};
-      }
-      
-      .markdown-body pre code .hljs-string {
-        color: ${isDark ? '#c3e88d' : '#032f62'};
-      }
-      
-      .markdown-body pre code .hljs-comment {
-        color: ${isDark ? '#676e95' : '#6a737d'};
-        font-style: italic;
-      }
-      
-      .markdown-body pre code .hljs-function {
-        color: ${isDark ? '#82AAFF' : '#6f42c1'};
-      }
-      
-      .markdown-body pre code .hljs-number {
-        color: ${isDark ? '#F78C6C' : '#005cc5'};
-      }
-      
-      .markdown-body pre code .hljs-title {
-        color: ${isDark ? '#f07178' : '#6f42c1'};
-      }
-      
-      .markdown-body pre code .hljs-attr {
-        color: ${isDark ? '#FFCB6B' : '#005cc5'};
-      }
-      
-      .markdown-body pre code .hljs-selector-class {
-        color: ${isDark ? '#FFCB6B' : '#6f42c1'};
-      }
-      
-      .markdown-body blockquote {
-        color: ${isDark ? '#9ca3af' : '#6a737d'};
-        border-left: 4px solid ${isDark ? '#3b82f6' : '#dfe2e5'};
-        padding: 0 16px;
-        margin: 16px 0;
-        background-color: ${isDark ? 'rgba(30, 41, 59, 0.5)' : 'rgba(246, 248, 250, 0.5)'};
-        border-radius: 0 6px 6px 0;
-      }
-      
-      .markdown-body blockquote p {
-        margin: 0.8em 0;
-      }
-      
-      .markdown-body ul,
-      .markdown-body ol {
-        padding-left: 2em;
-        margin: 16px 0;
-      }
-      
-      .markdown-body li + li {
-        margin-top: 0.25em;
-      }
-      
-      .markdown-body ul li {
-        list-style-type: disc;
-      }
-      
-      .markdown-body ol li {
-        list-style-type: decimal;
-      }
-      
-      .markdown-body ul ul,
-      .markdown-body ul ol,
-      .markdown-body ol ul,
-      .markdown-body ol ol {
-        margin: 8px 0 0;
-      }
-      
-      .markdown-body li > p {
-        margin-top: 16px;
-      }
-      
-      .markdown-body table {
-        border-collapse: separate;
-        border-spacing: 0;
-        width: 100%;
-        margin: 16px 0;
-        overflow-x: auto; /* 确保表格水平滚动 */
-        display: block; /* 确保 overflow-x 生效 */
-        border-radius: 6px;
-        border: 1px solid ${isDark ? '#334155' : '#dfe2e5'};
-        box-shadow: 0 2px 6px ${isDark ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.05)'};
-      }
-      
-      .markdown-body table th,
-      .markdown-body table td {
-        border: 1px solid ${isDark ? '#334155' : '#dfe2e5'};
-        padding: 8px 13px;
-        text-align: left;
-      }
-      
-      .markdown-body table th {
-        background-color: ${isDark ? '#1e293b' : '#f6f8fa'};
-        font-weight: 600;
-        color: ${isDark ? '#f1f5f9' : '#24292e'};
-      }
-      
-      .markdown-body table tr:nth-child(2n) {
-        background-color: ${isDark ? 'rgba(71, 85, 105, 0.1)' : 'rgba(246, 248, 250, 0.7)'};
-      }
-      
-      .markdown-body hr {
-        height: 1px;
-        padding: 0;
-        margin: 24px 0;
-        background-color: ${isDark ? '#334155' : '#e1e4e8'};
-        border: 0;
-      }
-      
-      .markdown-body .task-list-item {
-        list-style-type: none;
-        margin-left: -1.5em;
-      }
-      
-      .markdown-body .task-list-item input {
-        margin-right: 0.5em;
-      }
-      
-      .markdown-body pre:before,
-      .markdown-body pre:after {
-        display: none;
-        content: none;
-      }
-      
-      .message-wrapper.user-message-right {
-        flex-direction: row-reverse;
-      }
-      
-      .message-wrapper.user-message-right.message-bubble {
-        max-width: calc(85% - 42px);
-      }
-      
-      .message-wrapper.user-message-right.message-content {
-        border-top-left-radius: 18px;
-        border-top-right-radius: 4px;
-      }
-      
-      .message-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 8px;
-        justify-content: flex-start;
-      }
-
-      .message-actions.user {
-        justify-content: flex-end;
-      }
-      
-      .action-button {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 4px;
-        border-radius: var(--radius-sm);
-        transition: var(--transition);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--text-secondary);
-      }
-      
-      .action-button:hover {
-        background-color: rgba(0, 0, 0, 0.05);
-        color: var(--text-color);
-      }
-      
-      .action-button svg {
-        width: 16px;
-        height: 16px;
-      }
-      
-      .copy-button {
-        color: var(--primary-color);
-      }
-      
-      .copy-button:hover {
-        background-color: rgba(59, 130, 246, 0.1);
-      }
-      
-      .regenerate-button {
-        color: var(--text-secondary);
-      }
-      
-      .regenerate-button:hover {
-        background-color: rgba(0, 0, 0, 0.05);
-        color: var(--text-color);
-      }
-      
-      .render-image-button {
-        color: #8b5cf6; /* 紫色图标 */
-      }
-      
-      .render-image-button:hover {
-        background-color: rgba(139, 92, 246, 0.1);
-      }
-      
-      /* 自定义按钮样式 */
-      .markdown-button {
-        display: inline-block;
-        padding: 8px 16px;
-        background-color: var(--primary-color);
-        color: white;
-        border: none;
-        border-radius: var(--radius);
-        cursor: pointer;
-        font-weight: 500;
-        font-size: 14px;
-        transition: all 0.3s ease;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        margin: 8px 0;
-        text-align: center;
-      }
-      
-      .markdown-button:hover {
-        background-color: var(--primary-hover);
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-      }
-      
-      .markdown-button:active {
-        transform: translateY(0);
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      }
-      
-      
-      .render-image-button {
-        color: #8b5cf6; /* 紫色图标 */
-      }
-      
-      .render-image-button:hover {
-        background-color: rgba(139, 92, 246, 0.1);
-      }
-
-      .thinking-details {
-        margin-bottom: 16px;
-        border-radius: var(--radius);
-        overflow: hidden;
-      }
-      .thinking-summary {
-        cursor: pointer;
-        font-weight: bold;
-        padding: 8px 12px;
-        background-color: var(--card-bg, #f0f0f0);
-        color: var(--text-color);
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border-color);
-        transition: background-color 0.2s;
-      }
-      .thinking-summary:hover {
-        background-color: var(--hover-bg, #e0e0e0);
-      }
-      .thinking-content {
-        padding: 12px 16px;
-        border: 1px solid var(--border-color, #ddd);
-        border-radius: var(--radius-sm);
-        margin-top: 8px;
-        background-color: var(--card-bg, #ffffff);
-        color: var(--text-color);
-      }
-      [data-theme="dark"] .thinking-summary {
-        background-color: var(--card-bg, #1e293b);
-        border-color: var(--border-color, #334155);
-      }
-      [data-theme="dark"] .thinking-summary:hover {
-        background-color: var(--hover-bg, #2d3748);
-      }
-      [data-theme="dark"] .thinking-content {
-        border-color: var(--border-color, #334155);
-        background-color: var(--card-bg, #1e293b);
-      }
-
-      /* 移动端优化 */
-      @media (max-width: 767px) {
-        .message-bubble {
-          max-width: calc(90% - 42px);
-          transform: translateY(0);
-        }
-        
-        .message-content {
-          padding: 12px 16px;
-        }
-        
-        .avatar-icon {
-          width: 32px;
-          height: 32px;
-          display: none;
-        }
-        
-        .avatar-icon svg {
-          width: 18px;
-          height: 18px;
-        }
-        
-        .markdown-body pre {
-          padding: 16px 12px;
-        }
-        
-        .markdown-body {
-          font-size: calc(var(--font-size-base) - 1px);
-        }
-        
-        /* 在移动端调整消息和头像的布局 */
-        .message-wrapper {
-          flex-direction: column;
-          margin-bottom: 32px;
-        }
-        
-        .message-wrapper.user-message-right {
-          flex-direction: column;
-          align-items: flex-end;
-        }
-        
-        .message-avatar {
-          margin-top: 0;
-          margin-bottom: 8px;
-          flex-direction: row;
-          width: auto;
-          align-self: flex-start;
-        }
-        
-        .message-avatar.user {
-          align-self: flex-end;
-        }
-        
-        .avatar-icon {
-          margin-bottom: 0;
-          margin-right: 8px;
-        }
-        
-        .message-bubble {
-          max-width: 100%;
-        }
-        
-        /* 修复用户消息在移动端的布局 */
-        .message-wrapper.user-message-right {
-          flex-direction: column;
-          align-items: flex-end;
-        }
-        
-        /* 修复时间显示位置 - 对用户消息特殊处理 */
-        .message-wrapper.user-message-right .message-avatar {
-          align-self: flex-end;
-          flex-direction: row; /* 不使用反向排列，让时间保持在右侧 */
-        }
-        
-        .message-wrapper.user-message-right .message-time {
-          order: -1; /* 使时间元素显示在最左侧 */
-          margin-right: 8px; /* 给时间和头像之间添加间距 */
-          margin-left: 0;
-        }
-        
-        /* 确保头像和时间垂直对齐 */
-        .message-avatar {
-          display: flex;
-          align-items: center;
-        }
-        
-        /* 为确保用户头像和助手头像的样式一致 */
-        .message-wrapper.user-message-right .message-avatar .avatar-icon {
-          margin-right: 0;
-          margin-left: 0; /* 移除左侧间距 */
-        }
-        
-        /* 所有消息的气泡宽度保持一致 */
-        .message-bubble {
-          max-width: 100%;
-        }
-      }
-    </style>
   </div>
 `;
+
+  processedChatContent.value = generatedHtml;
 
   // 创建一个解析器来在内存中处理HTML
   const parser = new DOMParser();
@@ -812,47 +205,62 @@ function updateChatContent(messages: ChatMessage[]) {
   applyHighlight(virtualElement as HTMLElement).then(highlightedElement => {
     // 更新处理后的HTML
     processedChatContent.value = highlightedElement.innerHTML;
-
     // 重新渲染后再执行其他操作
     if (!highlightedElement) return;
-
     // 在下一个tick中，当DOM更新后，添加事件监听
-    nextTick(() => {
-      // 为真实DOM中的消息添加右键菜单事件
-      document.querySelectorAll('.chat-messages .message-content[data-message-index]').forEach(messageElement => {
-        messageElement.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const messageIndex = parseInt((messageElement as HTMLElement).dataset.messageIndex || '0', 10);
-          openMessageContextMenu(e as MouseEvent, messageIndex);
-        });
-      });
+    nextTick(setupFunctions);
+  }).catch(error => {
+    console.error("代码高亮失败:", error);
+  });
+}
 
-      // 其他需要在DOM更新后执行的代码...
-      renderMathInElement();      
-      setupExternalLinks();
-      setupActionButtons();
-      scrollToBottom(true);
+function setupFunctions() {
+  // 为真实DOM中的消息添加右键菜单事件
+  document.querySelectorAll('.chat-messages .message-content[data-message-index]').forEach(messageElement => {
+    messageElement.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const messageIndex = parseInt((messageElement as HTMLElement).dataset.messageIndex || '0', 10);
+      openMessageContextMenu(e as MouseEvent, messageIndex);
     });
   });
 
+  // 其他需要在DOM更新后执行的代码...
+  renderMathInElement();
+  setupExternalLinks();
+  setupActionButtons();
+  setupAllCopyButtons();
+  scrollToBottom(true);
 }
 
 // 流式消息处理相关函数
 async function setupStreamListeners() {
+  // 添加一个用于跟踪最新更新请求的ID
+  let latestUpdateId = 0;
+
   // 监听流式消息事件
   const unlistenStream = await listen('stream-message', (event) => {
     // 标记正在接收流式消息
     isStreaming.value = true;
     console.log("流式消息接收中，暂停UML渲染");
 
+    // 生成新的更新ID
+    const currentUpdateId = ++latestUpdateId;
+
     // 将后端发送的聊天历史更新到前端
     const chatData = event.payload as ChatHistory;
-    // 更新聊天内容显示
-    updateChatContent(chatData.content);
 
-    // 滚动到底部，添加平滑效果
-    scrollToBottom(true);
+    // 使用requestAnimationFrame确保在下一帧渲染前进行检查
+    requestAnimationFrame(() => {
+      // 只有当当前更新ID是最新的时才执行更新
+      if (currentUpdateId === latestUpdateId) {
+        // 更新聊天内容显示
+        updateChatContent(chatData.content);
+
+      } else {
+        console.log(`跳过过时的更新 (ID: ${currentUpdateId})`);
+      }
+    });
   });
 
   // 监听流完成事件
@@ -862,8 +270,17 @@ async function setupStreamListeners() {
     isStreaming.value = false;
     isLoading.value = false;
 
+    // 生成最终更新的ID
+    const finalUpdateId = ++latestUpdateId;
+
     const chatContent = await invoke("get_chat_html") as ChatMessage[];
-    updateChatContent(chatContent);
+
+    // 同样检查是否为最新更新
+    requestAnimationFrame(() => {
+      if (finalUpdateId === latestUpdateId) {
+        updateChatContent(chatContent);
+      }
+    });
   });
 
   // 在组件卸载时清理事件监听
@@ -875,143 +292,215 @@ async function setupStreamListeners() {
 
 // 设置复制按钮和重做按钮的事件监听器
 function setupActionButtons() {
-  nextTick(() => {
-    // 设置复制按钮事件监听
-    document.querySelectorAll('.chat-messages .copy-button').forEach(button => {
-      button.addEventListener('click', async () => {
-        const encodedContent = (button as HTMLElement).dataset.content;
-        if (encodedContent) {
-          try {
-            const content = decodeURIComponent(encodedContent);
-            
-            // 创建一个临时的DOM元素来解析内容
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = content;
-            
-            // 检查是否存在包含原始消息的元素
-            const originalMsgElement = tempDiv.querySelector('.original-message');
-            let textToWrite: string;
-            
-            if (originalMsgElement && originalMsgElement.getAttribute('data-content')) {
-              // 如果找到原始消息元素，获取并解码原始消息
-              try {
-                // 从Base64解码原始Markdown内容，使用更可靠的方法处理UTF-8编码
-                const base64Content = originalMsgElement.getAttribute('data-content') || '';
-                
-                // 使用 base64ToUint8Array 和 TextDecoder 正确处理 UTF-8 编码的文本
-                const binaryString = atob(base64Content);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                  bytes[i] = binaryString.charCodeAt(i);
-                }
-                textToWrite = new TextDecoder('utf-8').decode(bytes);
-                
-                console.log("已找到并解码原始Markdown内容");
-              } catch (decodeError) {
-                console.error("Base64解码失败:", decodeError);
-                // 解码失败则回退到使用HTML内容
-                textToWrite = content;
+  // 设置复制按钮事件监听
+  document.querySelectorAll('.chat-messages .copy-button').forEach(button => {
+    button.addEventListener('click', async () => {
+      const encodedContent = (button as HTMLElement).dataset.content;
+      if (encodedContent) {
+        try {
+          const content = decodeURIComponent(encodedContent);
+
+          // 创建一个临时的DOM元素来解析内容
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = content;
+
+          // 检查是否存在包含原始消息的元素
+          const originalMsgElement = tempDiv.querySelector('.original-message');
+          let textToWrite: string;
+
+          if (originalMsgElement && originalMsgElement.getAttribute('data-content')) {
+            // 如果找到原始消息元素，获取并解码原始消息
+            try {
+              // 从Base64解码原始Markdown内容，使用更可靠的方法处理UTF-8编码
+              const base64Content = originalMsgElement.getAttribute('data-content') || '';
+
+              // 使用 base64ToUint8Array 和 TextDecoder 正确处理 UTF-8 编码的文本
+              const binaryString = atob(base64Content);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
               }
-            } else {
-              // 如果没有找到原始消息元素，就使用HTML内容
+              textToWrite = new TextDecoder('utf-8').decode(bytes);
+
+              console.log("已找到并解码原始Markdown内容");
+            } catch (decodeError) {
+              console.error("Base64解码失败:", decodeError);
+              // 解码失败则回退到使用HTML内容
               textToWrite = content;
             }
-            
-            await writeText(textToWrite);
-            showNotification("内容已复制到剪贴板", "success");
-          } catch (error) {
-            console.error("复制失败:", error);
-            showNotification("复制失败", "error");
+          } else {
+            // 如果没有找到原始消息元素，就使用HTML内容
+            textToWrite = content;
           }
+
+          await writeText(textToWrite);
+          showNotification("内容已复制到剪贴板", "success");
+        } catch (error) {
+          console.error("复制失败:", error);
+          showNotification("复制失败", "error");
         }
-      });
+      }
     });
+  });
 
-    // 设置重做按钮事件监听
-    document.querySelectorAll('.chat-messages .regenerate-button').forEach(button => {
-      button.addEventListener('click', async () => {
-        // 如果正在流式传输，禁止重做操作
-        if (isStreaming.value) {
-          showNotification("请等待当前消息输出完成", "error");
-          return;
+  // 设置重做按钮事件监听
+  document.querySelectorAll('.chat-messages .regenerate-button').forEach(button => {
+    button.addEventListener('click', async () => {
+      // 如果正在流式传输，禁止重做操作
+      if (isStreaming.value) {
+        showNotification("请等待当前消息输出完成", "error");
+        return;
+      }
+
+      const messageIndex = Number((button as HTMLElement).dataset.messageIndex);
+      if (!isNaN(messageIndex)) {
+        try {
+          // 显示加载状态
+          isLoading.value = true;
+          isStreaming.value = true;
+
+          // 调用后端重新生成消息
+          await invoke("regenerate_message", { messageIndex });
+
+          // 处理将在事件监听器中完成
+        } catch (error) {
+          console.error("重新生成失败:", error);
+          showNotification("重新生成失败", "error");
+          isStreaming.value = false;
+          isLoading.value = false;
         }
-
-        const messageIndex = Number((button as HTMLElement).dataset.messageIndex);
-        if (!isNaN(messageIndex)) {
-          try {
-            // 显示加载状态
-            isLoading.value = true;
-            isStreaming.value = true;
-
-            // 调用后端重新生成消息
-            await invoke("regenerate_message", { messageIndex });
-
-            // 处理将在事件监听器中完成
-          } catch (error) {
-            console.error("重新生成失败:", error);
-            showNotification("重新生成失败", "error");
-            isStreaming.value = false;
-            isLoading.value = false;
-          }
-        }
-      });
+      }
     });
+  });
+  // 设置渲染图片按钮事件监听
+  document.querySelectorAll('.chat-messages .render-image-button').forEach(button => {
+    button.addEventListener('click', async () => {
+      const messageIndex = Number((button as HTMLElement).dataset.messageIndex);
+      if (isNaN(messageIndex)) return;
 
-    // 设置渲染图片按钮事件监听
-    document.querySelectorAll('.chat-messages .render-image-button').forEach(button => {
-      button.addEventListener('click', async () => {
-        const messageIndex = Number((button as HTMLElement).dataset.messageIndex);
-        if (isNaN(messageIndex)) return;
+      const messageContentElement = document.querySelector(`.chat-messages .message-content[data-message-index="${messageIndex}"]`) as HTMLElement;
 
-        const messageContentElement = document.querySelector(`.chat-messages .message-content[data-message-index="${messageIndex}"]`) as HTMLElement;
+      if (messageContentElement) {
+        showNotification("正在渲染图片...", "info");
+        try {
+          // 获取当前主题，以便在渲染时应用正确的背景色
+          const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+            (document.documentElement.getAttribute('data-theme') === 'system' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          const backgroundColor = isDark ? '#1e293b' : '#ffffff'; // 根据主题设置背景色
 
-        if (messageContentElement) {
-          showNotification("正在渲染图片...", "info");
-          try {
-            // 获取当前主题，以便在渲染时应用正确的背景色
-            const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-              (document.documentElement.getAttribute('data-theme') === 'system' &&
-                window.matchMedia('(prefers-color-scheme: dark)').matches);
-            const backgroundColor = isDark ? '#1e293b' : '#ffffff'; // 根据主题设置背景色
+          // 获取原始元素宽度
+          // const originalWidth = messageContentElement.offsetWidth;
 
-            const canvas = await html2canvas(messageContentElement, {
-              useCORS: true, // 允许加载跨域图片（如果需要）
-              scale: 2, // 提高分辨率
-              backgroundColor: backgroundColor, // 设置背景色
-              logging: true, // 开启日志以便调试
-              onclone: (clonedDoc) => {
-                // 确保克隆的文档中 Mermaid 图表已渲染为 SVG
-                const originalMermaidContainers = messageContentElement.querySelectorAll('.mermaid-container');
-                const clonedMermaidContainers = clonedDoc.querySelectorAll('.mermaid-container');
-                originalMermaidContainers.forEach((originalContainer, index) => {
-                  if (clonedMermaidContainers[index]) {
-                    // 尝试直接复制 SVG 内容
-                    const svgElement = originalContainer.querySelector('svg');
-                    if (svgElement) {
-                      clonedMermaidContainers[index].innerHTML = svgElement.outerHTML;
-                    } else {
-                      // 如果没有 SVG，保留加载或错误状态
-                      clonedMermaidContainers[index].innerHTML = originalContainer.innerHTML;
-                    }
+          // 设置默认宽度（例如 800px）或使用原始宽度的最大值
+          // const targetWidth = Math.min(Math.max(originalWidth, 800), 1200); // 宽度介于800-1200px之间
+          const targetWidth = 1080;
+
+          // 创建一个包装容器以控制宽度
+          const wrapperDiv = document.createElement('div');
+          wrapperDiv.style.width = `${targetWidth}px`;
+          wrapperDiv.style.backgroundColor = backgroundColor;
+
+          // 克隆原始元素到包装容器中以便渲染
+          const clonedElement = messageContentElement.cloneNode(true) as HTMLElement;
+          wrapperDiv.appendChild(clonedElement);
+
+          // 临时添加到文档中（不可见），以便html2canvas能正确计算尺寸
+          wrapperDiv.style.position = 'absolute';
+          wrapperDiv.style.left = '-9999px';
+          document.body.appendChild(wrapperDiv);
+
+          const canvas = await html2canvas(clonedElement, {
+            useCORS: true, // 允许加载跨域图片
+            scale: 2, // 提高分辨率
+            backgroundColor: backgroundColor,
+            logging: true,
+            width: targetWidth, // 指定宽度
+            onclone: (clonedDoc) => {
+              // 移除不需要的元素
+              const apiFooters = clonedDoc.querySelectorAll('.api-call-footer');
+              apiFooters.forEach(footer => {
+                footer.remove();
+              });
+
+              const detailsElements = clonedDoc.querySelectorAll('details');
+              detailsElements.forEach(details => {
+                details.removeAttribute('open'); // 关闭所有折叠框
+              });
+
+              const codeCopyButtons = clonedDoc.querySelectorAll('.code-copy-button');
+              codeCopyButtons.forEach(button => {
+                button.remove();
+              });
+
+              const thinkSummary = clonedDoc.querySelectorAll('summary');
+              thinkSummary.forEach(summary => {
+                summary.remove();
+              });
+
+              const miniDetailsContainers = clonedDoc.querySelectorAll('.mini-details-container');
+              miniDetailsContainers.forEach(container => {
+                container.remove();
+              });
+
+              const miniTechDetails = clonedDoc.querySelectorAll('.mini-tech-details');
+              miniTechDetails.forEach(container => {
+                container.remove();
+              });
+
+              // 确保克隆的文档中 Mermaid 图表已渲染为 SVG
+              const originalMermaidContainers = messageContentElement.querySelectorAll('.mermaid-container');
+              const clonedMermaidContainers = clonedDoc.querySelectorAll('.mermaid-container');
+              originalMermaidContainers.forEach((originalContainer, index) => {
+                if (clonedMermaidContainers[index]) {
+                  // 尝试直接复制 SVG 内容
+                  const svgElement = originalContainer.querySelector('svg');
+                  if (svgElement) {
+                    clonedMermaidContainers[index].innerHTML = svgElement.outerHTML;
+                  } else {
+                    // 如果没有 SVG，保留加载或错误状态
+                    clonedMermaidContainers[index].innerHTML = originalContainer.innerHTML;
                   }
-                });
-              }
-            });
+                }
+              });
 
-            // 创建下载链接
-            const link = document.createElement('a');
-            link.download = `NPULearn-message-${Date.now()}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-            showNotification("图片已保存", "success");
-          } catch (error) {
-            console.error("渲染图片失败:", error);
-            showNotification("渲染图片失败", "error");
-          }
-        } else {
-          showNotification("找不到要渲染的消息内容", "error");
+              // 确保克隆的文档中 Pintora 图表已渲染为 SVG
+              const originalPintoraContainers = messageContentElement.querySelectorAll('.pintora-container');
+              const clonedPintoraContainers = clonedDoc.querySelectorAll('.pintora-container');
+              originalPintoraContainers.forEach((originalContainer, index) => {
+                if (clonedPintoraContainers[index]) {
+                  // 尝试直接复制 SVG 内容
+                  const svgElement = originalContainer.querySelector('.pintora-diagram svg');
+                  if (svgElement) {
+                    const diagramElement = clonedPintoraContainers[index].querySelector('.pintora-diagram');
+                    if (diagramElement) {
+                      diagramElement.innerHTML = svgElement.outerHTML;
+                    }
+                  } else {
+                    // 如果没有 SVG，保留加载或错误状态
+                    clonedPintoraContainers[index].innerHTML = originalContainer.innerHTML;
+                  }
+                }
+              });
+            }
+          });
+
+          // 渲染完成后移除临时元素
+          document.body.removeChild(wrapperDiv);
+
+          // 创建下载链接
+          const link = document.createElement('a');
+          link.download = `NPULearn-message-${Date.now()}.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+          showNotification("图片已保存", "success");
+        } catch (error) {
+          console.error("渲染图片失败:", error);
+          showNotification("渲染图片失败", "error");
         }
-      });
+      } else {
+        showNotification("找不到要渲染的消息内容", "error");
+      }
     });
   });
 }
@@ -1239,6 +728,9 @@ onMounted(async () => {
 
   eventBus.on('message:send', (message) => {
     sendStreamMessageDirect(message);
+  });
+  eventBus.on('notification:show', (data) => {
+    showNotification(data.message, data.type as 'info' | 'success' | 'error');
   });
 
   // 添加全局拖动和结束拖动事件
@@ -1652,7 +1144,7 @@ async function regenerateCurrentMessage() {
   closeMessageContextMenu();
 }
 const canRegenerateMessage = computed(() => {
-  var canRegenerateMessageResult = false;
+  let canRegenerateMessageResult = false;
   if (messageContextMenuIndex.value !== null && messageContextMenuIndex.value >= 0) {
     invoke("get_chat_html").then((chatContent) => {
       const messages = chatContent as ChatMessage[];
@@ -2025,7 +1517,7 @@ function confirmDeleteChat() {
       <div class="chart-viewer-overlay" @click="closeChartViewer"></div>
       <div class="chart-viewer-content">
         <div class="chart-viewer-header">
-          <h3>Mermaid 图表查看器</h3>
+          <h3>图表查看器</h3>
           <div class="chart-viewer-controls">
             <button class="chart-control-button" @click="resetChartViewer" title="重置缩放">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -2056,7 +1548,7 @@ function confirmDeleteChat() {
           </div>
           <div class="chart-viewer-code-toggle">
             <details>
-              <summary>查看 Mermaid 代码</summary>
+              <summary>查看图表代码</summary>
               <pre class="chart-viewer-code">{{ currentChartContent }}</pre>
             </details>
           </div>
@@ -2151,4 +1643,3 @@ function confirmDeleteChat() {
 }
 </style>
 <style src="./style.css"></style>
-
