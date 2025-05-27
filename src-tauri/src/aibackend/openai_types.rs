@@ -28,6 +28,7 @@ pub struct ChatCompletionMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolCall {
+    pub id: String,
     pub function: Function,
 }
 
@@ -71,4 +72,84 @@ pub struct FunctionDefinition {
     pub name: String,
     pub description: Option<String>,
     pub parameters: Parameters,
+}
+
+// --- Chat Completion Request/Response Types ---
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct ChatCompletionRequest {
+    pub model: String,
+    pub messages: Vec<ChatCompletionMessage>,
+    pub temperature: Option<f32>,
+    pub max_tokens: Option<u32>,
+    pub top_p: Option<f32>,
+    pub frequency_penalty: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub tools: Option<Vec<Tool>>,
+    pub tool_choice: Option<String>,
+    pub stream: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatCompletionResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<ChatCompletionChoice>,
+    pub usage: Option<Usage>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatCompletionChoice {
+    pub index: u32,
+    pub message: ChatCompletionMessage,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+// --- Streaming Types ---
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatCompletionStreamResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<ChatCompletionStreamChoice>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatCompletionStreamChoice {
+    pub index: u32,
+    pub delta: Option<ChatCompletionDelta>,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatCompletionDelta {
+    pub role: Option<MessageRole>,
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<ToolCall>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+    ContentFilter,
+    FunctionCall,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: String,
 }

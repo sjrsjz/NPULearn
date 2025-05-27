@@ -1,8 +1,9 @@
+use aibackend::deepseek;
 use aibackend::interface::AIChat;
 use history_msg::history::{load_history, save_history};
 use history_msg::history::{ChatHistory, ChatMessage, ChatMessageType};
 use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Window};
@@ -208,23 +209,36 @@ fn process_message_stream(window: Window, message: String) {
     std::thread::spawn(move || {
         // 获取API密钥
         let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
-        let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
+        // let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
+        let deepseek_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::DeepSeek);
 
-        if gemini_keys.keys.is_empty() {
+        // if gemini_keys.keys.is_empty() {
+        //     // 如果没有API密钥，发送错误消息
+        //     let _ = window_clone.emit(
+        //         "stream-message",
+        //         "未找到API密钥，请先在设置中添加Gemini API密钥",
+        //     );
+        //     let _ = window_clone.emit("stream-complete", "");
+        //     return;
+        // }
+
+        if deepseek_keys.keys.is_empty() {
             // 如果没有API密钥，发送错误消息
             let _ = window_clone.emit(
                 "stream-message",
-                "未找到API密钥，请先在设置中添加Gemini API密钥",
+                "未找到API密钥，请先在设置中添加DeepSeek API密钥",
             );
             let _ = window_clone.emit("stream-complete", "");
             return;
         }
 
         // 随机选择一个API密钥
-        let api_key = gemini_keys.keys[0].clone(); // 或者使用random_key()随机选择
+        // let api_key = gemini_keys.keys[0].clone(); // 或者使用random_key()随机选择
+        let api_key = deepseek_keys.keys[0].clone(); // 或者使用random_key()随机选择
 
         // 初始化AI聊天实例
-        let mut chat = aibackend::gemini::GeminiChat::new();
+        // let mut chat = aibackend::gemini::GeminiChat::new();
+        let mut chat = aibackend::deepseek::DeepSeekChat::new();
 
         // 设置系统提示语
         let _ = chat.set_system_prompt(SYSTEM_PROMPT.clone());

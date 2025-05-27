@@ -17,7 +17,8 @@ export interface Settings {
 
 // 定义 ApiKeyType 枚举
 export enum ApiKeyType {
-    Gemini = "Gemini"
+    Gemini = "Gemini",
+    DeepSeek = "DeepSeek"
 }
 
 // 定义 ApiKey 接口
@@ -140,6 +141,8 @@ export function useSettingsProvider() {
         switch (key_type) {
             case ApiKeyType.Gemini:
                 return "Gemini";
+            case ApiKeyType.DeepSeek:
+                return "DeepSeek";
             default:
                 return "未知类型";
         }
