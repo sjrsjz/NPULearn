@@ -284,7 +284,7 @@ html[data-theme="dark"] .markdown-body img {
 }
 
 .custom-titlebar {
-    height: 32px;
+    height: 36px;
     background-color: var(--card-bg);
     display: flex;
     align-items: center;
@@ -3281,4 +3281,36 @@ html[data-theme="dark"] .thinking-content {
     background-color: rgba(59, 130, 246, 0.1);
     padding: 1px 4px;
     border-radius: 3px;
+}
+
+
+.model-selector {
+    position: relative;
+    display: flex;
+    justify-content: flex-end;
+    /* 内容右对齐 */
+    align-items: center;
+    margin-left: auto;
+    background-color: var(--card-bg);
+    width: auto;
+    /* 确保宽度自适应 */
+    flex-shrink: 0;
+    /* 防止被压缩 */
+    border: none;
+}
+.model-selector select {
+    border: none;
+    outline: none;
+    background: var(--card-bg);
+    color: var(--text-color);
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: var(--font-size-base);
+    appearance: auto;
+    /* 确保显示原生下拉箭头 */
+}
+
+.model-selector select:hover {
+    background-color: rgba(0, 0, 0, 0.05);
 }

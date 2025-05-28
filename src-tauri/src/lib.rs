@@ -1,9 +1,10 @@
-use aibackend::deepseek;
-use aibackend::interface::AIChat;
+use aibackend::deepseek::DeepSeekChat;
+use aibackend::gemini::GeminiChat;
+use aibackend::interface::{AIChat, AIChatType};
 use history_msg::history::{load_history, save_history};
 use history_msg::history::{ChatHistory, ChatMessage, ChatMessageType};
 use once_cell::sync::Lazy;
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Window};
@@ -12,9 +13,9 @@ use xlang_frontend::parser::lexer::lexer;
 
 use tauri_plugin_fs::FsExt;
 
-mod document_renderer;
 mod ai_utils;
 mod aibackend;
+mod document_renderer;
 mod setting;
 
 mod history_msg;
@@ -201,7 +202,7 @@ fn create_new_chat() -> Vec<ChatMessage> {
 
 // 以流式方式处理用户消息
 #[tauri::command]
-fn process_message_stream(window: Window, message: String) {
+fn process_message_stream(window: Window, message: String, key_type: String) {
     // 克隆窗口以便在新线程中使用
     let window_clone = window.clone();
 
@@ -210,35 +211,46 @@ fn process_message_stream(window: Window, message: String) {
         // 获取API密钥
         let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
         // let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
-        let deepseek_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::DeepSeek);
+        let key_list = api_key_list.filter_by_type(match key_type.as_str() {
+            "DeepSeek" => aibackend::apikey::ApiKeyType::DeepSeek,
+            "Gemini" => aibackend::apikey::ApiKeyType::Gemini,
+            _ => {
+                let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
+                return;
+            }
+        });
 
-        // if gemini_keys.keys.is_empty() {
-        //     // 如果没有API密钥，发送错误消息
-        //     let _ = window_clone.emit(
-        //         "stream-message",
-        //         "未找到API密钥，请先在设置中添加Gemini API密钥",
-        //     );
-        //     let _ = window_clone.emit("stream-complete", "");
-        //     return;
-        // }
-
-        if deepseek_keys.keys.is_empty() {
+        if key_list.keys.is_empty() {
             // 如果没有API密钥，发送错误消息
             let _ = window_clone.emit(
                 "stream-message",
-                "未找到API密钥，请先在设置中添加DeepSeek API密钥",
+                format!("没有可用的{} API密钥，请在设置中添加", key_type),
             );
-            let _ = window_clone.emit("stream-complete", "");
             return;
         }
 
         // 随机选择一个API密钥
-        // let api_key = gemini_keys.keys[0].clone(); // 或者使用random_key()随机选择
-        let api_key = deepseek_keys.keys[0].clone(); // 或者使用random_key()随机选择
+        let api_key = match key_list.random_key() {
+            Some(key) => key,
+            None => {
+                let _ = window_clone.emit(
+                    "stream-message",
+                    format!("没有可用的{} API密钥，请在设置中添加", key_type),
+                );
+                return;
+            }
+        };
 
         // 初始化AI聊天实例
         // let mut chat = aibackend::gemini::GeminiChat::new();
-        let mut chat = aibackend::deepseek::DeepSeekChat::new();
+        let mut chat= match key_type.as_str() {
+            "DeepSeek" => AIChatType::DeepSeek(DeepSeekChat::new()),
+            "Gemini" => AIChatType::Gemini(GeminiChat::new()),
+            _ => {
+                let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
+                return;
+            }
+        };
 
         // 设置系统提示语
         let _ = chat.set_system_prompt(SYSTEM_PROMPT.clone());
@@ -483,7 +495,7 @@ struct ASTOptimizer;
 impl ASTOptimizer {
     /// 修正AST节点，优化表达式结构
     pub fn optimize(node: &mut ASTNode) {
-        while Self::optimize_recursive(node) {};
+        while Self::optimize_recursive(node) {}
     }
 
     fn optimize_recursive(node: &mut ASTNode) -> bool {
@@ -499,7 +511,7 @@ impl ASTOptimizer {
                 optimized |= Self::optimize_lambda_call(node);
             }
             ASTNodeType::Expressions => {
-                optimized |=Self::optimize_expressions(node);
+                optimized |= Self::optimize_expressions(node);
             }
             _ => {}
         }

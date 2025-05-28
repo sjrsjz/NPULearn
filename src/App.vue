@@ -9,7 +9,7 @@ import LoadingLogo from './components/LoadingLogo.vue';
 import Setting from './components/Setting.vue';
 import html2canvas from 'html2canvas'; // 导入 html2canvas
 
-import { useSettingsProvider } from './composables/useSettings';
+import { ApiKeyType, useSettingsProvider } from './composables/useSettings';
 import { Window } from '@tauri-apps/api/window';
 
 
@@ -58,7 +58,7 @@ const messageContextMenuIndex = ref<number | null>(null); // 当前右键菜单�
 const showChatContextMenu = ref(false);
 const chatContextMenuPosition = ref({ x: 0, y: 0 });
 const chatContextMenuId = ref<number | null>(null);
-
+const selectedModel = ref<string | null>(null); // 当前选中的模型
 
 // 切换设置界面的显示
 function toggleSettings() {
@@ -238,7 +238,6 @@ async function setupStreamListeners() {
   // 添加一个用于跟踪最新更新请求的ID
   let latestUpdateId = 0;
 
-  // 监听流式消息事件
   const unlistenStream = await listen('stream-message', (event) => {
     // 标记正在接收流式消息
     isStreaming.value = true;
@@ -248,19 +247,47 @@ async function setupStreamListeners() {
     const currentUpdateId = ++latestUpdateId;
 
     // 将后端发送的聊天历史更新到前端
-    const chatData = event.payload as ChatHistory;
-
-    // 使用requestAnimationFrame确保在下一帧渲染前进行检查
-    requestAnimationFrame(() => {
-      // 只有当当前更新ID是最新的时才执行更新
-      if (currentUpdateId === latestUpdateId) {
-        // 更新聊天内容显示
-        updateChatContent(chatData.content);
-
-      } else {
-        console.log(`跳过过时的更新 (ID: ${currentUpdateId})`);
+    try {
+      // 检查 payload 是否为字符串（错误信息）
+      if (typeof event.payload === 'string') {
+        console.error("后端返回错误:", event.payload);
+        showNotification(`${event.payload}`, "error");
+        isStreaming.value = false;
+        isLoading.value = false;
+        return;
       }
-    });
+
+      // 尝试进行类型断言，如果失败会抛出异常
+      const chatData = event.payload as ChatHistory;
+
+      // 验证数据结构
+      if (!chatData || !chatData.content || !Array.isArray(chatData.content)) {
+        const errorMessage = `接收到无效的聊天数据格式: ${JSON.stringify(event.payload)}`;
+        console.error(errorMessage);
+        showNotification(errorMessage, "error");
+        isStreaming.value = false;
+        isLoading.value = false;
+        return;
+      }
+
+      // 使用requestAnimationFrame确保在下一帧渲染前进行检查
+      requestAnimationFrame(() => {
+        // 只有当当前更新ID是最新的时才执行更新
+        if (currentUpdateId === latestUpdateId) {
+          // 更新聊天内容显示
+          updateChatContent(chatData.content);
+        } else {
+          console.log(`跳过过时的更新 (ID: ${currentUpdateId})`);
+        }
+      });
+    } catch (error) {
+      // 显示详细的错误信息
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("处理流式消息失败:", errorMessage);
+      showNotification(`处理消息失败: ${errorMessage}`, "error");
+      isStreaming.value = false;
+      isLoading.value = false;
+    }
   });
 
   // 监听流完成事件
@@ -273,14 +300,38 @@ async function setupStreamListeners() {
     // 生成最终更新的ID
     const finalUpdateId = ++latestUpdateId;
 
-    const chatContent = await invoke("get_chat_html") as ChatMessage[];
+    try {
+      const result = await invoke("get_chat_html");
 
-    // 同样检查是否为最新更新
-    requestAnimationFrame(() => {
-      if (finalUpdateId === latestUpdateId) {
-        updateChatContent(chatContent);
+      // 检查返回值类型并记录详细信息
+      if (typeof result === 'string') {
+        console.error("获取聊天内容返回错误字符串:", result);
+        showNotification(`获取聊天内容失败: ${result}`, "error");
+        return;
       }
-    });
+
+      const chatContent = result as ChatMessage[];
+
+      // 验证返回的数据
+      if (!Array.isArray(chatContent)) {
+        const errorMessage = `获取聊天内容返回无效格式: ${JSON.stringify(result)}`;
+        console.error(errorMessage);
+        showNotification(errorMessage, "error");
+        return;
+      }
+
+      // 同样检查是否为最新更新
+      requestAnimationFrame(() => {
+        if (finalUpdateId === latestUpdateId) {
+          updateChatContent(chatContent);
+        }
+      });
+    } catch (error) {
+      // 显示详细的错误信息
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("获取最终聊天内容失败:", errorMessage);
+      showNotification(`获取聊天内容失败: ${errorMessage}`, "error");
+    }
   });
 
   // 在组件卸载时清理事件监听
@@ -555,7 +606,7 @@ async function sendStreamMessage() {
   console.log("开始流式传输消息，已禁用UML渲染");
 
   // 使用 Promise 包装后端调用，但不等待它完成
-  invoke("process_message_stream", { message })
+  invoke("process_message_stream", { message, keyType: selectedModel.value })
     .catch(error => {
       console.error("消息发送失败:", error);
       showNotification("消息发送失败", "error");
@@ -606,7 +657,7 @@ async function sendStreamMessageDirect(message: string) {
   console.log("开始流式传输消息，已禁用UML渲染");
 
   // 使用 Promise 包装后端调用，但不等待它完成
-  invoke("process_message_stream", { message })
+  invoke("process_message_stream", { message, keyType: selectedModel.value })
     .catch(error => {
       console.error("消息发送失败:", error);
       showNotification("消息发送失败", "error");
@@ -739,7 +790,7 @@ onMounted(async () => {
   window.addEventListener('touchmove', handleDrag);
   window.addEventListener('touchend', endDrag);
 
-
+  selectedModel.value = ApiKeyType.Gemini; // 默认选择Gemini模型
 
   // 检测是否为移动设备
   isMobile.value = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -1288,6 +1339,17 @@ function confirmDeleteChat() {
   closeChatContextMenu();
 }
 
+function updateModel(event: Event) {
+  const newModel = (event.target as HTMLSelectElement).value;
+  if (newModel) {
+    selectedModel.value = newModel;
+    showNotification(`模型已切换到 ${newModel}`, 'success');
+  } else {
+    showNotification('请选择一个有效的模型', 'error');
+  }
+}
+
+
 </script>
 
 <template>
@@ -1435,6 +1497,12 @@ function confirmDeleteChat() {
             </svg>
           </button>
           <h1>NPULearn</h1>
+          <!-- 右侧模型选择区 -->
+          <div class="model-selector">
+            <select v-model="selectedModel" @change="updateModel">
+              <option v-for="model in ApiKeyType" :key="model" :value="model">{{ model }}</option>
+            </select>
+          </div>
         </header>
 
         <!-- 聊天内容区域 - 添加点击事件处理函数 -->
