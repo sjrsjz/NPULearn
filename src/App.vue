@@ -256,9 +256,9 @@ function setupFunctions() {
   // 其他需要在DOM更新后执行的代码...
   renderMathInElement();
   setupExternalLinks();
-  setupActionButtons();  setupAllCopyButtons();
+  setupActionButtons(); setupAllCopyButtons();
   scrollToBottom(true, false); // 强制滚动，因为这是新内容渲染
-  
+
   // 内容渲染完成后重新设置滚动监听器和检查滚动按钮状态
   setTimeout(() => {
     setupScrollListener();
@@ -744,9 +744,9 @@ function checkScrollToBottomButton() {
   // 当用户向上滚动超过一定距离时显示按钮（容差设为150px）
   const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
   const shouldShow = distanceFromBottom > 150;
-  
+
   showScrollToBottomButton.value = shouldShow;
-  
+
   // 调试信息
   console.log(`滚动检查: 距离底部=${distanceFromBottom}px, 显示按钮=${shouldShow}`);
 }
@@ -769,10 +769,10 @@ function setupScrollListener() {
   chatContent.removeEventListener('scroll', handleScroll);
   // 添加新的滚动监听器
   chatContent.addEventListener('scroll', handleScroll, { passive: true });
-  
+
   // 初始检查一次
   checkScrollToBottomButton();
-  
+
   console.log('滚动监听器已设置');
 }
 
@@ -887,7 +887,7 @@ watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldT
 onMounted(async () => {
   eventBus.on('history:autoHide', () => {
     autoHideHistory();
-  });  eventBus.on('content:update', (messages) => {
+  }); eventBus.on('content:update', (messages) => {
     updateChatContent(messages.messages);
   });
 
@@ -983,7 +983,7 @@ onUnmounted(() => {
   window.removeEventListener('touchend', endDrag);
   window.removeEventListener('resize', handleResize);
   // 清除主题和字体大小变化的事件监听
-  window.removeEventListener('themeChanged', (_: Event) => { });  window.removeEventListener('fontSizeChanged', (_: Event) => { });
+  window.removeEventListener('themeChanged', (_: Event) => { }); window.removeEventListener('fontSizeChanged', (_: Event) => { });
   // 移除菜单关闭监听器
   removeDocumentClickListener();
 
@@ -1117,7 +1117,7 @@ function openMessageContextMenu(event: MouseEvent, messageIndex: number) {
   const selection = window.getSelection();
   const selectedText = selection ? selection.toString().trim() : "";
   selectedTextAtContextMenu.value = selectedText;
-  
+
   console.log('捕获到的选中文本:', selectedText); // 调试日志
 
   // 防止事件冒泡和默认行为
@@ -1284,13 +1284,13 @@ async function copySelectedText() {
   try {
     // 首先尝试使用保存的选中文本
     let textToCopy = selectedTextAtContextMenu.value;
-    
+
     // 如果没有保存的文本，再尝试获取当前选中的文本
     if (!textToCopy || !textToCopy.trim()) {
       const selection = window.getSelection();
       textToCopy = selection ? selection.toString() : "";
     }
-    
+
     if (textToCopy && textToCopy.trim()) {
       await writeText(textToCopy);
       showNotification("选中文本已复制到剪贴板", "success");
@@ -1516,7 +1516,7 @@ async function uploadFile() {
     isLoading.value = true;
     await invoke("upload_file_from_local");
     showNotification("文件上传成功", "success");
-      // 自动滚动到底部显示新添加的内容
+    // 自动滚动到底部显示新添加的内容
     nextTick(() => {
       scrollToBottom(true, true); // 强制滚动，因为有新内容
     });
@@ -1648,7 +1648,7 @@ async function uploadFile() {
           </div>
         </div>
 
-        <div class="history-footer">          <button @click="toggleSettings" class="settings-button">
+        <div class="history-footer"> <button @click="toggleSettings" class="settings-button">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <!-- 现代化的设置图标：简洁的滑块式设计 -->
@@ -1705,12 +1705,10 @@ async function uploadFile() {
 
           <!-- 悬浮滚动到底部按钮 -->
           <transition name="scroll-button">
-            <button v-if="showScrollToBottomButton" 
-                    class="scroll-to-bottom-button" 
-                    @click="forceScrollToBottom"
-                    title="滚动到底部">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" 
-                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <button v-if="showScrollToBottomButton" class="scroll-to-bottom-button" @click="forceScrollToBottom"
+              title="滚动到底部">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="7 13 12 18 17 13"></polyline>
                 <polyline points="7 6 12 11 17 6"></polyline>
               </svg>
@@ -1727,7 +1725,9 @@ async function uploadFile() {
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
               </svg>
               复制内容
-            </div>            <div class="context-menu-item" @click="copySelectedText" v-if="selectedTextAtContextMenu && selectedTextAtContextMenu.trim()">
+            </div>
+            <div class="context-menu-item" @click="copySelectedText"
+              v-if="selectedTextAtContextMenu && selectedTextAtContextMenu.trim()">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path>
@@ -1755,7 +1755,7 @@ async function uploadFile() {
               重新生成
             </div>
           </div>
-        </div>        <!-- 底部输入区 -->
+        </div> <!-- 底部输入区 -->
         <div class="chat-input-area">
           <form @submit.prevent="sendStreamMessage" class="input-form">
             <div class="input-container">
@@ -1769,8 +1769,9 @@ async function uploadFile() {
                   <polyline points="10,9 9,9 8,9"></polyline>
                 </svg>
               </button>
-              <textarea v-model="inputMessage" placeholder="输入消息... (Ctrl+Enter 发送)" class="message-input animated-input"
-                rows="1" @keydown="handleInputKeydown" @input="autoResizeTextarea"></textarea>
+              <textarea v-model="inputMessage" placeholder="输入消息... (Ctrl+Enter 发送)"
+                class="message-input animated-input" rows="1" @keydown="handleInputKeydown"
+                @input="autoResizeTextarea"></textarea>
             </div>
             <!-- 将按钮移到 textarea 外部 -->
             <button type="submit" class="send-button animated-button" :disabled="isStreaming"
@@ -1921,6 +1922,26 @@ async function uploadFile() {
   height: calc(100vh - var(--titlebar-height));
   /* 默认减去标题栏高度 */
   overflow: hidden;
+}
+
+/* 响应式设计调整 */
+@media (min-width: 768px) {
+  .history-sidebar {
+    transform: translateX(0);
+    position: relative;
+    box-shadow: none;
+    top: 0;
+    /* 在大屏幕上始终从顶部开始 */
+  }
+
+  .chat-container {
+    margin-left: 0;
+    width: calc(100% - var(--sidebar-width));
+    /* 大屏幕非移动设备下，如果标题栏存在，需要减去其高度 */
+    --titlebar-height: v-bind("isMobile ? '0px' : '32px'");
+    height: calc(100vh - var(--titlebar-height));
+  }
+
 }
 </style>
 <style src="./style.css"></style>

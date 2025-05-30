@@ -69,7 +69,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -77,12 +77,9 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Setup NDK
-        uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r25c
-          add-to-path: false
+          api-level: 33
+          build-tools: 33.0.0
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -102,17 +99,46 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
-      - name: Build Android app
+      - name: Setup Android environment and build
         run: |
-          export ANDROID_HOME=$ANDROID_SDK_ROOT
-          export NDK_HOME=$ANDROID_SDK_ROOT/ndk/25.2.9519653
+          echo "Setting up Android environment..."
+          
+          # 显示当前环境
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+          
+          # 接受所有许可证
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+          
+          # 安装NDK
+          echo "Installing Android NDK..."
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653"
+          
+          # 设置NDK环境变量
+          export NDK_HOME="$ANDROID_SDK_ROOT/ndk/25.2.9519653"
+          echo "NDK_HOME: $NDK_HOME"
+          
+          # 验证NDK安装
+          if [ -d "$NDK_HOME" ]; then
+            echo "✓ NDK successfully installed at: $NDK_HOME"
+          else
+            echo "✗ NDK installation failed"
+            echo "Available directories in $ANDROID_SDK_ROOT:"
+            ls -la "$ANDROID_SDK_ROOT/"
+            exit 1
+          fi
+          
+          # 构建Android应用
+          echo "Building Android application..."
           bun run tauri android build
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
 
   # 发布 (仅在标签推送时)
   publish:
@@ -131,6 +157,7 @@ jobs:
         with:
           files: |
             android-apk/*.apk
+            android-apk/*.aab
             desktop-*/*
           generate_release_notes: true
           draft: false

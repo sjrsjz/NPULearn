@@ -484,24 +484,7 @@ body {
     transition: opacity 0.3s ease;
 }
 
-/* 响应式设计调整 */
-@media (min-width: 768px) {
-    .history-sidebar {
-        transform: translateX(0);
-        position: relative;
-        box-shadow: none;
-        top: 0;
-        /* 在大屏幕上始终从顶部开始 */
-    }
 
-    .chat-container {
-        margin-left: 0;
-        width: calc(100% - var(--sidebar-width));
-        /* 大屏幕非移动设备下，如果标题栏存在，需要减去其高度 */
-        height: calc(100vh - 32px);
-    }
-
-}
 
 .history-open {
     transform: translateX(0);
