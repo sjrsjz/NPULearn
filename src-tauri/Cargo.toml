@@ -1,8 +1,9 @@
 [package]
 name = "npulearn"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "NPULearn - 智能学习助手桌面应用"
+authors = ["NPULearn Contributors"]
+license = "CC-BY-NC-SA-4.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -44,3 +45,9 @@ html-escape = "0.2.13"
 log = "0.4.20"
 scraper = "0.17"
 percent-encoding = "2.3"
+urlencoding = "2.1"
+# Document processing dependencies
+zip = "0.6"
+xml = "0.8"
+encoding_rs = "0.8"
+chardet = "0.2"

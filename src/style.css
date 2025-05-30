@@ -960,7 +960,7 @@ chat-messages .scoped-content {
     /* 保证至少有输入框的高度 */
     max-height: 150px;
     /* 限制最大高度，例如约5行 */
-    height: 48px;
+    height: 40px;
     /* 初始高度设为 min-height */
 }
 
@@ -972,7 +972,7 @@ chat-messages .scoped-content {
 .send-button {
     width: 40px;
     height: 40px;
-    transform: translateY(-4px);
+    transform: translateY(-8px) ;
     background-color: var(--primary-color);
     color: white;
     border: none;
@@ -986,14 +986,6 @@ chat-messages .scoped-content {
     flex-shrink: 0;
     /* 防止按钮被压缩 */
 }
-
-.send-button:hover:not(:disabled) {
-    /* 仅在非禁用状态下应用 hover 效果 */
-    background-color: var(--primary-hover);
-    transform: scale(1.08);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-}
-
 .send-button.streaming {
     background-color: #2563eb;
 }
@@ -1014,6 +1006,73 @@ send-icon {
     to {
         transform: rotate(360deg);
     }
+}
+
+/* 文件上传功能样式 */
+.input-container {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 4px;
+    transition: var(--transition);
+    box-shadow: var(--shadow-sm);
+}
+
+.input-container:focus-within {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+}
+
+.upload-button {
+    width: 36px;
+    height: 48px;
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: calc(var(--radius) - 2px);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+
+.upload-button:hover:not(:disabled) {
+    background-color: var(--border-color);
+    color: var(--primary-color);
+}
+
+
+.upload-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.upload-button svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 2;
+}
+
+/* 更新 message-input 样式以适配新容器 */
+.input-container .message-input {
+    border: none;
+    box-shadow: none;
+    background-color: transparent;
+    padding: 12px 8px 12px 4px;
+    margin: 0;
+}
+
+.input-container .message-input:focus {
+    border: none;
+    box-shadow: none;
 }
 
 chat-messages .mjx-chtml {
@@ -1074,15 +1133,21 @@ chat-messages .mjx-container {
     position: fixed;
     top: 16px;
     right: 16px;
+    left: 16px;
     padding: 12px 16px;
     border-radius: var(--radius);
     background-color: var(--card-bg);
     box-shadow: var(--shadow);
     z-index: 1000;
     max-width: 400px;
+    width: auto;
+    margin-left: auto;
     animation: notification-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     border-left: 4px solid;
     color: var(--text-color);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    box-sizing: border-box;
 }
 
 .notification.success {
@@ -1215,8 +1280,64 @@ chat-messages a:active {
     .chat-content {
         padding: 16px 12px;
     }
+
+    /* 移动端文件上传按钮优化 */
+    .upload-button {
+        width: 32px;
+        height: 48px;
+    }
+
+    .upload-button svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .input-container {
+        gap: 6px;
+        padding: 3px;
+    }
+
+    .input-container .message-input {
+        padding: 10px 6px 10px 2px;
+        min-height: 44px;
+        height: 44px;
+    }
 }
 
+/* 响应式通知样式 */
+@media (max-width: 768px) {
+    .notification {
+        top: 12px;
+        right: 12px;
+        left: 12px;
+        max-width: none;
+        width: calc(100vw - 24px);
+        margin: 0;
+        padding: 10px 14px;
+        font-size: calc(var(--font-size-base) - 1px);
+    }
+    
+    .notification-content {
+        gap: 6px;
+    }
+    
+    .notification-content svg {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .notification {
+        top: 8px;
+        right: 8px;
+        left: 8px;
+        width: calc(100vw - 16px);
+        padding: 8px 12px;
+        font-size: calc(var(--font-size-base) - 2px);
+    }
+}
 
 /* 自定义滚动条样式 */
 ::-webkit-scrollbar {
@@ -1273,7 +1394,7 @@ chat-messages a:active {
 }
 
 .animated-button:not(:disabled):hover {
-    transform: scale(1.08);
+    transform: scale(1.08) translateY(-10px);
     box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
@@ -1338,13 +1459,12 @@ chat-messages a:active {
 }
 
 /* 流式输出时禁用相关样式 */
-.send-button:disabled {
+.send-button:active {
     background-color: #93c5fd;
     cursor: not-allowed;
     transform: scale(1);
-    transform: translateY(-4px);
+    transform: translateY(-8px);
     box-shadow: none;
-    opacity: 0.7;
 }
 
 /* 流式输出时禁用的按钮和链接 */
@@ -1895,7 +2015,7 @@ chat-messages a:active {
 }
 
 :root[data-theme="dark"] .code-copy-button:hover,
-:root[data-theme="system"] .code-copy-button:hover {
+:root[data-theme="dark"] .code-copy-button:hover {
     background-color: rgba(255, 255, 255, 0.2);
     color: var(--dark-text-color);
 }
@@ -2384,6 +2504,12 @@ chat-messages a:active {
 
 .special-api-call {
     padding: 10px 15px;
+}
+
+@media screen and (max-width: 768px) {
+    .special-api-call {
+        padding: 0px 0px;
+    }    
 }
 
 .mini-tech-details {
@@ -3246,12 +3372,12 @@ html[data-theme="dark"] .thinking-content {
 }
 
 :root[data-theme="dark"] .json-details summary,
-:root[data-theme="system"] .json-details summary {
+:root[data-theme="dark"] .json-details summary {
     color: var(--dark-text-color);
 }
 
 :root[data-theme="dark"] .json-details summary::before,
-:root[data-theme="system"] .json-details summary::before {
+:root[data-theme="dark"] .json-details summary::before {
     color: var(--dark-text-secondary);
 }
 
@@ -3263,7 +3389,7 @@ html[data-theme="dark"] .thinking-content {
 }
 
 :root[data-theme="dark"] .json-details summary:hover,
-:root[data-theme="system"] .json-details summary:hover {
+:root[data-theme="dark"] .json-details summary:hover {
     background-color: rgba(255, 255, 255, 0.05);
 }
 
@@ -3392,4 +3518,77 @@ html[data-theme="dark"] .model-selector select:focus {
 
 html[data-theme="dark"] .model-selector select:disabled {
     background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* 悬浮滚动到底部按钮样式 */
+.scroll-to-bottom-button {
+    position: fixed;
+    bottom: 100px;
+    right: 20px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background-color: rgba(59, 130, 246, 0.8); /* 半透明主色调 */
+    color: white;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 10;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.scroll-to-bottom-button:hover {
+    background-color: rgba(37, 99, 235, 0.5); /* 悬停时更不透明 */
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+}
+
+.scroll-to-bottom-button:active {
+    background-color: rgba(29, 78, 216, 0.35); /* 按下时半透明 */
+    transform: translateY(0);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.scroll-to-bottom-button svg {
+    transition: transform 0.2s ease;
+}
+
+.scroll-to-bottom-button:hover svg {
+    transform: translateY(1px);
+}
+
+/* 暗色主题适配 */
+html[data-theme="dark"] .scroll-to-bottom-button {
+    background-color: rgba(96, 165, 250, 0.5); /* 暗色主题下的半透明蓝色 */
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme="dark"] .scroll-to-bottom-button:hover {
+    background-color: rgba(59, 130, 246, 0.9); /* 悬停时更不透明 */
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme="dark"] .scroll-to-bottom-button:active {
+    background-color: rgba(37, 99, 235, 0.25); /* 按下时半透明 */
+}
+
+/* 按钮出现/消失的过渡动画 */
+.scroll-button-enter-active,
+.scroll-button-leave-active {
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.scroll-button-enter-from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.8);
+}
+
+.scroll-button-leave-to {
+    opacity: 0;
+    transform: translateY(20px) scale(0.8);
 }

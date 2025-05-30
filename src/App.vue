@@ -1,3 +1,14 @@
+<!--
+NPULearn - 智能学习助手桌面应用
+Copyright (c) 2025 NPULearn Contributors
+
+This work is licensed under CC BY-NC-SA 4.0.
+Commercial use requires explicit authorization.
+For details, see LICENSE file or visit:
+https://creativecommons.org/licenses/by-nc-sa/4.0/
+-->
+
+
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
@@ -53,12 +64,17 @@ const chatToDeleteId = ref<number | null>(null); // 要删除的对话ID
 const showMessageContextMenu = ref(false); // 是否显示消息上下文菜单
 const messageContextMenuPosition = ref({ x: 0, y: 0 }); // 消息上下文菜单位置
 const messageContextMenuIndex = ref<number | null>(null); // 当前右键菜单对应的消息索引
+const selectedTextAtContextMenu = ref<string>(""); // 保存右键时的选中文本
 
 // 添加对话历史项右键菜单相关状态
 const showChatContextMenu = ref(false);
 const chatContextMenuPosition = ref({ x: 0, y: 0 });
 const chatContextMenuId = ref<number | null>(null);
 const selectedModel = ref<string | null>(null); // 当前选中的模型
+
+// 悬浮滚动按钮相关状态
+const showScrollToBottomButton = ref(false);
+let scrollCheckTimeout: NodeJS.Timeout | null = null;
 
 // 切换设置界面的显示
 function toggleSettings() {
@@ -191,13 +207,26 @@ function updateChatContent(messages: ChatMessage[]) {
     ${messagesHtml}
   </div>
 `;
-
   processedChatContent.value = generatedHtml;
 
   // 创建一个解析器来在内存中处理HTML
   const parser = new DOMParser();
   const doc = parser.parseFromString(`<div class="chat-messages">${generatedHtml}</div>`, 'text/html');
   const virtualElement = doc.querySelector('.chat-messages');
+
+  // 延迟检查滚动按钮状态
+  nextTick(() => {
+    setTimeout(() => {
+      checkScrollToBottomButton();
+    }, 100);
+  });
+
+  // 延迟检查滚动按钮状态
+  nextTick(() => {
+    setTimeout(() => {
+      checkScrollToBottomButton();
+    }, 100);
+  });
 
   if (!virtualElement) return;
 
@@ -224,13 +253,16 @@ function setupFunctions() {
       openMessageContextMenu(e as MouseEvent, messageIndex);
     });
   });
-
   // 其他需要在DOM更新后执行的代码...
   renderMathInElement();
   setupExternalLinks();
-  setupActionButtons();
-  setupAllCopyButtons();
-  scrollToBottom(true);
+  setupActionButtons();  setupAllCopyButtons();
+  scrollToBottom(true, false); // 强制滚动，因为这是新内容渲染
+  
+  // 内容渲染完成后重新设置滚动监听器和检查滚动按钮状态
+  setTimeout(() => {
+    setupScrollListener();
+  }, 200);
 }
 
 // 流式消息处理相关函数
@@ -325,8 +357,8 @@ async function setupStreamListeners() {
         if (finalUpdateId === latestUpdateId) {
           updateChatContent(chatContent);
           nextTick(() => {
-            invoke("get_chat_history_items").then((historyItems: ChatHistory[]) => {
-              chatHistory.value = historyItems;
+            invoke("get_chat_history_items").then((historyItems: any) => {
+              chatHistory.value = historyItems as ChatHistory[];
               console.log("聊天历史已更新:", chatHistory.value);
             }).catch(error => {
               console.error("获取聊天历史失败:", error);
@@ -677,8 +709,87 @@ async function sendStreamMessageDirect(message: string) {
 
 }
 
-// 自动滚动到底部 - 改进版
-function scrollToBottom(smooth = false) {
+// 检查用户是否已经滚动到底部
+function isUserAtBottom() {
+  const chatContent = document.querySelector('.chat-content');
+  if (!chatContent) return false;
+
+  const scrollHeight = chatContent.scrollHeight;
+  const clientHeight = chatContent.clientHeight;
+  const scrollTop = chatContent.scrollTop;
+
+  // 允许一定的误差范围（300px），因为滚动可能不完全精确
+  const isAtBottom = scrollTop + clientHeight >= scrollHeight - 300;
+  return isAtBottom;
+}
+
+// 检查是否显示滚动到底部按钮
+function checkScrollToBottomButton() {
+  const chatContent = document.querySelector('.chat-content');
+  if (!chatContent) {
+    showScrollToBottomButton.value = false;
+    return;
+  }
+
+  const scrollHeight = chatContent.scrollHeight;
+  const clientHeight = chatContent.clientHeight;
+  const scrollTop = chatContent.scrollTop;
+
+  // 如果内容高度小于等于容器高度，说明不需要滚动，隐藏按钮
+  if (scrollHeight <= clientHeight) {
+    showScrollToBottomButton.value = false;
+    return;
+  }
+
+  // 当用户向上滚动超过一定距离时显示按钮（容差设为150px）
+  const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+  const shouldShow = distanceFromBottom > 150;
+  
+  showScrollToBottomButton.value = shouldShow;
+  
+  // 调试信息
+  console.log(`滚动检查: 距离底部=${distanceFromBottom}px, 显示按钮=${shouldShow}`);
+}
+
+// 监听聊天内容区域的滚动事件
+function setupScrollListener() {
+  const chatContent = document.querySelector('.chat-content');
+  if (!chatContent) {
+    // 如果当前没有找到元素，稍后重试
+    setTimeout(setupScrollListener, 500);
+    return;
+  }
+
+  // 实时监听滚动事件
+  const handleScroll = () => {
+    checkScrollToBottomButton();
+  };
+
+  // 移除可能存在的旧监听器
+  chatContent.removeEventListener('scroll', handleScroll);
+  // 添加新的滚动监听器
+  chatContent.addEventListener('scroll', handleScroll, { passive: true });
+  
+  // 初始检查一次
+  checkScrollToBottomButton();
+  
+  console.log('滚动监听器已设置');
+}
+
+// 强制滚动到底部（从悬浮按钮触发）
+function forceScrollToBottom() {
+  scrollToBottom(true, true);
+  showScrollToBottomButton.value = false;
+}
+
+// 自动滚动到底部 - 改进版，只在用户已经在底部时滚动
+function scrollToBottom(smooth = false, force = false) {
+  // 如果不是强制滚动，检查用户是否在底部
+  if (!force && !isUserAtBottom()) {
+    console.log('用户不在底部，跳过自动滚动');
+    return;
+  }
+
   // 首次尝试滚动
   nextTick(() => {
     scrollToBottomImpl(smooth);
@@ -776,9 +887,7 @@ watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldT
 onMounted(async () => {
   eventBus.on('history:autoHide', () => {
     autoHideHistory();
-  });
-
-  eventBus.on('content:update', (messages) => {
+  });  eventBus.on('content:update', (messages) => {
     updateChatContent(messages.messages);
   });
 
@@ -820,11 +929,11 @@ onMounted(async () => {
     // 加载聊天历史和当前对话内容
     await loadChatHistory();
 
-    isStreaming.value = false; // 初始加载时默认没有流传输
-
-    // 所有内容加载完成后，隐藏启动logo
+    isStreaming.value = false; // 初始加载时默认没有流传输    // 所有内容加载完成后，隐藏启动logo
     setTimeout(() => {
       isAppLoading.value = false;
+      // 确保在应用完全加载后设置滚动监听器
+      setupScrollListener();
     }, 1500); // 添加短暂延迟，让过渡更平滑
   } catch (error) {
     console.error("初始化失败:", error);
@@ -874,10 +983,14 @@ onUnmounted(() => {
   window.removeEventListener('touchend', endDrag);
   window.removeEventListener('resize', handleResize);
   // 清除主题和字体大小变化的事件监听
-  window.removeEventListener('themeChanged', (_: Event) => { });
-  window.removeEventListener('fontSizeChanged', (_: Event) => { });
+  window.removeEventListener('themeChanged', (_: Event) => { });  window.removeEventListener('fontSizeChanged', (_: Event) => { });
   // 移除菜单关闭监听器
   removeDocumentClickListener();
+
+  // 清理滚动超时
+  if (scrollCheckTimeout) {
+    clearTimeout(scrollCheckTimeout);
+  }
 
   eventBus.all.clear();
 });
@@ -1000,6 +1113,13 @@ const documentClickListener = ref<((e: MouseEvent) => void) | null>(null);
 
 // 修改 openMessageContextMenu 函数，添加事件冒泡控制和更严格的条件检查
 function openMessageContextMenu(event: MouseEvent, messageIndex: number) {
+  // 保存当前选中的文本（在任何操作之前立即获取）
+  const selection = window.getSelection();
+  const selectedText = selection ? selection.toString().trim() : "";
+  selectedTextAtContextMenu.value = selectedText;
+  
+  console.log('捕获到的选中文本:', selectedText); // 调试日志
+
   // 防止事件冒泡和默认行为
   event.preventDefault();
   event.stopPropagation();
@@ -1158,6 +1278,32 @@ async function copyMessageContent() {
   }
   closeMessageContextMenu();
 }
+
+// 复制选中文本
+async function copySelectedText() {
+  try {
+    // 首先尝试使用保存的选中文本
+    let textToCopy = selectedTextAtContextMenu.value;
+    
+    // 如果没有保存的文本，再尝试获取当前选中的文本
+    if (!textToCopy || !textToCopy.trim()) {
+      const selection = window.getSelection();
+      textToCopy = selection ? selection.toString() : "";
+    }
+    
+    if (textToCopy && textToCopy.trim()) {
+      await writeText(textToCopy);
+      showNotification("选中文本已复制到剪贴板", "success");
+    } else {
+      showNotification("没有选中任何文本", "info");
+    }
+  } catch (error) {
+    console.error("复制选中文本失败:", error);
+    showNotification("复制选中文本失败", "error");
+  }
+  closeMessageContextMenu();
+}
+
 // 删除消息
 async function deleteMessage() {
   if (messageContextMenuIndex.value !== null && messageContextMenuIndex.value >= 0) {
@@ -1359,7 +1505,29 @@ function updateModel(event: Event) {
   }
 }
 
+// 文件上传功能
+async function uploadFile() {
+  if (isStreaming.value) {
+    showNotification("请等待当前消息输出完成", "error");
+    return;
+  }
 
+  try {
+    isLoading.value = true;
+    await invoke("upload_file_from_local");
+    showNotification("文件上传成功", "success");
+      // 自动滚动到底部显示新添加的内容
+    nextTick(() => {
+      scrollToBottom(true, true); // 强制滚动，因为有新内容
+    });
+  } catch (error) {
+    console.error("文件上传失败:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    showNotification(`文件上传失败: ${errorMessage}`, "error");
+  } finally {
+    isLoading.value = false;
+  }
+}
 </script>
 
 <template>
@@ -1480,14 +1648,16 @@ function updateModel(event: Event) {
           </div>
         </div>
 
-        <div class="history-footer">
-          <button @click="toggleSettings" class="settings-button">
+        <div class="history-footer">          <button @click="toggleSettings" class="settings-button">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path
-                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1-2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
-              </path>
+              <!-- 现代化的设置图标：简洁的滑块式设计 -->
+              <rect x="4" y="8" width="2" height="12" rx="1"></rect>
+              <rect x="11" y="3" width="2" height="14" rx="1"></rect>
+              <rect x="18" y="8" width="2" height="12" rx="1"></rect>
+              <circle cx="5" cy="4" r="2"></circle>
+              <circle cx="12" cy="19" r="2"></circle>
+              <circle cx="19" cy="4" r="2"></circle>
             </svg>
             设置
           </button>
@@ -1533,6 +1703,20 @@ function updateModel(event: Event) {
           </div>
           <div v-html="processedChatContent" class="chat-messages" @click="handleChatMessagesClick"></div>
 
+          <!-- 悬浮滚动到底部按钮 -->
+          <transition name="scroll-button">
+            <button v-if="showScrollToBottomButton" 
+                    class="scroll-to-bottom-button" 
+                    @click="forceScrollToBottom"
+                    title="滚动到底部">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" 
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="7 13 12 18 17 13"></polyline>
+                <polyline points="7 6 12 11 17 6"></polyline>
+              </svg>
+            </button>
+          </transition>
+
           <!-- 消息右键菜单 - 添加固定的位置样式 -->
           <div v-if="showMessageContextMenu" class="context-menu"
             :style="{ top: messageContextMenuPosition.y + 'px', left: messageContextMenuPosition.x + 'px' }">
@@ -1543,6 +1727,14 @@ function updateModel(event: Event) {
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
               </svg>
               复制内容
+            </div>            <div class="context-menu-item" @click="copySelectedText" v-if="selectedTextAtContextMenu && selectedTextAtContextMenu.trim()">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path>
+                <path d="M9 2v20"></path>
+                <path d="M15 2v20"></path>
+              </svg>
+              复制选中文本
             </div>
             <div class="context-menu-item delete-item" @click="deleteMessage">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
@@ -1563,12 +1755,23 @@ function updateModel(event: Event) {
               重新生成
             </div>
           </div>
-        </div>
-        <!-- 底部输入区 -->
+        </div>        <!-- 底部输入区 -->
         <div class="chat-input-area">
           <form @submit.prevent="sendStreamMessage" class="input-form">
-            <textarea v-model="inputMessage" placeholder="输入消息... (Ctrl+Enter 发送)" class="message-input animated-input"
-              rows="1" @keydown="handleInputKeydown" @input="autoResizeTextarea"></textarea>
+            <div class="input-container">
+              <button type="button" class="upload-button" @click="uploadFile" :disabled="isStreaming" title="上传文件">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14,2 14,8 20,8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <polyline points="10,9 9,9 8,9"></polyline>
+                </svg>
+              </button>
+              <textarea v-model="inputMessage" placeholder="输入消息... (Ctrl+Enter 发送)" class="message-input animated-input"
+                rows="1" @keydown="handleInputKeydown" @input="autoResizeTextarea"></textarea>
+            </div>
             <!-- 将按钮移到 textarea 外部 -->
             <button type="submit" class="send-button animated-button" :disabled="isStreaming"
               :class="{ 'streaming': isStreaming }">
