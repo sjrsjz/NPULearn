@@ -261,18 +261,6 @@ async function resetSettings() {
     }
 }
 
-// 选择保存路径
-async function selectSavePath() {
-    try {
-        const path = await invoke("select_save_directory");
-        if (path) {
-            settings.value.save_path = path as string;
-        }
-    } catch (error) {
-        console.error("选择路径失败:", error);
-        showNotification("选择路径失败", "error");
-    }
-}
 
 // 通知
 const notification = ref({
