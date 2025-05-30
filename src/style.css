@@ -780,6 +780,33 @@ body {
     align-items: center;
     height: 100%;
     /* 填充父容器 */
+    flex: 1; /* 让标题占据剩余空间，推动右侧元素向右 */
+}
+
+.model-selector {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+}
+
+.model-selector select {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    font-size: var(--font-size-sm);
+    outline: none;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.model-selector select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.model-selector select:hover {
+    border-color: var(--text-secondary);
 }
 
 .toggle-history {
@@ -2424,7 +2451,7 @@ chat-messages a:active {
 
 /* 暗色模式适配 */
 :root[data-theme="dark"] .tool-api-param,
-:root[data-theme="system"] .tool-api-param {
+:root[data-theme="dark"] .tool-api-param {
     background-color: rgba(255, 255, 255, 0.1);
 }
 
