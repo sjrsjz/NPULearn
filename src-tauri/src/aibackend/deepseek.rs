@@ -73,7 +73,7 @@ pub struct DeepSeekChat {
     tools: Vec<Tool>,
 
     chat_id: u32,
-    title: String,
+    title: Option<String>,
     time: String,
 }
 
@@ -187,7 +187,7 @@ impl DeepSeekChat {
             last_prompt: None,
             tools: Vec::new(),
             chat_id: 0,
-            title: "New Chat".to_string(),
+            title: None,
             time: "".to_string(),
         }
     }

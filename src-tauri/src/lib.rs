@@ -1,7 +1,7 @@
 use aibackend::deepseek::DeepSeekChat;
 use aibackend::gemini::GeminiChat;
 use aibackend::interface::{AIChat, AIChatType};
-use history_msg::history::{load_history, save_history};
+use history_msg::history::{get_title_from_history, load_history, save_history};
 use history_msg::history::{ChatHistory, ChatMessage, ChatMessageType};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -118,13 +118,13 @@ fn initialize_history() {
 
 // 获取聊天历史列表
 #[tauri::command]
-fn get_chat_history() -> Vec<ChatHistoryItem> {
+fn get_chat_history_items() -> Vec<ChatHistoryItem> {
     let history = CHAT_HISTORY.lock().unwrap();
     let mut history_items: Vec<ChatHistoryItem> = history
         .values()
         .map(|h| ChatHistoryItem {
             id: h.id,
-            title: h.title.clone(),
+            title: get_title_from_history(h),
             time: h.time.clone(),
         })
         .collect();
@@ -183,7 +183,7 @@ fn create_new_chat() -> Vec<ChatMessage> {
     let today = now.format("%H:%M").to_string();
     let new_chat = ChatHistory {
         id: new_id,
-        title: format!("对话 {}", new_id),
+        title: None, //deprecated
         time: today.clone(),
         content: vec![],
     };
@@ -243,7 +243,7 @@ fn process_message_stream(window: Window, message: String, key_type: String) {
 
         // 初始化AI聊天实例
         // let mut chat = aibackend::gemini::GeminiChat::new();
-        let mut chat= match key_type.as_str() {
+        let mut chat = match key_type.as_str() {
             "DeepSeek" => AIChatType::DeepSeek(DeepSeekChat::new()),
             "Gemini" => AIChatType::Gemini(GeminiChat::new()),
             _ => {
@@ -264,7 +264,7 @@ fn process_message_stream(window: Window, message: String, key_type: String) {
             } else {
                 ChatHistory {
                     id: current_chat_id,
-                    title: String::new(),
+                    title: None,
                     time: String::new(),
                     content: vec![],
                 }
@@ -327,6 +327,8 @@ fn process_message_stream(window: Window, message: String, key_type: String) {
                 // 更新最后一条消息的内容
                 let last_idx = cloned_context.content.len() - 1;
                 cloned_context.content[last_idx].content = accumulated.clone();
+
+                cloned_context.title = Some(get_title_from_history(&cloned_context));
 
                 // 将内容转换为HTML并立即发送到前端
                 let content: &ChatHistory = &ChatHistory::markdown_to_html(&cloned_context);
@@ -405,6 +407,7 @@ fn process_message_stream(window: Window, message: String, key_type: String) {
                     time: chrono::Local::now().format("%H:%M").to_string(),
                     content: error_message.clone(),
                 });
+                cloned_context.title = Some(get_title_from_history(&cloned_context));
 
                 let content: &ChatHistory = &ChatHistory::markdown_to_html(&cloned_context);
                 let _ = window_clone.emit("stream-message", content);
@@ -599,7 +602,11 @@ fn parse_code(code: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn regenerate_message(window: Window, message_index: usize) -> Result<(), String> {
+fn regenerate_message(
+    window: Window,
+    message_index: usize,
+    key_type: String,
+) -> Result<(), String> {
     // 克隆窗口以便在新线程中使用
     let window_clone = window.clone();
 
@@ -637,23 +644,45 @@ fn regenerate_message(window: Window, message_index: usize) -> Result<(), String
 
         // 获取API密钥
         let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
-        let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
+        let key_list = api_key_list.filter_by_type(match key_type.as_str() {
+            "DeepSeek" => aibackend::apikey::ApiKeyType::DeepSeek,
+            "Gemini" => aibackend::apikey::ApiKeyType::Gemini,
+            _ => {
+                let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
+                return;
+            }
+        });
 
-        if gemini_keys.keys.is_empty() {
+        if key_list.keys.is_empty() {
             // 如果没有API密钥，发送错误消息
             let _ = window_clone.emit(
                 "stream-message",
-                "未找到API密钥，请先在设置中添加Gemini API密钥",
+                format!("没有可用的{} API密钥，请在设置中添加", key_type),
             );
-            let _ = window_clone.emit("stream-complete", "");
             return;
         }
 
         // 随机选择一个API密钥
-        let api_key = gemini_keys.keys[0].clone(); // 或者使用random_key()随机选择
+        let api_key = match key_list.random_key() {
+            Some(key) => key,
+            None => {
+                let _ = window_clone.emit(
+                    "stream-message",
+                    format!("没有可用的{} API密钥，请在设置中添加", key_type),
+                );
+                return;
+            }
+        };
 
         // 初始化AI聊天实例
-        let mut ai_chat = aibackend::gemini::GeminiChat::new();
+        let mut ai_chat = match key_type.as_str() {
+            "DeepSeek" => AIChatType::DeepSeek(DeepSeekChat::new()),
+            "Gemini" => AIChatType::Gemini(GeminiChat::new()),
+            _ => {
+                let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
+                return;
+            }
+        };
 
         // 设置系统提示语
         let _ = ai_chat.set_system_prompt(SYSTEM_PROMPT.clone());
@@ -708,7 +737,7 @@ fn regenerate_message(window: Window, message_index: usize) -> Result<(), String
                 // 更新最后一条消息的内容
                 let last_idx = display_context.content.len() - 1;
                 display_context.content[last_idx].content = accumulated.clone();
-
+                display_context.title = Some(get_title_from_history(&display_context));
                 // 将内容转换为HTML并立即发送到前端
                 let content = &ChatHistory::markdown_to_html(&display_context);
                 println!("Sending stream message: {}", text.clone());
@@ -762,7 +791,6 @@ fn regenerate_message(window: Window, message_index: usize) -> Result<(), String
                 });
 
                 chat.time = chrono::Local::now().format("%H:%M").to_string();
-
                 // 保存历史记录
                 save_history(&history).unwrap_or_else(|e| {
                     println!("Failed to save history: {}", e);
@@ -780,7 +808,6 @@ fn regenerate_message(window: Window, message_index: usize) -> Result<(), String
                 });
 
                 chat.time = chrono::Local::now().format("%H:%M").to_string();
-
                 // 显示错误消息
                 let display_context = chat.clone();
                 let display_content = &ChatHistory::markdown_to_html(&display_context);
@@ -828,7 +855,7 @@ fn delete_chat(id: u32) -> Result<(), String> {
                 *current_id,
                 ChatHistory {
                     id: *current_id,
-                    title: format!("对话 {}", *current_id),
+                    title: None, // deprecated
                     time: today.clone(),
                     content: vec![],
                 },
@@ -852,7 +879,7 @@ fn rename_chat(id: u32, new_title: String) -> Result<(), String> {
 
     // 检查对话是否存在
     if let Some(chat) = history.get_mut(&id) {
-        chat.title = new_title;
+        chat.title = Some(new_title);
         // 保存更新后的历史记录
         save_history(&history).map_err(|e| e.to_string())?;
         Ok(())
@@ -950,6 +977,41 @@ async fn wolfram_alpha_compute(
     Ok(results)
 }
 
+#[tauri::command]
+fn upload_file_from_local(
+    window: Window,
+) -> Result<(), String> {
+    // 获取应用句柄
+    let app_handle = window.app_handle();
+    
+    // 弹出文件选择对话框
+    match select_file(app_handle) {
+        Ok(file_path) => {
+\            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+fn select_file(app_handle: &AppHandle) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    // 非阻塞方式不适合我们的用例，因为我们需要返回结果
+    // 使用阻塞式文件夹选择对话框
+    let file = Arc::new(Mutex::new(Err("".to_string())));
+    let file_clone = file.clone();
+    app_handle.dialog().file().pick_file(move |folder_path| {
+        let mut folder_guard = file_clone.lock().unwrap();
+        match folder_path {
+            Some(path) => *folder_guard = Ok(path.to_string()),
+            None => *folder_guard = Err("No directory selected".to_string()),
+        };
+    });
+
+    return file.lock().unwrap().clone();
+}
+
+
+
 // 确保在 run 函数中注册所有命令
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -961,7 +1023,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_chat_html,
-            get_chat_history,
+            get_chat_history_items,
             select_chat_by_id,
             get_current_chat_id,
             create_new_chat,

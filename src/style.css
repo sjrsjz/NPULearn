@@ -3282,35 +3282,114 @@ html[data-theme="dark"] .thinking-content {
     padding: 1px 4px;
     border-radius: 3px;
 }
-
-
 .model-selector {
     position: relative;
     display: flex;
     justify-content: flex-end;
-    /* 内容右对齐 */
     align-items: center;
     margin-left: auto;
     background-color: var(--card-bg);
     width: auto;
-    /* 确保宽度自适应 */
     flex-shrink: 0;
-    /* 防止被压缩 */
     border: none;
 }
+
 .model-selector select {
-    border: none;
+    border: 1px solid var(--border-color);
     outline: none;
     background: var(--card-bg);
     color: var(--text-color);
-    padding: 8px 12px;
-    border-radius: 4px;
+    padding: 10px 36px 10px 14px;
+    border-radius: var(--radius);
     cursor: pointer;
     font-size: var(--font-size-base);
-    appearance: auto;
-    /* 确保显示原生下拉箭头 */
+    font-weight: 500;
+    appearance: none;
+    position: relative;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-sm);
+    min-width: 140px;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px;
 }
 
 .model-selector select:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+    background-color: var(--card-bg);
+}
+
+.model-selector select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    background-color: var(--card-bg);
+}
+
+.model-selector select:active {
+    transform: translateY(1px);
+}
+
+/* 暗色主题适配 */
+html[data-theme="dark"] .model-selector select {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+}
+
+html[data-theme="dark"] .model-selector select:hover {
+    border-color: var(--light-primary-color);
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.1);
+}
+
+html[data-theme="dark"] .model-selector select:focus {
+    border-color: var(--light-primary-color);
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+}
+
+/* 自定义下拉选项样式（部分浏览器支持） */
+.model-selector select option {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+}
+
+.model-selector select option:hover {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.model-selector select option:checked {
+    background-color: var(--primary-color);
+    color: white;
+    font-weight: 600;
+}
+
+/* 添加一个容器包装器，用于可能的未来扩展 */
+.model-selector-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .model-selector select {
+        min-width: 120px;
+        padding: 8px 32px 8px 12px;
+        font-size: calc(var(--font-size-base) - 1px);
+        background-size: 14px;
+        background-position: right 10px center;
+    }
+}
+
+/* 加载状态样式（如果需要） */
+.model-selector select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
     background-color: rgba(0, 0, 0, 0.05);
+}
+
+html[data-theme="dark"] .model-selector select:disabled {
+    background-color: rgba(255, 255, 255, 0.05);
 }

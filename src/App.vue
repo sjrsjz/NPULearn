@@ -324,6 +324,15 @@ async function setupStreamListeners() {
       requestAnimationFrame(() => {
         if (finalUpdateId === latestUpdateId) {
           updateChatContent(chatContent);
+          nextTick(() => {
+            invoke("get_chat_history_items").then((historyItems: ChatHistory[]) => {
+              chatHistory.value = historyItems;
+              console.log("聊天历史已更新:", chatHistory.value);
+            }).catch(error => {
+              console.error("获取聊天历史失败:", error);
+              showNotification("获取聊天历史失败", "error");
+            });
+          });
         }
       });
     } catch (error) {
@@ -411,7 +420,7 @@ function setupActionButtons() {
           isStreaming.value = true;
 
           // 调用后端重新生成消息
-          await invoke("regenerate_message", { messageIndex });
+          await invoke("regenerate_message", { messageIndex, keyType: selectedModel.value });
 
           // 处理将在事件监听器中完成
         } catch (error) {
@@ -1182,7 +1191,7 @@ async function regenerateCurrentMessage() {
       isStreaming.value = true;
 
       // 调用后端重新生成消息
-      await invoke("regenerate_message", { messageIndex: messageContextMenuIndex.value });
+      await invoke("regenerate_message", { messageIndex: messageContextMenuIndex.value, keyType: selectedModel.value });
 
       // 处理将在事件监听器中完成
     } catch (error) {
@@ -1282,6 +1291,7 @@ async function submitDelete() {
 
     // 如果当前显示的就是被删除的对话，则清空显示内容
     // 检查当前活跃的对话ID是否与被删除的ID相同
+    await loadChatHistory();
     const currentId = chatHistory.value.find(item => item.id === currentChatId.value)?.id;
     if (currentId === chatToDeleteId.value) {
       updateChatContent([]);

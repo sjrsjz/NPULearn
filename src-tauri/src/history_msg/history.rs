@@ -78,7 +78,7 @@ impl ChatMessage {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub(crate) struct ChatHistory {
     pub(crate) id: u32,
-    pub(crate) title: String,
+    pub(crate) title: Option<String>,
     pub(crate) time: String,
     pub(crate) content: Vec<ChatMessage>,
 }
@@ -151,12 +151,58 @@ pub fn load_history() -> Result<HashMap<u32, ChatHistory>, String> {
     }
 
     match serde_json::from_str::<HashMap<u32, ChatHistory>>(&contents) {
-        Ok(chat_history) => Ok(chat_history),
+        Ok(chat_history) => {
+            // 替换原始标题
+            let mut updated_history = HashMap::new();
+            for (id, mut history) in chat_history {
+                let new_title = history
+                    .title
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or(get_title_from_history(&history));
+                history.title = Some(new_title);
+                updated_history.insert(id, history);
+            }
+            Ok(updated_history)
+        }
         Err(e) => {
             println!("Failed to parse JSON: {}", e);
             Err(format!("Failed to parse chat history: {}", e))
         }
     }
+}
+
+fn escape_title(title: &str) -> String {
+    title
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
+        .trim() // 去除首尾空白字符
+        .to_string()
+}
+
+pub fn get_title_from_history(history: &ChatHistory) -> String {
+    if let Some(title) = &history.title {
+        return escape_title(title);
+    }
+    // 查找 `<|start_title|>` 和 `<|end_title|>` 标记之间的内容
+    let start_tag = "<|start_title|>";
+    let end_tag = "<|end_title|>";
+    for message in history.content.iter().rev() {
+        if let Some(start_index) = message.content.find(start_tag) {
+            if let Some(end_index) = message.content.find(end_tag) {
+                if end_index > start_index + start_tag.len() {
+                    // 提取标题内容
+                    let title = &message.content[start_index + start_tag.len()..end_index];
+                    return escape_title(title);
+                }
+            }
+        }
+    }
+    // 如果没有找到标题，返回默认标题
+    escape_title(&format!("未命名对话 - {}", history.id))
 }
 
 // #[tauri::command]
