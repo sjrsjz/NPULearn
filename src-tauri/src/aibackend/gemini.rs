@@ -69,7 +69,7 @@ pub struct GeminiChat {
     tools: Vec<Tool>, // Consider if this needs to be stored if tools are passed per call
 
     chat_id: u32,  // 用于唯一标识聊天会话
-    title: String, // 聊天标题
+    title: Option<String>, // 聊天标题
     time: String,  // 聊天时间
 }
 
@@ -432,7 +432,7 @@ impl GeminiChat {
             last_prompt: None,
             tools: Vec::new(),
             chat_id: 0,                    // 初始化为0或其他默认值
-            title: "New Chat".to_string(), // 初始化标题
+            title: None, // 初始化标题
             time: "".to_string(),          // 初始化时间
         }
     }

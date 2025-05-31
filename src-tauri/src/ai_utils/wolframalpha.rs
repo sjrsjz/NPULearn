@@ -13,6 +13,7 @@ use url::Url;
 
 // 修改错误枚举中的 HttpError 变体
 #[derive(Debug)]
+
 pub enum WolframAlphaError {
     WebSocketError(String),
     JsonError(String),

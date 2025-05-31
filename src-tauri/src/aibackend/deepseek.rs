@@ -1,6 +1,6 @@
 use crate::aibackend::interface::AIChat;
 use crate::aibackend::openai_types::{
-    ChatCompletionMessage, Content, MessageRole, Tool, ToolCall, ChatCompletionRequest, 
+    ChatCompletionMessage, Content, MessageRole, Tool, ToolCall, 
     ChatCompletionResponse, ChatCompletionStreamResponse,
 };
 use crate::aibackend::template::{self, cot_template, COT, TypesetInfo};
@@ -73,7 +73,7 @@ pub struct DeepSeekChat {
     tools: Vec<Tool>,
 
     chat_id: u32,
-    title: String,
+    title: Option<String>,
     time: String,
 }
 
@@ -171,6 +171,7 @@ where
     Ok(full_response)
 }
 
+#[allow(dead_code)]
 impl DeepSeekChat {
     pub fn new() -> Self {
         DeepSeekChat {
@@ -186,7 +187,7 @@ impl DeepSeekChat {
             last_prompt: None,
             tools: Vec::new(),
             chat_id: 0,
-            title: "New Chat".to_string(),
+            title: None,
             time: "".to_string(),
         }
     }

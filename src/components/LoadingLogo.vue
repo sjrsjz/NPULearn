@@ -376,7 +376,8 @@ onUnmounted(() => {
     <Transition name="fade">
         <div v-if="visible" class="loading-logo-container" :class="{ 'fade-out': !show }">
             <div class="logo-wrapper">
-                <img src="../assets/logo.png" alt="Logo" class="logo-icon" :class="{ 'fade-in': phase === 'rotating' || phase === 'exiting' }" />
+                <img src="../assets/npulearn.png" alt="Logo" class="logo-icon"
+                    :class="{ 'fade-in': phase === 'rotating' || phase === 'exiting' }" />
                 <div class="logo">
                     <div class="particles-container">
                         <div v-for="(particle, index) in particles" :key="index" class="particle" :style="{

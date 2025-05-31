@@ -195,16 +195,7 @@ html[data-theme="dark"] .pintora-container {
   margin-bottom: 16px;
   font-weight: 600;
   line-height: 1.25;
-  color: #111827;
-}
-
-html[data-theme="dark"] .markdown-body h1,
-html[data-theme="dark"] .markdown-body h2,
-html[data-theme="dark"] .markdown-body h3,
-html[data-theme="dark"] .markdown-body h4,
-html[data-theme="dark"] .markdown-body h5,
-html[data-theme="dark"] .markdown-body h6 {
-  color: #f1f5f9;
+  color: var(--text-color);
 }
 
 .markdown-body h1 {
@@ -284,7 +275,7 @@ html[data-theme="dark"] .markdown-body img {
 }
 
 .custom-titlebar {
-    height: 32px;
+    height: 36px;
     background-color: var(--card-bg);
     display: flex;
     align-items: center;
@@ -484,24 +475,7 @@ body {
     transition: opacity 0.3s ease;
 }
 
-/* 响应式设计调整 */
-@media (min-width: 768px) {
-    .history-sidebar {
-        transform: translateX(0);
-        position: relative;
-        box-shadow: none;
-        top: 0;
-        /* 在大屏幕上始终从顶部开始 */
-    }
 
-    .chat-container {
-        margin-left: 0;
-        width: calc(100% - var(--sidebar-width));
-        /* 大屏幕非移动设备下，如果标题栏存在，需要减去其高度 */
-        height: calc(100vh - 32px);
-    }
-
-}
 
 .history-open {
     transform: translateX(0);
@@ -797,6 +771,33 @@ body {
     align-items: center;
     height: 100%;
     /* 填充父容器 */
+    flex: 1; /* 让标题占据剩余空间，推动右侧元素向右 */
+}
+
+.model-selector {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+}
+
+.model-selector select {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    font-size: var(--font-size-sm);
+    outline: none;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.model-selector select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.model-selector select:hover {
+    border-color: var(--text-secondary);
 }
 
 .toggle-history {
@@ -960,7 +961,7 @@ chat-messages .scoped-content {
     /* 保证至少有输入框的高度 */
     max-height: 150px;
     /* 限制最大高度，例如约5行 */
-    height: 48px;
+    height: 40px;
     /* 初始高度设为 min-height */
 }
 
@@ -972,7 +973,7 @@ chat-messages .scoped-content {
 .send-button {
     width: 40px;
     height: 40px;
-    transform: translateY(-4px);
+    transform: translateY(-8px) ;
     background-color: var(--primary-color);
     color: white;
     border: none;
@@ -986,14 +987,6 @@ chat-messages .scoped-content {
     flex-shrink: 0;
     /* 防止按钮被压缩 */
 }
-
-.send-button:hover:not(:disabled) {
-    /* 仅在非禁用状态下应用 hover 效果 */
-    background-color: var(--primary-hover);
-    transform: scale(1.08);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-}
-
 .send-button.streaming {
     background-color: #2563eb;
 }
@@ -1016,28 +1009,119 @@ send-icon {
     }
 }
 
-chat-messages .mjx-chtml {
+/* 文件上传功能样式 */
+.input-container {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 4px;
+    transition: var(--transition);
+    box-shadow: var(--shadow-sm);
+}
+
+.input-container:focus-within {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+}
+
+.upload-button {
+    width: 36px;
+    height: 48px;
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: calc(var(--radius) - 2px);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+
+.upload-button:hover:not(:disabled) {
+    background-color: var(--border-color);
+    color: var(--primary-color);
+}
+
+
+.upload-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.upload-button svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 2;
+}
+
+/* 更新 message-input 样式以适配新容器 */
+.input-container .message-input {
+    border: none;
+    box-shadow: none;
+    background-color: transparent;
+    padding: 12px 8px 12px 4px;
+    margin: 0;
+}
+
+.input-container .message-input:focus {
+    border: none;
+    box-shadow: none;
+}
+
+.chat-messages .mjx-chtml {
     margin: 0.5em 0;
     font-size: var(--font-size-lg);
 }
 
-chat-messages .mjx-math {
+.chat-messages .mjx-math {
     max-width: 100%;
-    /* 确保不超过容器宽度 */
+    /* 限制最大宽度 */
     overflow-x: auto;
     /* 水平溢出时显示滚动条 */
     overflow-y: hidden;
     /* 隐藏垂直滚动条 */
     display: block;
-    /* 确保 max-width 生效 */
-    padding-bottom: 4px;
-    /* 为滚动条留出一点空间 */
+    /* 确保 overflow 生效 */
+    padding-bottom: 8px;
+    /* 为滚动条留出足够空间 */
     font-size: var(--font-size-lg);
+    /* 强制显示滚动条样式 */
+    scrollbar-width: thin;
+    /* Firefox */
 }
 
-chat-messages .mjx-chtml.MJXc-display {
+.chat-messages .mjx-math::-webkit-scrollbar {
+    height: 6px;
+    /* 设置滚动条高度 */
+}
+
+.chat-messages .mjx-math::-webkit-scrollbar-track {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.chat-messages .mjx-math::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: 3px;
+}
+
+.chat-messages .mjx-math::-webkit-scrollbar-thumb:hover {
+    background: var(--text-color);
+}
+
+.chat-messages .mjx-chtml.MJXc-display {
     margin: 1em 0;
     padding: 0.5em 0;
+    max-width: 100%;
+    /* 限制最大宽度而不是固定宽度 */
     overflow-x: auto;
     /* 水平溢出时显示滚动条 */
     overflow-y: hidden;
@@ -1045,17 +1129,36 @@ chat-messages .mjx-chtml.MJXc-display {
     text-align: center;
     display: block;
     /* 确保 overflow 生效 */
-    max-width: 100%;
-    /* 确保不超过容器宽度 */
-    padding-bottom: 4px;
-    /* 为滚动条留出一点空间 */
+    padding-bottom: 8px;
+    /* 为滚动条留出足够空间 */
+    /* 强制显示滚动条样式 */
+    scrollbar-width: thin;
+    /* Firefox */
 }
 
-chat-messages .MJX-TEX {
+.chat-messages .mjx-chtml.MJXc-display::-webkit-scrollbar {
+    height: 6px;
+}
+
+.chat-messages .mjx-chtml.MJXc-display::-webkit-scrollbar-track {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.chat-messages .mjx-chtml.MJXc-display::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: 3px;
+}
+
+.chat-messages .mjx-chtml.MJXc-display::-webkit-scrollbar-thumb:hover {
+    background: var(--text-color);
+}
+
+.chat-messages .MJX-TEX {
     text-align: center;
 }
 
-chat-messages .mjx-container {
+.chat-messages .mjx-container {
     padding: 6px 0;
     max-width: 100%;
     /* 确保容器不超过父元素 */
@@ -1064,9 +1167,87 @@ chat-messages .mjx-container {
     overflow-y: hidden;
     display: block;
     /* 确保 overflow 生效 */
-    padding-bottom: 4px;
-    /* 为滚动条留出一点空间 */
+    padding-bottom: 8px;
+    /* 为滚动条留出足够空间 */
     font-size: var(--font-size-lg);
+    /* 强制显示滚动条样式 */
+    scrollbar-width: thin;
+    /* Firefox */
+}
+
+.chat-messages .mjx-container::-webkit-scrollbar {
+    height: 6px;
+}
+
+.chat-messages .mjx-container::-webkit-scrollbar-track {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.chat-messages .mjx-container::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: 3px;
+}
+
+.chat-messages .mjx-container::-webkit-scrollbar-thumb:hover {
+    background: var(--text-color);
+}
+
+/* MathJax SVG 相关样式优化 */
+.chat-messages .mjx-container svg {
+    max-width: none !important;
+    /* 允许SVG超出容器宽度 */
+    height: auto;
+    display: block;
+}
+
+/* 确保MathJax容器的父元素支持溢出滚动 */
+.chat-messages .message-content {
+    overflow-x: visible;
+    /* 确保消息内容容器不会裁剪溢出内容 */
+}
+
+/* 为长公式添加特殊处理 */
+.chat-messages mjx-container[display="true"] {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    max-width: 100%;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
+    /* 强制滚动条始终可见（仅在内容溢出时） */
+    overscroll-behavior-x: contain;
+}
+
+/* 确保所有MathJax容器都能正确处理溢出 */
+.chat-messages mjx-container,
+.chat-messages .mjx-container,
+.chat-messages .mjx-math,
+.chat-messages .mjx-chtml {
+    /* 强制滚动条在需要时显示 */
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    /* 防止内容被压缩 */
+    min-width: 0;
+    /* 确保父容器约束生效 */
+    max-width: 100%;
+}
+
+.chat-messages mjx-container[display="true"]::-webkit-scrollbar {
+    height: 6px;
+}
+
+.chat-messages mjx-container[display="true"]::-webkit-scrollbar-track {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+.chat-messages mjx-container[display="true"]::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: 3px;
+}
+
+.chat-messages mjx-container[display="true"]::-webkit-scrollbar-thumb:hover {
+    background: var(--text-color);
 }
 
 /* 通知样式 */
@@ -1074,15 +1255,21 @@ chat-messages .mjx-container {
     position: fixed;
     top: 16px;
     right: 16px;
+    left: 16px;
     padding: 12px 16px;
     border-radius: var(--radius);
     background-color: var(--card-bg);
     box-shadow: var(--shadow);
     z-index: 1000;
     max-width: 400px;
+    width: auto;
+    margin-left: auto;
     animation: notification-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     border-left: 4px solid;
     color: var(--text-color);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    box-sizing: border-box;
 }
 
 .notification.success {
@@ -1215,8 +1402,64 @@ chat-messages a:active {
     .chat-content {
         padding: 16px 12px;
     }
+
+    /* 移动端文件上传按钮优化 */
+    .upload-button {
+        width: 32px;
+        height: 48px;
+    }
+
+    .upload-button svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .input-container {
+        gap: 6px;
+        padding: 3px;
+    }
+
+    .input-container .message-input {
+        padding: 10px 6px 10px 2px;
+        min-height: 44px;
+        height: 44px;
+    }
 }
 
+/* 响应式通知样式 */
+@media (max-width: 768px) {
+    .notification {
+        top: 12px;
+        right: 12px;
+        left: 12px;
+        max-width: none;
+        width: calc(100vw - 24px);
+        margin: 0;
+        padding: 10px 14px;
+        font-size: calc(var(--font-size-base) - 1px);
+    }
+    
+    .notification-content {
+        gap: 6px;
+    }
+    
+    .notification-content svg {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .notification {
+        top: 8px;
+        right: 8px;
+        left: 8px;
+        width: calc(100vw - 16px);
+        padding: 8px 12px;
+        font-size: calc(var(--font-size-base) - 2px);
+    }
+}
 
 /* 自定义滚动条样式 */
 ::-webkit-scrollbar {
@@ -1273,7 +1516,7 @@ chat-messages a:active {
 }
 
 .animated-button:not(:disabled):hover {
-    transform: scale(1.08);
+    transform: scale(1.08) translateY(-10px);
     box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
 }
 
@@ -1338,13 +1581,12 @@ chat-messages a:active {
 }
 
 /* 流式输出时禁用相关样式 */
-.send-button:disabled {
+.send-button:active {
     background-color: #93c5fd;
     cursor: not-allowed;
     transform: scale(1);
-    transform: translateY(-4px);
+    transform: translateY(-8px);
     box-shadow: none;
-    opacity: 0.7;
 }
 
 /* 流式输出时禁用的按钮和链接 */
@@ -1895,7 +2137,7 @@ chat-messages a:active {
 }
 
 :root[data-theme="dark"] .code-copy-button:hover,
-:root[data-theme="system"] .code-copy-button:hover {
+:root[data-theme="dark"] .code-copy-button:hover {
     background-color: rgba(255, 255, 255, 0.2);
     color: var(--dark-text-color);
 }
@@ -1949,7 +2191,7 @@ chat-messages a:active {
 
 /* 深色模式下菜单hover效果 */
 :root[data-theme="dark"] .context-menu-item:hover,
-:root[data-theme="system"] .context-menu-item:hover {
+:root[data-theme="dark"] .context-menu-item:hover {
     background-color: rgba(255, 255, 255, 0.1);
 }
 
@@ -2200,7 +2442,7 @@ chat-messages a:active {
 
 /* 暗色模式适配 */
 :root[data-theme="dark"] .tool-api-param,
-:root[data-theme="system"] .tool-api-param {
+:root[data-theme="dark"] .tool-api-param {
     background-color: rgba(255, 255, 255, 0.1);
 }
 
@@ -2386,6 +2628,12 @@ chat-messages a:active {
     padding: 10px 15px;
 }
 
+@media screen and (max-width: 768px) {
+    .special-api-call {
+        padding: 0px 0px;
+    }    
+}
+
 .mini-tech-details {
     width: auto;
     border: none;
@@ -2545,27 +2793,24 @@ chat-messages a:active {
 
 /* 暗色主题适配 */
 :root[data-theme="dark"] .wolfram-item-code code,
-:root[data-theme="system"] .wolfram-item-code code {
-    background-color: rgba(255, 255, 255, 0.1);
+:root[data-theme="dark"] .wolfram-related-queries,
+:root[data-theme="system"] .wolfram-item-code code,
+:root[data-theme="system"] .wolfram-related-queries {
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 /* Markdown 代码块样式 */
 .markdown-body pre {
-  background-color: #f6f8fa;
+  background-color: var(--card-bg);
   border-radius: 6px;
   margin: 16px 0;
   padding: 16px;
   overflow-x: auto; /* 确保代码块水平滚动 */
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e1e4e8;
+  border: 1px solid var(--border-color);
   position: relative;
 }
 
-html[data-theme="dark"] .markdown-body pre {
-  background-color: #1e293b;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-  border: 1px solid #334155;
-}
 
 .markdown-body code {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
@@ -3246,12 +3491,12 @@ html[data-theme="dark"] .thinking-content {
 }
 
 :root[data-theme="dark"] .json-details summary,
-:root[data-theme="system"] .json-details summary {
+:root[data-theme="dark"] .json-details summary {
     color: var(--dark-text-color);
 }
 
 :root[data-theme="dark"] .json-details summary::before,
-:root[data-theme="system"] .json-details summary::before {
+:root[data-theme="dark"] .json-details summary::before {
     color: var(--dark-text-secondary);
 }
 
@@ -3263,7 +3508,7 @@ html[data-theme="dark"] .thinking-content {
 }
 
 :root[data-theme="dark"] .json-details summary:hover,
-:root[data-theme="system"] .json-details summary:hover {
+:root[data-theme="dark"] .json-details summary:hover {
     background-color: rgba(255, 255, 255, 0.05);
 }
 
@@ -3283,6 +3528,7 @@ html[data-theme="dark"] .thinking-content {
     border-radius: 3px;
 }
 
+<<<<<<< HEAD
 
 /* new add code */
 
@@ -3322,4 +3568,178 @@ html[data-theme="dark"] .thinking-content {
   padding: 16px;
   background: var(--bg-color);
   border-top: 1px solid var(--border-color);
+=======
+.model-selector {
+    position: relative;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-left: auto;
+    background-color: var(--card-bg);
+    width: auto;
+    flex-shrink: 0;
+    border: none;
+}
+
+.model-selector select {
+    border: none;
+    /* 完全移除边框 */
+    outline: none;
+    background: var(--card-bg);
+    color: var(--text-color);
+    padding: 10px 36px 10px 14px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: var(--font-size-base);
+    font-weight: 500;
+    appearance: none;
+    position: relative;
+    transition: all 0.2s ease;
+    min-width: 140px;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23374151' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px;
+}
+
+.model-selector select:hover {
+    border: none;
+    background-color: var(--card-bg);
+}
+
+.model-selector select:focus {
+    border: none;
+    background-color: var(--card-bg);
+}
+
+.model-selector select:active {
+    transform: translateY(1px);
+}
+
+/* 自定义下拉选项样式（部分浏览器支持） */
+.model-selector select option {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+}
+
+.model-selector select option:hover {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.model-selector select option:checked {
+    background-color: var(--primary-color);
+    color: white;
+    font-weight: 600;
+}
+
+/* 添加一个容器包装器，用于可能的未来扩展 */
+.model-selector-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .model-selector select {
+        min-width: 120px;
+        padding: 8px 32px 8px 12px;
+        font-size: calc(var(--font-size-base) - 1px);
+        background-size: 14px;
+        background-position: right 10px center;
+    }
+}
+
+/* 加载状态样式（如果需要） */
+.model-selector select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+html[data-theme="dark"] .model-selector select:disabled {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* 悬浮滚动到底部按钮样式 */
+.scroll-to-bottom-button {
+    position: fixed;
+    bottom: 100px;
+    right: 20px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background-color: rgba(59, 130, 246, 0.8);
+    /* 半透明主色调 */
+    color: white;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 10;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.scroll-to-bottom-button:hover {
+    background-color: rgba(37, 99, 235, 0.5);
+    /* 悬停时更不透明 */
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+}
+
+.scroll-to-bottom-button:active {
+    background-color: rgba(29, 78, 216, 0.35);
+    /* 按下时半透明 */
+    transform: translateY(0);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.scroll-to-bottom-button svg {
+    transition: transform 0.2s ease;
+}
+
+.scroll-to-bottom-button:hover svg {
+    transform: translateY(1px);
+}
+
+/* 暗色主题适配 */
+html[data-theme="dark"] .scroll-to-bottom-button {
+    background-color: rgba(96, 165, 250, 0.5);
+    /* 暗色主题下的半透明蓝色 */
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme="dark"] .scroll-to-bottom-button:hover {
+    background-color: rgba(59, 130, 246, 0.9);
+    /* 悬停时更不透明 */
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+html[data-theme="dark"] .scroll-to-bottom-button:active {
+    background-color: rgba(37, 99, 235, 0.25);
+    /* 按下时半透明 */
+}
+
+/* 按钮出现/消失的过渡动画 */
+.scroll-button-enter-active,
+.scroll-button-leave-active {
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.scroll-button-enter-from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.8);
+}
+
+.scroll-button-leave-to {
+    opacity: 0;
+    transform: translateY(20px) scale(0.8);
+>>>>>>> 203f1aa07b5bfe14fe07380aa20f0b97c54c1287
 }

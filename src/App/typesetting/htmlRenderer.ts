@@ -57,11 +57,9 @@ async function renderHTMLContainers(container: HTMLElement): Promise<void> {
                     iframe.className = 'html-iframe';
 
                     // 只允许脚本，不允许同源，提高安全性
-                    iframe.setAttribute('sandbox', 'allow-scripts');
-
-                    iframe.style.width = '100%';
+                    iframe.setAttribute('sandbox', 'allow-scripts');                    iframe.style.width = '100%';
                     iframe.style.border = 'none';
-                    iframe.style.overflow = 'hidden'; // 防止出现滚动条
+                    iframe.style.overflow = 'auto'; // 允许滚动条（垂直和水平）
                     iframe.title = '隔离的HTML内容';
 
                     // 添加iframe到容器
@@ -86,9 +84,8 @@ async function renderHTMLContainers(container: HTMLElement): Promise<void> {
                                             <head>
                                                 <meta charset="UTF-8">
                                                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                                                <base target="_blank">
-                                                <style>
-                                                    /* 重置所有样式，防止溢出 */
+                                                <base target="_blank">                                                <style>
+                                                    /* 重置所有样式，智能处理溢出 */
                                                     html, body {
                                                         margin: 0;
                                                         padding: 10px;
@@ -97,34 +94,41 @@ async function renderHTMLContainers(container: HTMLElement): Promise<void> {
                                                         background-color: transparent;
                                                         width: 100%;
                                                         height: auto;
-                                                        overflow-x: hidden;
+                                                        overflow: visible; /* 允许内容正常溢出，由iframe处理滚动 */
                                                     }
                                                     
-                                                    /* 限制所有元素最大宽度 */
+                                                    /* 元素基础样式 */
                                                     * {
-                                                        max-width: 100%;
                                                         box-sizing: border-box;
                                                     }
                                                     
+                                                    /* 图片和视频响应式 */
                                                     img, video {
                                                         max-width: 100%;
                                                         height: auto;
                                                     }
                                                     
+                                                    /* 代码块样式 */
                                                     pre {
                                                         overflow-x: auto;
                                                         background-color: #f5f5f5;
                                                         padding: 10px;
                                                         border-radius: 5px;
-                                                        max-width: 100%;
-                                                        white-space: pre-wrap;
+                                                        white-space: pre;
+                                                        word-wrap: normal;
                                                     }
                                                     
-                                                    /* 防止内容溢出 */
+                                                    /* 表格样式 */
                                                     table {
-                                                        max-width: 100%;
                                                         overflow-x: auto;
-                                                        display: block;
+                                                        border-collapse: collapse;
+                                                        width: auto;
+                                                        min-width: 100%;
+                                                    }
+                                                    
+                                                    /* 宽内容处理 */
+                                                    .wide-content {
+                                                        overflow-x: auto;
                                                     }
                                                 </style>
                                             </head>
@@ -133,35 +137,66 @@ async function renderHTMLContainers(container: HTMLElement): Promise<void> {
                                         `;
 
                     // 使用srcdoc属性
-                    iframe.srcdoc = htmlDoc;
-
-                    // 调整iframe高度以适应内容
+                    iframe.srcdoc = htmlDoc;                    // 调整iframe高度以适应内容，支持水平滚动
                     iframe.onload = () => {
-                      try {
-                        const resizeObserver = new ResizeObserver(() => {
+                      try {                        // 设置初始高度和滚动处理
+                        const updateIframeSize = () => {
                           if (iframe.contentWindow && iframe.contentDocument?.body) {
-                            const height = iframe.contentDocument.body.scrollHeight;
-                            iframe.style.height = (height + 20) + 'px'; // 添加一些额外空间
+                            // 获取内容的实际高度和宽度
+                            const bodyHeight = iframe.contentDocument.body.scrollHeight;
+                            const bodyWidth = iframe.contentDocument.body.scrollWidth;
+                            
+                            // 设置最大高度限制（比如500px），超过则显示滚动条
+                            const maxHeight = 1024;
+                            const minHeight = 200;
+                            
+                            if (bodyHeight <= maxHeight) {
+                              // 内容不高，设置为实际高度加padding
+                              iframe.style.height = Math.max(bodyHeight + 50, minHeight) + 'px';
+                              iframe.style.overflowY = 'hidden';
+                            } else {
+                              // 内容太高，设置固定高度并显示滚动条
+                              iframe.style.height = maxHeight + 'px';
+                              iframe.style.overflowY = 'auto';
+                            }
+                            
+                            // 水平滚动处理
+                            if (bodyWidth > iframe.offsetWidth) {
+                              iframe.style.overflowX = 'auto';
+                            } else {
+                              iframe.style.overflowX = 'hidden';
+                            }
                           }
+                        };
+
+                        const resizeObserver = new ResizeObserver(() => {
+                          updateIframeSize();
                         });
 
                         if (iframe.contentDocument?.body) {
-                          // 初始设置高度
-                          iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px';
+                          // 初始设置
+                          updateIframeSize();
+                          
                           // 观察高度变化
                           resizeObserver.observe(iframe.contentDocument.body);
 
                           // 添加事件监听器检测内容变化
                           const mutationObserver = new MutationObserver(() => {
-                            if (iframe.contentDocument?.body) {
-                              iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px';
-                            }
+                            updateIframeSize();
                           });
 
                           mutationObserver.observe(iframe.contentDocument.body, {
                             childList: true,
-                            subtree: true
+                            subtree: true,
+                            attributes: true,
+                            attributeOldValue: true
                           });
+                          
+                          // 监听图片和其他资源加载完成
+                          iframe.contentDocument.addEventListener('load', updateIframeSize, true);
+                          
+                          // 延迟确保所有内容都已渲染
+                          setTimeout(updateIframeSize, 500);
                         }
                       } catch (resizeError) {
                         console.error("设置iframe高度失败:", resizeError);
@@ -324,9 +359,8 @@ async function handleHTMLRender(apiInfo: any) {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <base target="_blank">
-                <style>
-                    /* 重置所有样式，防止溢出 */
+                <base target="_blank">                <style>
+                    /* 重置所有样式，智能处理溢出 */
                     html, body {
                         margin: 0;
                         padding: 10px;
@@ -335,80 +369,99 @@ async function handleHTMLRender(apiInfo: any) {
                         background-color: white;
                         width: 100%;
                         height: auto;
-                        overflow-x: hidden;
+                        overflow: visible; /* 允许内容正常溢出，由iframe处理滚动 */
                     }
                     
-                    /* 限制所有元素最大宽度 */
+                    /* 元素基础样式 */
                     * {
-                        max-width: 100%;
                         box-sizing: border-box;
                     }
                     
+                    /* 图片和视频响应式 */
                     img, video {
                         max-width: 100%;
                         height: auto;
                     }
                     
+                    /* 代码块样式 */
                     pre {
                         overflow-x: auto;
                         background-color: #f5f5f5;
                         padding: 10px;
                         border-radius: 5px;
-                        max-width: 100%;
-                        white-space: pre-wrap;
+                        white-space: pre;
+                        word-wrap: normal;
                     }
                     
-                    /* 防止内容溢出 */
+                    /* 表格样式 */
                     table {
-                        max-width: 100%;
                         overflow-x: auto;
-                        display: block;
+                        border-collapse: collapse;
+                        width: auto;
+                        min-width: 100%;
+                    }
+                    
+                    /* 宽内容处理 */
+                    .wide-content {
+                        overflow-x: auto;
                     }
                 </style>
             </head>
             <body>${processedContent}</body>
             </html>
-        `;
-
-    // 添加iframe以渲染HTML内容
-    htmlStructure += `<iframe class="html-iframe" sandbox="allow-scripts" style="width: 100%; border: none; overflow: hidden;" title="隔离的HTML内容" srcdoc="${htmlDoc.replace(/"/g, '&quot;')}" onload="setTimeout(() => {
+        `;    // 添加iframe以渲染HTML内容
+    htmlStructure += `<iframe class="html-iframe" sandbox="allow-scripts" style="width: 100%; border: none; overflow: auto;" title="隔离的HTML内容" srcdoc="${htmlDoc.replace(/"/g, '&quot;')}" onload="setTimeout(() => {
     try {
-        if (this.contentDocument && this.contentDocument.body) {
-            // 增加额外空间到40px
-            this.style.height = (this.contentDocument.body.scrollHeight + 40) + 'px';
-            
-            const resizeObserver = new ResizeObserver(() => {
-                if (this.contentDocument && this.contentDocument.body) {
-                    this.style.height = (this.contentDocument.body.scrollHeight + 40) + 'px';
+        if (this.contentDocument && this.contentDocument.body) {            // 设置高度和滚动处理的函数
+            const updateSize = () => {
+                const bodyHeight = this.contentDocument.body.scrollHeight;
+                const bodyWidth = this.contentDocument.body.scrollWidth;
+                
+                // 设置最大高度限制，超过则显示滚动条
+                const maxHeight = 1000;
+                const minHeight = 200;
+                
+                if (bodyHeight <= maxHeight) {
+                    // 内容不高，设置为实际高度加padding
+                    this.style.height = Math.max(bodyHeight + 50, minHeight) + 'px';
+                    this.style.overflowY = 'hidden';
+                } else {
+                    // 内容太高，设置固定高度并显示滚动条
+                    this.style.height = maxHeight + 'px';
+                    this.style.overflowY = 'auto';
                 }
-            });
+                
+                // 水平滚动处理
+                if (bodyWidth > this.offsetWidth) {
+                    this.style.overflowX = 'auto';
+                } else {
+                    this.style.overflowX = 'hidden';
+                }
+            };
             
+            // 初始设置
+            updateSize();
+            
+            const resizeObserver = new ResizeObserver(updateSize);
             resizeObserver.observe(this.contentDocument.body);
             
-            const mutationObserver = new MutationObserver(() => {
-                if (this.contentDocument && this.contentDocument.body) {
-                    this.style.height = (this.contentDocument.body.scrollHeight + 40) + 'px';
-                }
-            });
-            
+            const mutationObserver = new MutationObserver(updateSize);
             mutationObserver.observe(this.contentDocument.body, {
                 childList: true,
-                subtree: true
+                subtree: true,
+                attributes: true,
+                attributeOldValue: true
             });
             
             // 监听图片加载
             this.contentDocument.addEventListener('load', function(e) {
                 if (e.target instanceof HTMLImageElement) {
-                    setTimeout(() => {
-                        this.style.height = (this.contentDocument.body.scrollHeight + 40) + 'px';
-                    }, 100);
+                    setTimeout(updateSize, 100);
                 }
-            }.bind(this), true);
+            }, true);
             
-            // 延迟再次设置高度，确保所有内容都已渲染
-            setTimeout(() => {
-                this.style.height = (this.contentDocument.body.scrollHeight + 40) + 'px';
-            }, 500);
+            // 延迟再次设置，确保所有内容都已渲染
+            setTimeout(updateSize, 500);
         }
     } catch (error) {
         console.error('设置iframe高度失败:', error);

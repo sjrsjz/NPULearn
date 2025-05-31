@@ -58,7 +58,7 @@ async function selectHistory(id: number) {
 async function loadChatHistory() {
     try {
         // 从后端API获取聊天历史列表
-        chatHistory.value = await invoke("get_chat_history");
+        chatHistory.value = await invoke("get_chat_history_items");
         console.log("已加载聊天历史:", chatHistory.value);
         const chatContent = await invoke("get_chat_html") as ChatMessage[];
         AppEvents.updateChatContent(chatContent); // 确保在加载历史后更新内容
