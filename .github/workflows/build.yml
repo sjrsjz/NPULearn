@@ -69,20 +69,42 @@ jobs:
                      (matrix.platform == 'macos-latest' && contains(matrix.args, 'x86_64')) && 'desktop-macos-x64' ||
                      format('desktop-{0}', matrix.platform) }}
           path: |
+            # Windows Artifacts
             src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.sig
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/nsis/*.zip
+            src-tauri/target/release/bundle/nsis/*.zip.sig
+
+            # Linux Artifacts
             src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/deb/*.deb.sig
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
             src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/updater/*.app.tar.gz
-            src-tauri/target/release/bundle/**/*.sig
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig
+
+            # macOS ARM64 Artifacts
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg.sig
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+
+            # macOS x86_64 Artifacts
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg.sig
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
   # 发布 (仅在标签推送时)
   publish:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build-desktop]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to create releases and upload assets
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -94,7 +116,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            desktop-*/*
+            desktop-*/**/* # Changed to recursively find files
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
