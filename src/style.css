@@ -3282,3 +3282,44 @@ html[data-theme="dark"] .thinking-content {
     padding: 1px 4px;
     border-radius: 3px;
 }
+
+
+/* new add code */
+
+.file-upload-button {
+  background: transparent;
+  border: none;
+  color: var(--text-color);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+}
+
+.file-upload-button:hover {
+  background-color: var(--hover-color);
+  transform: translateY(-1px);
+}
+
+.file-upload-button:active {
+  transform: translateY(0);
+}
+
+.file-upload-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.input-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 16px;
+  background: var(--bg-color);
+  border-top: 1px solid var(--border-color);
+}

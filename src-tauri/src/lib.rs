@@ -967,6 +967,8 @@ pub fn run() {
             setting::setting::get_default_settings,
             setting::setting::select_save_directory,
             wolfram_alpha_compute, // 添加新的Wolfram Alpha计算命令
+            //new add code
+
         ])
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -1014,3 +1016,6 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+
+
