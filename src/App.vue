@@ -644,7 +644,8 @@ async function sendStreamMessage() {
   isStreaming.value = true;
   isLoading.value = true;
 
-  console.log("开始流式传输消息，已禁用UML渲染");
+  console.log("开始流式传输消息");
+  scrollToBottom(true, true); // 强制滚动到底部
 
   // 使用 Promise 包装后端调用，但不等待它完成
   invoke("process_message_stream", { message, keyType: selectedModel.value })
@@ -1536,7 +1537,7 @@ async function uploadFile() {
     <div v-if="!isMobile" class="custom-titlebar" data-tauri-drag-region>
       <div class="custom-titlebar" data-tauri-drag-region>
         <div class="app-icon">
-          <img src="./assets/logo.png" alt="NPULearn" />
+          <img src="./assets/npulearn.png" alt="NPULearn" />
         </div>
         <div class="title" data-tauri-drag-region>NPULearn</div>
         <div class="window-controls">
