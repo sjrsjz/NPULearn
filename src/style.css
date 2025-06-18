@@ -3528,47 +3528,6 @@ html[data-theme="dark"] .thinking-content {
     border-radius: 3px;
 }
 
-<<<<<<< HEAD
-
-/* new add code */
-
-.file-upload-button {
-  background: transparent;
-  border: none;
-  color: var(--text-color);
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 8px;
-}
-
-.file-upload-button:hover {
-  background-color: var(--hover-color);
-  transform: translateY(-1px);
-}
-
-.file-upload-button:active {
-  transform: translateY(0);
-}
-
-.file-upload-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.input-form {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 16px;
-  background: var(--bg-color);
-  border-top: 1px solid var(--border-color);
-=======
 .model-selector {
     position: relative;
     display: flex;
@@ -3741,5 +3700,4 @@ html[data-theme="dark"] .scroll-to-bottom-button:active {
 .scroll-button-leave-to {
     opacity: 0;
     transform: translateY(20px) scale(0.8);
->>>>>>> 203f1aa07b5bfe14fe07380aa20f0b97c54c1287
 }

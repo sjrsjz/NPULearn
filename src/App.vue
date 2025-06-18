@@ -1496,13 +1496,6 @@ function confirmDeleteChat() {
   closeChatContextMenu();
 }
 
-<<<<<<< HEAD
-
-
-// new add code
-
-async function selectFile() {
-=======
 function updateModel(event: Event) {
   const newModel = (event.target as HTMLSelectElement).value;
   if (newModel) {
@@ -1515,73 +1508,12 @@ function updateModel(event: Event) {
 
 // 文件上传功能
 async function uploadFile() {
->>>>>>> 203f1aa07b5bfe14fe07380aa20f0b97c54c1287
   if (isStreaming.value) {
     showNotification("请等待当前消息输出完成", "error");
     return;
   }
 
   try {
-<<<<<<< HEAD
-    showNotification("正在选择文件...", "info");
-    
-    // 选择文件
-    const filePath = await invoke("pick_file") as string;
-    
-    if (filePath) {
-      showNotification("正在读取文件...", "info");
-      
-      // 读取文件内容
-      const fileContent = await invoke("read_selected_file", { filePath }) as string;
-      
-      // 将文件内容添加到输入框
-      if (inputMessage.value.trim()) {
-        inputMessage.value += "\n\n" + fileContent;
-      } else {
-        inputMessage.value = fileContent;
-      }
-      
-      // 自动调整输入框高度
-      nextTick(() => {
-        const textarea = document.querySelector('.message-input') as HTMLTextAreaElement;
-        if (textarea) {
-          autoResizeTextarea({ target: textarea } as unknown as Event);
-        }
-      });
-      
-      showNotification("文件已加载", "success");
-    }
-  } catch (error) {
-    console.error("文件选择失败:", error);
-    showNotification("文件选择失败: " + error, "error");
-  }
-}
-
-// 或者直接发送文件内容
-async function selectAndSendFile() {
-  if (isStreaming.value) {
-    showNotification("请等待当前消息输出完成", "error");
-    return;
-  }
-
-  try {
-    showNotification("正在选择文件...", "info");
-    
-    // 直接选择并读取文件
-    const fileContent = await invoke("select_and_read_file") as string;
-    
-    if (fileContent) {
-      // 直接发送文件内容
-      await sendStreamMessageDirect(fileContent);
-      showNotification("文件已发送", "success");
-    }
-  } catch (error) {
-    console.error("文件选择失败:", error);
-    showNotification("文件选择失败: " + error, "error");
-  }
-}
-
-=======
     isLoading.value = true;
     await invoke("upload_file_from_local");
     showNotification("文件上传成功", "success");
@@ -1597,7 +1529,6 @@ async function selectAndSendFile() {
     isLoading.value = false;
   }
 }
->>>>>>> 203f1aa07b5bfe14fe07380aa20f0b97c54c1287
 </script>
 
 <template>
@@ -2015,30 +1946,3 @@ async function selectAndSendFile() {
 }
 </style>
 <style src="./style.css"></style>
-
-
-<!-- new add code -->
-<!-- 在输入区域添加文件上传按钮 -->
-<div class="chat-input-area">
-  <form @submit.prevent="sendStreamMessage" class="input-form">
-    <!-- 添加文件上传按钮 -->
-    <button type="button" @click="selectFile" class="file-upload-button" :disabled="isStreaming" title="上传文件">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
-        <polyline points="14,2 14,8 20,8"></polyline>
-        <line x1="16" y1="13" x2="8" y2="13"></line>
-        <line x1="16" y1="17" x2="8" y2="17"></line>
-        <polyline points="10,9 9,9 8,9"></polyline>
-      </svg>
-    </button>
-    
-    <textarea v-model="inputMessage" placeholder="输入消息... (Ctrl+Enter 发送)" class="message-input animated-input"
-      rows="1" @keydown="handleInputKeydown" @input="autoResizeTextarea"></textarea>
-    
-    <button type="submit" class="send-button animated-button" :disabled="isStreaming"
-      :class="{ 'streaming': isStreaming }">
-      <!-- 现有发送按钮代码 -->
-    </button>
-  </form>
-</div>
-
