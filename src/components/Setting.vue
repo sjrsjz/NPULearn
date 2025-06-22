@@ -40,7 +40,8 @@ const font_size_before_save = ref('medium');
 // 定义 ApiKeyType 枚举
 enum ApiKeyType {
     Gemini = "Gemini",
-    DeepSeek = "DeepSeek"
+    DeepSeek = "DeepSeek",
+    Coze = "Coze"
 }
 
 function get_display_name(key_type: ApiKeyType): string {
@@ -49,6 +50,8 @@ function get_display_name(key_type: ApiKeyType): string {
             return "Gemini";
         case ApiKeyType.DeepSeek:
             return "DeepSeek";
+        case ApiKeyType.Coze:
+            return "Coze";
         default:
             return "未知类型";
     }
@@ -120,7 +123,7 @@ const newApiKey = reactive({
     key_type: ApiKeyType.Gemini
 });
 const isAddingKey = ref(false);
-const apiKeyTypes = Object.values(ApiKeyType);
+const apiKeyTypes = Object.values(ApiKeyType).filter(type => type !== ApiKeyType.Coze);
 const apiKeyConfigFile = 'api_keys.json';
 
 

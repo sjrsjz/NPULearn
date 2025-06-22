@@ -36,27 +36,25 @@ pub fn init(handle: Arc<Box<AppHandle>>, app_data_dir: PathBuf, app_config_dir: 
 pub enum ApiKeyType {
     Gemini,
     DeepSeek,
+    Coze,
 }
 
 #[allow(dead_code)]
-impl ApiKeyType {
-    pub fn to_string(&self) -> String {
+impl ApiKeyType {    pub fn to_string(&self) -> String {
         match self {
             ApiKeyType::Gemini => "Gemini".to_string(),
             ApiKeyType::DeepSeek => "DeepSeek".to_string(),
+            ApiKeyType::Coze => "Coze".to_string(),
         }
-    }
-
-    pub fn from_string(s: &str) -> Option<ApiKeyType> {
+    }    pub fn from_string(s: &str) -> Option<ApiKeyType> {
         match s {
             "Gemini" => Some(ApiKeyType::Gemini),
             "DeepSeek" => Some(ApiKeyType::DeepSeek),
+            "Coze" => Some(ApiKeyType::Coze),
             _ => None,
         }
-    }
-
-    pub fn get_all_types() -> Vec<ApiKeyType> {
-        vec![ApiKeyType::Gemini, ApiKeyType::DeepSeek]
+    }    pub fn get_all_types() -> Vec<ApiKeyType> {
+        vec![ApiKeyType::Gemini, ApiKeyType::DeepSeek, ApiKeyType::Coze]
     }
 }
 

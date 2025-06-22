@@ -10,6 +10,7 @@ https://creativecommons.org/licenses/by-nc-sa/4.0/
 
 use aibackend::deepseek::DeepSeekChat;
 use aibackend::gemini::GeminiChat;
+use aibackend::coze::CozeChat;
 use aibackend::interface::{AIChat, AIChatType};
 use history_msg::history::{get_title_from_history, load_history, save_history};
 use history_msg::history::{ChatHistory, ChatMessage, ChatMessageType};
@@ -280,46 +281,55 @@ fn create_new_chat() -> Vec<ChatMessage> {
 #[tauri::command]
 async fn process_message_stream(window: Window, message: String, key_type: String) {
     // 克隆窗口以便在新线程中使用
-    let window_clone = window.clone();
-
-    // 获取API密钥
-    let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
-    // let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
-    let key_list = api_key_list.filter_by_type(match key_type.as_str() {
-        "DeepSeek" => aibackend::apikey::ApiKeyType::DeepSeek,
-        "Gemini" => aibackend::apikey::ApiKeyType::Gemini,
+    let window_clone = window.clone();    // 获取API密钥
+    let api_key = match key_type.as_str() {
+        "Coze" => {
+            // Coze 使用内置密钥，不需要从配置读取
+            aibackend::apikey::ApiKey {
+                key: "built-in".to_string(),
+                name: "Coze Built-in".to_string(),
+                key_type: aibackend::apikey::ApiKeyType::Coze,
+            }
+        }
         _ => {
-            let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
-            return;
+            // 其他类型从配置文件读取
+            let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
+            let key_list = api_key_list.filter_by_type(match key_type.as_str() {
+                "DeepSeek" => aibackend::apikey::ApiKeyType::DeepSeek,
+                "Gemini" => aibackend::apikey::ApiKeyType::Gemini,
+                _ => {
+                    let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
+                    return;
+                }
+            });
+
+            if key_list.keys.is_empty() {
+                // 如果没有API密钥，发送错误消息
+                let _ = window_clone.emit(
+                    "stream-message",
+                    format!("没有可用的{} API密钥，请在设置中添加", key_type),
+                );
+                return;
+            }
+
+            // 随机选择一个API密钥
+            match key_list.random_key() {
+                Some(key) => key,
+                None => {
+                    let _ = window_clone.emit(
+                        "stream-message",
+                        format!("没有可用的{} API密钥，请在设置中添加", key_type),
+                    );
+                    return;
+                }
+            }
         }
-    });
-
-    if key_list.keys.is_empty() {
-        // 如果没有API密钥，发送错误消息
-        let _ = window_clone.emit(
-            "stream-message",
-            format!("没有可用的{} API密钥，请在设置中添加", key_type),
-        );
-        return;
-    }
-
-    // 随机选择一个API密钥
-    let api_key = match key_list.random_key() {
-        Some(key) => key,
-        None => {
-            let _ = window_clone.emit(
-                "stream-message",
-                format!("没有可用的{} API密钥，请在设置中添加", key_type),
-            );
-            return;
-        }
-    };
-
-    // 初始化AI聊天实例
+    };// 初始化AI聊天实例
     // let mut chat = aibackend::gemini::GeminiChat::new();
     let mut chat = match key_type.as_str() {
         "DeepSeek" => AIChatType::DeepSeek(DeepSeekChat::new()),
         "Gemini" => AIChatType::Gemini(GeminiChat::new()),
+        "Coze" => AIChatType::Coze(CozeChat::new()),
         _ => {
             let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
             return;
@@ -1283,6 +1293,9 @@ async fn add_file_content_as_message(
 
     Ok(())
 }
+
+// 移除测试模块
+// mod test_coze;
 
 // 确保在 run 函数中注册所有命令
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

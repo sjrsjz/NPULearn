@@ -18,7 +18,8 @@ export interface Settings {
 // 定义 ApiKeyType 枚举
 export enum ApiKeyType {
     Gemini = "Gemini",
-    DeepSeek = "DeepSeek"
+    DeepSeek = "DeepSeek",
+    Coze = "Coze"
 }
 
 // 定义 ApiKey 接口
@@ -135,14 +136,14 @@ export function useSettingsProvider() {
                 keyType: keyType
             };
         });
-    }
-
-    function getDisplayName(key_type: ApiKeyType): string {
+    }    function getDisplayName(key_type: ApiKeyType): string {
         switch (key_type) {
             case ApiKeyType.Gemini:
                 return "Gemini";
             case ApiKeyType.DeepSeek:
                 return "DeepSeek";
+            case ApiKeyType.Coze:
+                return "Coze";
             default:
                 return "未知类型";
         }
@@ -342,6 +343,11 @@ export function useSettingsProvider() {
         }
     );
 
+    // 获取需要配置API密钥的类型（排除Coze）
+    function getConfigurableApiKeyTypes(): ApiKeyType[] {
+        return Object.values(ApiKeyType).filter(type => type !== ApiKeyType.Coze);
+    }
+
     // 提供全局状态和方法
     provide(SettingsKey, {
         // 状态
@@ -368,7 +374,8 @@ export function useSettingsProvider() {
         selectSavePath,
         loadSettings,
         cancelSettings,
-        initAppSettings
+        initAppSettings,
+        getConfigurableApiKeyTypes
     });
 
     return {
@@ -396,7 +403,8 @@ export function useSettingsProvider() {
         selectSavePath,
         loadSettings,
         cancelSettings,
-        initAppSettings
+        initAppSettings,
+        getConfigurableApiKeyTypes
     };
 }
 
