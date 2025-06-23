@@ -135,11 +135,25 @@ where
                         
                         if data == "[DONE]" {
                             break;
-                        }
-
-                        if let Ok(json_data) = serde_json::from_str::<ChatCompletionStreamResponse>(data) {
+                        }                        if let Ok(json_data) = serde_json::from_str::<ChatCompletionStreamResponse>(data) {
                             if let Some(choice) = json_data.choices.first() {
+                                // 检查是否有 finish_reason，如果有则表示流结束，不处理 tokens 信息
+                                if choice.finish_reason.is_some() {
+                                    println!("Stream finished with reason: {:?}", choice.finish_reason);
+                                    break;
+                                }
+                                
                                 if let Some(delta) = &choice.delta {
+                                    // 处理推理内容（思维链）
+                                    if let Some(reasoning_content) = &delta.reasoning_content {
+                                        if !reasoning_content.is_empty() {
+                                            println!("Extracted reasoning content: {}", reasoning_content);
+                                            callback(reasoning_content.clone());
+                                            full_response.push_str(reasoning_content);
+                                        }
+                                    }
+                                    
+                                    // 处理最终回复内容
                                     if let Some(content) = &delta.content {
                                         if !content.is_empty() {
                                             println!("Extracted content: {}", content);
@@ -192,7 +206,22 @@ impl DeepSeekChat {
         }
     }
 
-    fn build_system_instruction(&self) -> String {
+    pub fn new_with_model(model: &str) -> Self {
+        let mut chat = Self::new();
+        chat.model = model.to_string();
+        chat
+    }
+
+    // 检查是否为推理模型
+    fn is_reasoning_model(&self) -> bool {
+        self.model == "deepseek-reasoner"
+    }    fn build_system_instruction(&self) -> String {
+        // 推理模型不需要 COT 提示词，直接返回基础系统提示
+        if self.is_reasoning_model() {
+            return self.system_prompt.clone();
+        }
+        
+        // 非推理模型使用 COT 模板
         return cot_template(&[
             TypesetInfo {
                 name: "mermaid_render".to_string(),
@@ -278,8 +307,7 @@ impl DeepSeekChat {
                     args.insert("query".to_string(), Value::String("1+1".to_string()));
                     args.insert("image_only".to_string(), Value::Bool(false));
                     args.insert("format".to_string(), Value::String("html".to_string()));
-                    args
-                },
+                    args                },
             },
         ], &self.system_prompt);
     }

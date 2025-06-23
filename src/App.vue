@@ -36,9 +36,13 @@ import { ChatHistory, ChatMessage } from "./App/types.ts";
 
 // 初始化全局设置，在整个应用中提供设置
 const {
+  settings,
   notification,
   showNotification,
-  initAppSettings
+  initAppSettings,
+  apiKeys,
+  loadApiKeys,
+  fetchGeminiModels
 } = useSettingsProvider();
 
 const isAppLoading = ref(true);
@@ -449,10 +453,16 @@ function setupActionButtons() {
         try {
           // 显示加载状态
           isLoading.value = true;
-          isStreaming.value = true;
+          isStreaming.value = true;          // 获取当前选择的模型名称
+          const currentApiType = selectedModel.value as ApiKeyType;
+          const currentModelName = getCurrentSelectedModel(currentApiType);
 
           // 调用后端重新生成消息
-          await invoke("regenerate_message", { messageIndex, keyType: selectedModel.value });
+          await invoke("regenerate_message", { 
+            messageIndex, 
+            keyType: selectedModel.value, 
+            modelName: currentModelName 
+          });
 
           // 处理将在事件监听器中完成
         } catch (error) {
@@ -642,13 +652,21 @@ async function sendStreamMessage() {
 
   // 先设置状态，确保在任何渲染发生前就已标记为流传输
   isStreaming.value = true;
-  isLoading.value = true;
-
-  console.log("开始流式传输消息");
+  isLoading.value = true;  console.log("开始流式传输消息");
   scrollToBottom(true, true); // 强制滚动到底部
 
+  // 获取当前选择的模型名称
+  const currentApiType = selectedModel.value as ApiKeyType;
+  const currentModelName = getCurrentSelectedModel(currentApiType);
+  
+  console.log(`当前API类型: ${currentApiType}, 选择的模型: ${currentModelName}`);
+  
   // 使用 Promise 包装后端调用，但不等待它完成
-  invoke("process_message_stream", { message, keyType: selectedModel.value })
+  invoke("process_message_stream", { 
+    message, 
+    keyType: selectedModel.value,
+    modelName: currentModelName 
+  })
     .catch(error => {
       console.error("消息发送失败:", error);
       showNotification("消息发送失败", "error");
@@ -695,11 +713,18 @@ async function sendStreamMessageDirect(message: string) {
   // 先设置状态，确保在任何渲染发生前就已标记为流传输
   isStreaming.value = true;
   isLoading.value = true;
-
   console.log("开始流式传输消息，已禁用UML渲染");
 
+  // 获取当前选择的模型名称
+  const currentApiType = selectedModel.value as ApiKeyType;
+  const currentModelName = getCurrentSelectedModel(currentApiType);
+
   // 使用 Promise 包装后端调用，但不等待它完成
-  invoke("process_message_stream", { message, keyType: selectedModel.value })
+  invoke("process_message_stream", { 
+    message, 
+    keyType: selectedModel.value,
+    modelName: currentModelName 
+  })
     .catch(error => {
       console.error("消息发送失败:", error);
       showNotification("消息发送失败", "error");
@@ -925,12 +950,23 @@ onMounted(async () => {
     await loadMathJax();
 
     // 设置流式消息监听器
-    await setupStreamListeners();
-
-    // 加载聊天历史和当前对话内容
+    await setupStreamListeners();    // 加载聊天历史和当前对话内容
     await loadChatHistory();
 
-    isStreaming.value = false; // 初始加载时默认没有流传输    // 所有内容加载完成后，隐藏启动logo
+    // 加载API密钥并检查是否需要获取Gemini模型
+    await loadApiKeys();
+    const geminiKeys = apiKeys.value.filterByType(ApiKeyType.Gemini);
+    if (geminiKeys.keys.length > 0) {
+      console.log('应用启动时检测到Gemini API密钥，自动获取最新模型列表...');
+      // 异步获取，不阻塞应用启动
+      fetchGeminiModels().catch(error => {
+        console.error('应用启动时获取Gemini模型失败:', error);
+      });
+    } else {
+      console.log('应用启动时未检测到Gemini API密钥，跳过模型列表获取');
+    }
+
+    isStreaming.value = false; // 初始加载时默认没有流传输// 所有内容加载完成后，隐藏启动logo
     setTimeout(() => {
       isAppLoading.value = false;
       // 确保在应用完全加载后设置滚动监听器
@@ -1335,10 +1371,16 @@ async function regenerateCurrentMessage() {
     try {
       // 显示加载状态
       isLoading.value = true;
-      isStreaming.value = true;
+      isStreaming.value = true;      // 获取当前选择的模型名称
+      const currentApiType = selectedModel.value as ApiKeyType;
+      const currentModelName = getCurrentSelectedModel(currentApiType);
 
       // 调用后端重新生成消息
-      await invoke("regenerate_message", { messageIndex: messageContextMenuIndex.value, keyType: selectedModel.value });
+      await invoke("regenerate_message", { 
+        messageIndex: messageContextMenuIndex.value, 
+        keyType: selectedModel.value,
+        modelName: currentModelName 
+      });
 
       // 处理将在事件监听器中完成
     } catch (error) {
@@ -1494,6 +1536,13 @@ function confirmDeleteChat() {
   chatToDeleteId.value = chatContextMenuId.value;
   showConfirmDelete.value = true;
   closeChatContextMenu();
+}
+
+// 获取当前选择的模型名称
+function getCurrentSelectedModel(apiType: ApiKeyType): string {
+  const modelName = settings.value.model_selection[apiType];
+  console.log(`获取模型名称 - API类型: ${apiType}, 模型名称: ${modelName}, 完整设置:`, settings.value.model_selection);
+  return modelName || 'default-model';
 }
 
 function updateModel(event: Event) {

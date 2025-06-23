@@ -336,14 +336,14 @@ where
                                             if let Some(parts) =
                                                 content.get("parts").and_then(|p| p.as_array())
                                             {
-                                                if let Some(part) = parts.get(0) {
-                                                    if let Some(text) =
+                                                if let Some(part) = parts.get(0) {                                                    if let Some(text) =
                                                         part.get("text").and_then(|t| t.as_str())
                                                     {
                                                         if !text.is_empty() {
                                                             println!("Extracted text: {}", text);
-                                                            callback(text.to_string());
-                                                            full_response.push_str(text);
+                                                            let processed_text = process_reasoning_content(text);
+                                                            callback(processed_text.clone());
+                                                            full_response.push_str(&processed_text);
                                                         }
                                                     }
                                                 }
@@ -385,11 +385,11 @@ where
                     if let Some(candidate) = candidates.get(0) {
                         if let Some(content) = candidate.get("content") {
                             if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
-                                if let Some(part) = parts.get(0) {
-                                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                if let Some(part) = parts.get(0) {                                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                         if !text.is_empty() {
-                                            callback(text.to_string());
-                                            full_response.push_str(text);
+                                            let processed_text = process_reasoning_content(text);
+                                            callback(processed_text.clone());
+                                            full_response.push_str(&processed_text);
                                         }
                                     }
                                 }
@@ -437,8 +437,13 @@ impl GeminiChat {
         }
     }
 
-    fn build_system_instruction(&self) -> String {
-        return cot_template(&[
+    /// 使用指定模型创建新实例
+    pub fn new_with_model(model: &str) -> Self {
+        let mut chat = Self::new();
+        chat.model = model.to_string();
+        chat
+    }    fn build_system_instruction(&self) -> String {
+        let typeset_infos = vec![
             TypesetInfo {
                 name: "mermaid_render".to_string(),
                 description: "render mermaid graph".to_string(),
@@ -526,7 +531,10 @@ impl GeminiChat {
                     args
                 },
             },
-        ], &self.system_prompt);
+        ];
+
+        // 推理模型和非推理模型都使用相同的模板，但推理模型会自动处理 <thought> 标签
+        cot_template(&typeset_infos, &self.system_prompt)
     }
     /// 转换OpenAI格式的消息为Gemini格式的请求体
     fn build_gemini_request_body(
@@ -1126,4 +1134,129 @@ pub async fn image_to_text(api_key: &str, image_data: &[u8]) -> Result<String, B
 
     let response_json: Value = response.json().await?;
     parse_gemini_response(&response_json) // 复用解析逻辑
+}
+
+/// 获取可用的Gemini模型列表
+#[allow(dead_code)]
+pub async fn fetch_available_models(api_key: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    println!("🌐 [DEBUG] Starting to fetch model list from Gemini API");
+    println!("🔑 [DEBUG] Using API key: {}...", &api_key[..std::cmp::min(10, api_key.len())]);
+    
+    let client = reqwest::Client::new();
+    let url = "https://generativelanguage.googleapis.com/v1beta/openai/models";
+    
+    println!("📡 [DEBUG] Sending GET request to: {}", url);
+    
+    let response = client
+        .get(url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await?;
+
+    let status = response.status();
+    println!("📊 [DEBUG] API response status: {}", status);
+    
+    if !status.is_success() {
+        let error_text = response.text().await?;
+        println!("❌ [DEBUG] API request failed: {} - {}", status, error_text);
+        return Err(format!("Failed to fetch models ({}): {}", status, error_text).into());
+    }
+
+    let response_json: Value = response.json().await?;
+    println!("📋 [DEBUG] API response JSON: {}", serde_json::to_string_pretty(&response_json).unwrap_or_else(|_| "Unable to format JSON".to_string()));
+    
+    // Parse model list
+    let mut models = Vec::new();
+    if let Some(data) = response_json.get("data").and_then(|d| d.as_array()) {
+        println!("🔍 [DEBUG] All models returned by Gemini API (total: {}):", data.len());
+        for model in data {
+            if let Some(id) = model.get("id").and_then(|id| id.as_str()) {
+                println!("  📝 [DEBUG] Raw model: {}", id);
+                
+                // Remove 'models/' prefix if present
+                let cleaned_id = if id.starts_with("models/") {
+                    let cleaned = &id[7..]; // Remove "models/" prefix
+                    println!("  🧹 [DEBUG] Removed prefix, cleaned model: {}", cleaned);
+                    cleaned
+                } else {
+                    id
+                };
+                
+                // Filter models that meet our criteria
+                if is_valid_gemini_model(cleaned_id) {
+                    println!("  ✅ [DEBUG] Model passed filter: {}", cleaned_id);
+                    models.push(cleaned_id.to_string());
+                } else {
+                    println!("  ❌ [DEBUG] Model filtered out: {}", cleaned_id);
+                }
+            }
+        }
+    } else {
+        println!("⚠️ [DEBUG] No 'data' field found in response or it's not an array");
+    }
+    
+    println!("🎯 [DEBUG] Filtered valid Gemini model list ({} models): {:?}", models.len(), models);
+    Ok(models)
+}
+
+/// 检查模型是否符合我们的过滤条件
+fn is_valid_gemini_model(model_id: &str) -> bool {
+    // 检查是否匹配 gemini-[1-10].[0-10]-* 模式
+    let pattern_regex = regex::Regex::new(r"^gemini-([1-9]|10)\.([0-9]|10)-").unwrap();
+    if !pattern_regex.is_match(model_id) {
+        return false;
+    }
+    
+    // 排除包含特定关键词的模型
+    let excluded_keywords = [
+        "vision", "thinking", "tts", "exp", "embedding", 
+        "audio", "native", "dialog", "live","image"
+    ];
+    
+    for keyword in &excluded_keywords {
+        if model_id.to_lowercase().contains(keyword) {
+            return false;
+        }
+    }
+    
+    true
+}
+
+/// 处理推理模型内容，过滤掉 <thought> 标签内的内容
+fn process_reasoning_content(text: &str) -> String {
+    let mut result = String::new();
+    let mut i = 0;
+    let chars: Vec<char> = text.chars().collect();
+    let mut in_thought = false;
+    
+    while i < chars.len() {
+        // 检查 <thought> 标签
+        if i + 8 < chars.len() {
+            let potential_tag: String = chars[i..i+9].iter().collect();
+            if potential_tag == "<thought>" {
+                in_thought = true;
+                i += 9;
+                continue;
+            }
+        }
+        
+        // 检查 </thought> 标签
+        if i + 9 < chars.len() {
+            let potential_tag: String = chars[i..i+10].iter().collect();
+            if potential_tag == "</thought>" {
+                in_thought = false;
+                i += 10;
+                continue;
+            }
+        }
+        
+        // 如果不在 thought 标签内，添加字符到结果
+        if !in_thought {
+            result.push(chars[i]);
+        }
+        
+        i += 1;
+    }
+    
+    result
 }

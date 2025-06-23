@@ -123,6 +123,7 @@ pub struct ChatCompletionStreamResponse {
     pub created: u64,
     pub model: String,
     pub choices: Vec<ChatCompletionStreamChoice>,
+    pub usage: Option<Usage>, // 添加 usage 字段，用于推理模型的最后响应
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -136,6 +137,7 @@ pub struct ChatCompletionStreamChoice {
 pub struct ChatCompletionDelta {
     pub role: Option<MessageRole>,
     pub content: Option<String>,
+    pub reasoning_content: Option<String>, // 添加推理内容字段
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 

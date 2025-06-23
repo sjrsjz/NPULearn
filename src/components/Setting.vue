@@ -1,1387 +1,694 @@
-<script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue';
-import { invoke } from "@tauri-apps/api/core";
-// 导入 Vue 的 watch 函数
-import { watch } from 'vue';
-import { applyFontSize, applyTheme } from '../themeUtils';
-
-const emit = defineEmits(['close']);
-
-// 设置选项
-const settings = ref({
-    theme: 'system', // 主题: system, light, dark
-    font_size: 'medium', // 字体大小: small, medium, large
-    auto_save: true, // 自动保存对话
-    save_path: '', // 保存路径
-    api_model: 'Gemini', // AI 模型
-    model_config: {
-        temperature: 0.7, // 温度参数 0.1-1.0
-        max_tokens: 2048, // 最大生成令牌数
-    },
-});
-
-// 主题选项
-const themeOptions = [
-    { value: 'system', label: '跟随系统' },
-    { value: 'light', label: '浅色模式' },
-    { value: 'dark', label: '深色模式' },
-];
-
-// 字体大小选项
-const fontSizeOptions = [
-    { value: 'small', label: '小' },
-    { value: 'medium', label: '中' },
-    { value: 'large', label: '大' },
-];
-
-const theme_before_save = ref('system');
-const font_size_before_save = ref('medium');
-
-// 定义 ApiKeyType 枚举
-enum ApiKeyType {
-    Gemini = "Gemini",
-    DeepSeek = "DeepSeek",
-    Coze = "Coze"
-}
-
-function get_display_name(key_type: ApiKeyType): string {
-    switch (key_type) {
-        case ApiKeyType.Gemini:
-            return "Gemini";
-        case ApiKeyType.DeepSeek:
-            return "DeepSeek";
-        case ApiKeyType.Coze:
-            return "Coze";
-        default:
-            return "未知类型";
-    }
-}
-
-// 模型选项
-const modelOptions = ref<{ value: ApiKeyType; label: string; keyType: ApiKeyType }[]>([]);
-
-function loadModelOptions() {
-    // 根据ApiKeyType 枚举动态加载模型选项
-    modelOptions.value = Object.values(ApiKeyType).map((keyType) => {
-        return {
-            value: keyType,
-            label: get_display_name(keyType),
-            keyType: keyType
-        };
-    });
-}
-
-// 定义 ApiKey 接口
-interface ApiKey {
-    key: string;
-    name: string;
-    key_type: ApiKeyType;
-}
-
-
-// 实现 APIKeyList 类
-class APIKeyList {
-    keys: ApiKey[];
-
-    constructor() {
-        this.keys = [];
-    }
-
-    // 添加 API 密钥
-    addKey(key: ApiKey): void {
-        this.keys.push(key);
-    }
-
-    // 移除 API 密钥
-    removeKey(key: ApiKey): void {
-        this.keys = this.keys.filter(k => k.key !== key.key);
-    }
-
-    // 根据类型过滤 API 密钥
-    filterByType(keyType: ApiKeyType): APIKeyList {
-        const result = new APIKeyList();
-        result.keys = this.keys.filter(key => key.key_type === keyType);
-        return result;
-    }
-
-    // 获取随机 API 密钥
-    randomKey(): ApiKey | null {
-        if (this.keys.length === 0) {
-            return null;
-        }
-        const randomIndex = Math.floor(Math.random() * this.keys.length);
-        return this.keys[randomIndex];
-    }
-}
-
-
-// API Key 管理
-const apiKeys = ref<APIKeyList>(new APIKeyList());
-const newApiKey = reactive({
-    key: '',
-    name: '',
-    key_type: ApiKeyType.Gemini
-});
-const isAddingKey = ref(false);
-const apiKeyTypes = Object.values(ApiKeyType).filter(type => type !== ApiKeyType.Coze);
-const apiKeyConfigFile = 'api_keys.json';
-
-
-
-
-async function getApiKeyListOrCreate(config_name: string): Promise<APIKeyList> {
-    try {
-        const response = await invoke("get_api_key_list_or_create", { configName: config_name });
-        // 将响应转换为 APIKeyList 类的实例
-        const keyList = new APIKeyList();
-        if (response && typeof response === 'object' && 'keys' in response) {
-            const keys = (response as any).keys;
-            if (Array.isArray(keys)) {
-                keys.forEach((key: any) => {
-                    if (key.key && key.name && key.key_type) {
-                        keyList.addKey({
-                            key: key.key,
-                            name: key.name,
-                            key_type: key.key_type as ApiKeyType
-                        });
-                    }
-                });
-            }
-        }
-        return keyList;
-    } catch (error) {
-        console.error("获取 API 密钥列表失败:", error);
-        return new APIKeyList();
-    }
-}
-
-async function saveApiKeyList(config_file: string, apiKeyList: APIKeyList): Promise<void> {
-    try {
-        await invoke("try_save_api_key_list", { configName: config_file, list: apiKeyList });
-        showNotification("API 密钥列表已保存", "success");
-    } catch (error) {
-        console.error("保存 API 密钥列表失败:", error);
-        showNotification("保存 API 密钥列表失败", "error");
-    }
-}
-
-
-// 加载 API Keys
-async function loadApiKeys() {
-    try {
-        const keys = await getApiKeyListOrCreate(apiKeyConfigFile);
-        if (keys) {
-            apiKeys.value = keys;
-        }
-    } catch (error) {
-        console.error("加载 API 密钥失败:", error);
-        showNotification("加载 API 密钥失败", "error");
-    }
-}
-
-// 添加新的 API Key
-async function addApiKey() {
-    if (!newApiKey.key || !newApiKey.name) {
-        showNotification("密钥和名称不能为空", "error");
-        return;
-    }
-
-    const key: ApiKey = {
-        key: newApiKey.key,
-        name: newApiKey.name,
-        key_type: newApiKey.key_type
-    };
-
-    apiKeys.value.addKey(key);
-    await saveApiKeyList(apiKeyConfigFile, apiKeys.value);
-
-    // 重置表单
-    newApiKey.key = '';
-    newApiKey.name = '';
-    isAddingKey.value = false;
-
-    showNotification("API 密钥已添加", "success");
-}
-
-// 添加用于API密钥删除确认的状态
-const showConfirmDeleteKey = ref(false);
-const keyToDelete = ref<ApiKey | null>(null);
-
-// 修改为显示删除确认对话框
-function confirmDeleteApiKey(key: ApiKey) {
-    keyToDelete.value = key;
-    showConfirmDeleteKey.value = true;
-}
-
-// 执行真正的删除操作
-async function submitDeleteApiKey() {
-    if (!keyToDelete.value) {
-        showNotification("无效的 API 密钥", "error");
-        return;
-    }
-
-    try {
-        apiKeys.value.removeKey(keyToDelete.value);
-        await saveApiKeyList(apiKeyConfigFile, apiKeys.value);
-        showNotification("API 密钥已删除", "info");
-    } catch (error) {
-        console.error("删除 API 密钥失败:", error);
-        showNotification("删除 API 密钥失败", "error");
-    } finally {
-        // 关闭对话框并清除状态
-        showConfirmDeleteKey.value = false;
-        keyToDelete.value = null;
-    }
-}
-
-// 取消删除操作
-function cancelDeleteApiKey() {
-    showConfirmDeleteKey.value = false;
-    keyToDelete.value = null;
-}
-// 保存设置
-async function saveSettings() {
-    try {
-        await invoke("save_settings", { settings: settings.value });
-        theme_before_save.value = settings.value.theme as 'system' | 'light' | 'dark';
-        font_size_before_save.value = settings.value.font_size as 'small' | 'medium' | 'large';
-        showNotification("设置已保存", "success");
-    } catch (error) {
-        console.error("保存设置失败:", error);
-        showNotification("保存设置失败", "error");
-    }
-}
-
-// 重置设置
-async function resetSettings() {
-    try {
-        const defaultSettings = await invoke("get_default_settings");
-        settings.value = defaultSettings as any;
-        showNotification("设置已重置", "info");
-    } catch (error) {
-        console.error("重置设置失败:", error);
-        showNotification("重置设置失败", "error");
-    }
-}
-
-
-// 通知
-const notification = ref({
-    visible: false,
-    message: '',
-    type: 'success'
-});
-
-// 显示通知
-function showNotification(message: string, type: string = 'success', duration: number = 3000) {
-    notification.value = {
-        visible: true,
-        message,
-        type
-    };
-
-    setTimeout(() => {
-        notification.value.visible = false;
-    }, duration);
-}
-
-
-// 监听主题变化
-watch(
-    () => settings.value.theme,
-    (newTheme: string) => {
-        applyTheme(newTheme as 'system' | 'light' | 'dark');
-    }
-);
-
-watch(
-    () => settings.value.font_size,
-    (newFontSize: string) => {
-        applyFontSize(newFontSize as 'small' | 'medium' | 'large');
-    }
-);
-
-
-// 加载设置
-async function loadSettings() {
-    try {
-        const savedSettings = await invoke("get_settings");
-        if (savedSettings) {
-            settings.value = { ...settings.value, ...savedSettings };
-            applyTheme(settings.value.theme as 'system' | 'light' | 'dark');
-            applyFontSize(settings.value.font_size as 'small' | 'medium' | 'large');
-            theme_before_save.value = settings.value.theme as 'system' | 'light' | 'dark';
-            font_size_before_save.value = settings.value.font_size as 'small' | 'medium' | 'large';
-        }
-    } catch (error) {
-        console.error("加载设置失败:", error);
-    }
-}
-
-
-// 关闭设置界面
-function closeSettings() {
-    applyTheme(theme_before_save.value as 'system' | 'light' | 'dark');
-    applyFontSize(font_size_before_save.value as 'small' | 'medium' | 'large');
-    emit('close');
-}
-
-// 初始化应用设置
-async function initAppSettings() {
-    try {
-        const savedSettings = await invoke("get_settings");
-        if (savedSettings) {
-            settings.value = { ...settings.value, ...savedSettings };
-            // 应用主题
-            if (settings.value.theme === 'system') {
-                document.documentElement.removeAttribute('data-theme');
-            } else {
-                document.documentElement.setAttribute('data-theme', settings.value.theme);
-            }
-
-            // 应用字体大小
-            document.documentElement.setAttribute('data-font-size', settings.value.font_size);
-        }
-    } catch (error) {
-        console.error("初始化应用设置失败:", error);
-    }
-}
-
-
-// 组件挂载时加载设置
-onMounted(() => {
-    initAppSettings();
-    loadSettings();
-    loadApiKeys();
-    loadModelOptions();
-});
-
-</script>
-
 <template>
-    <div class="settings-container">
-        <!-- 通知组件 -->
-        <div v-if="notification.visible" class="notification" :class="notification.type">
-            <div class="notification-content">
-                <svg v-if="notification.type === 'success'" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
-                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                </svg>
-                <svg v-else-if="notification.type === 'error'" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
-                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="15" y1="9" x2="9" y2="15"></line>
-                    <line x1="9" y1="9" x2="15" y2="15"></line>
-                </svg>
-                <svg v-else-if="notification.type === 'info'" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
-                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="16" x2="12" y2="12"></line>
-                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                </svg>
-                <span>{{ notification.message }}</span>
+  <div class="settings-container">
+    <div class="settings-header">
+      <h2>设置</h2>
+      <button class="close-button" @click="$emit('close')">✕</button>
+    </div>
+
+    <!-- 加载状态 -->
+    <div v-if="isLoading" class="loading-container">
+      <div class="loading-spinner"></div>
+      <p>正在加载设置...</p>
+    </div>
+
+    <!-- 设置内容 -->
+    <div v-else class="settings-content">
+        <!-- 通知 -->
+        <div v-if="notification.visible" :class="['notification', notification.type]">
+          {{ notification.message }}
+        </div>        <!-- 基础设置 -->
+        <div class="setting-section">
+          <h3>基础设置</h3>
+          
+          <div class="setting-item">
+            <label>主题</label>
+            <select v-model="settings.theme">
+              <option v-for="option in themeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label>字体大小</label>
+            <select v-model="settings.font_size">
+              <option v-for="option in fontSizeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+        </div>        <!-- 模型管理 -->
+        <div class="setting-section">
+          <h3>模型管理</h3>
+          <p class="section-description">为每种AI服务选择要使用的模型</p>
+            <div v-for="apiType in getAllApiKeyTypes()" :key="apiType" class="model-selection-item">            <div class="model-header">
+              <h4>{{ getDisplayName(apiType) }}</h4>
+              <span v-if="isCurrentModelReasoning(apiType)" class="reasoning-badge">推理模型</span>
             </div>
-        </div>
-        <div class="settings-header">
-            <h2>设置</h2>
-            <button class="close-settings" @click="closeSettings">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <!-- 现代化的关闭图标：圆角X -->
-                    <path d="M6 6l12 12"></path>
-                    <path d="M18 6l-12 12"></path>
-                </svg>
-            </button>
-        </div>
-
-        <div class="settings-content">
-            <!-- 外观设置 -->
-            <div class="settings-section">
-                <h3>外观设置</h3>
-
-                <div class="settings-item">
-                    <label for="theme">主题</label>
-                    <div class="settings-controls">
-                        <select id="theme" v-model="settings.theme">
-                            <option v-for="option in themeOptions" :key="option.value" :value="option.value">
-                                {{ option.label }}
-                            </option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="settings-item">
-                    <label for="fontSize">字体大小</label>
-                    <div class="settings-controls">
-                        <select id="fontSize" v-model="settings.font_size">
-                            <option v-for="option in fontSizeOptions" :key="option.value" :value="option.value">
-                                {{ option.label }}
-                            </option>
-                        </select>
-                    </div>
-                </div>
+              <div class="model-selector">
+              <select 
+                v-model="settings.model_selection[apiType]" 
+                @change="updateModelSelection(apiType, ($event.target as HTMLSelectElement).value)"
+                :disabled="apiType === 'Gemini' && isLoadingGeminiModels"
+              >
+                <option v-for="model in getAvailableModels(apiType)" :key="model.name" :value="model.name">
+                  {{ model.displayName }}
+                </option>
+              </select>
+              
+              <!-- 显示Gemini模型加载状态和错误信息 -->
+              <div v-if="apiType === 'Gemini' && isLoadingGeminiModels" class="model-loading">
+                正在获取最新的Gemini模型列表...
+              </div>
+              <div v-if="apiType === 'Gemini' && geminiModelsError" class="model-error">
+                {{ geminiModelsError }}
+              </div>
+              
+              <div v-if="getSelectedModelInfo(apiType)?.description" class="model-description">
+                {{ getSelectedModelInfo(apiType)?.description }}
+              </div>
             </div>
-            <!-- 
-
-            <div class="settings-section">
-                <h3>保存设置</h3>
-
-                <div class="settings-item auto-save-item">
-                    <label for="autoSave">自动保存对话</label>
-                    <div class="settings-controls">
-                        <label class="switch">
-                            <input type="checkbox" id="autoSave" v-model="settings.auto_save">
-                            <span class="slider round"></span>
-                        </label>
-                    </div>
-                </div>
-
-                <div class="settings-item">
-                    <label for="savePath">保存路径</label>
-                    <div class="settings-controls path-selection">
-                        <input type="text" id="savePath" v-model="settings.save_path" readonly
-                            placeholder="点击右侧按钮选择保存路径">
-                        <button @click="selectSavePath" class="directory-button">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                stroke-linejoin="round">
-                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
-                                </path>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-section">
-                <h3>模型设置</h3>
-
-                <div class="settings-item">
-                    <label for="apiModel">AI 模型</label>
-                    <div class="settings-controls">
-                        <select id="apiModel" v-model="settings.api_model">
-                            <option v-for="option in modelOptions" :key="option.value" :value="option.value">
-                                {{ option.label }}
-                            </option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="settings-item">
-                    <label for="temperature">温度参数</label>
-                    <div class="settings-controls range-slider">
-                        <input type="range" id="temperature" v-model.number="settings.model_config.temperature"
-                            min="0.1" max="1" step="0.1">
-                        <span class="range-value">{{ settings.model_config.temperature.toFixed(1) }}</span>
-                    </div>
-                </div>
-
-                <div class="settings-item">
-                    <label for="maxTokens">最大令牌数</label>
-                    <div class="settings-controls">
-                        <input type="number" id="maxTokens" v-model.number="settings.model_config.max_tokens" min="512"
-                            max="8192" step="512">
-                    </div>
-                </div>
-            </div> -->
-
-            <div class="settings-section">
-                <h3>API 密钥管理</h3>
-
-                <!-- API Keys 列表 -->
-                <div class="api-keys-list">
-                    <div v-if="apiKeys.keys.length === 0" class="empty-state">
-                        暂无 API 密钥，点击下方按钮添加
-                    </div>
-
-                    <div v-else class="api-key-items">
-                        <div v-for="(key, index) in apiKeys.keys" :key="index" class="api-key-item">
-                            <div class="api-key-info">
-                                <div class="api-key-name">{{ key.name }}</div>
-                                <div class="api-key-type">{{ key.key_type }}</div>
-                                <div class="api-key-value">{{ key.key.substring(0, 4) + '••••••••' +
-                                    key.key.substring(key.key.length - 4) }}</div>
-                            </div>
-                            <!-- 在API密钥列表中修改删除按钮 -->
-                            <button class="delete-key-button" @click="confirmDeleteApiKey(key)">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                    stroke-linejoin="round">
-                                    <!-- 垃圾桶盖子 -->
-                                    <path d="M3 6h18"></path>
-                                    <!-- 垃圾桶主体 -->
-                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                                    <!-- 垃圾桶内部分割线 -->
-                                    <line x1="10" y1="11" x2="10" y2="17"></line>
-                                    <line x1="14" y1="11" x2="14" y2="17"></line>
-                                </svg>
-                            </button>
-
-                            <!-- 添加API密钥删除确认对话框 -->
-                            <div v-if="showConfirmDeleteKey" class="modal-overlay" @click.self="cancelDeleteApiKey">
-                                <div class="modal-content">
-                                    <div class="modal-header">
-                                        <h3>删除API密钥</h3>
-                                        <button class="modal-close" @click="cancelDeleteApiKey">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
-                                                viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                                stroke-linecap="round" stroke-linejoin="round">
-                                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                                <line x1="6" y1="6" x2="18" y2="18"></line>
-                                            </svg>
-                                        </button>
-                                    </div>
-                                    <div class="modal-body">
-                                        <p>确定要删除 "{{ keyToDelete?.name }}" 吗？此操作不可撤销。</p>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button class="modal-button cancel" @click="cancelDeleteApiKey">取消</button>
-                                        <button class="modal-button delete" @click="submitDeleteApiKey">删除</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 添加新 API Key 表单 -->
-                    <div v-if="isAddingKey" class="add-key-form">
-                        <div class="form-header">
-                            <h4>添加新密钥</h4>
-                            <button class="close-form" @click="isAddingKey = false">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                    stroke-linejoin="round">
-                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                            </button>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="keyName">名称</label>
-                            <input type="text" id="keyName" v-model="newApiKey.name" placeholder="例如: 我的 Gemini API 密钥">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="keyType">类型</label>
-                            <select id="keyType" v-model="newApiKey.key_type">
-                                <option v-for="type in apiKeyTypes" :key="type" :value="type">{{ type }}</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="apiKeyValue">密钥</label>
-                            <input type="text" id="apiKeyValue" v-model="newApiKey.key" placeholder="输入 API 密钥">
-                        </div>
-
-                        <div class="form-actions">
-                            <button class="cancel-button" @click="isAddingKey = false">取消</button>
-                            <button class="add-key-button" @click="addApiKey">添加</button>
-                        </div>
-                    </div>
-
-                    <!-- 添加 API Key 按钮 -->
-                    <button v-if="!isAddingKey" class="add-api-key" @click="isAddingKey = true">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <line x1="12" y1="5" x2="12" y2="19"></line>
-                            <line x1="5" y1="12" x2="19" y2="12"></line>
-                        </svg>
-                        添加 API 密钥
-                    </button>
-                </div>
-            </div>
+          </div>
         </div>
 
-        <!-- 设置操作按钮 -->
-        <div class="settings-actions">
-            <button @click="resetSettings" class="reset-button">重置设置</button>
-            <button @click="saveSettings" class="save-button">保存设置</button>
-            <button @click="closeSettings" class="cancel-button">取消</button>
+        <!-- API密钥管理 -->
+        <div class="setting-section">
+          <h3>API密钥管理</h3>
+          <p class="section-description">配置各AI服务的API密钥（Coze使用内置密钥无需配置）</p>
+          
+          <!-- 现有密钥列表 -->
+          <div class="api-keys-list">
+            <div v-for="keyType in getConfigurableApiKeyTypes()" :key="keyType" class="key-type-section">
+              <h4>{{ getDisplayName(keyType) }}</h4>
+              
+              <div v-if="getKeysForType(keyType).length === 0" class="no-keys">
+                暂无配置的密钥
+              </div>
+              
+              <div v-else class="keys-grid">
+                <div v-for="key in getKeysForType(keyType)" :key="key.key" class="key-item">
+                  <div class="key-info">
+                    <div class="key-name">{{ key.name }}</div>
+                    <div class="key-preview">{{ maskApiKey(key.key) }}</div>
+                  </div>
+                  <button @click="deleteApiKey(key)" class="delete-key-btn">删除</button>
+                </div>
+              </div>
+
+              <button @click="startAddingKey(keyType)" class="add-key-btn">
+                添加{{ getDisplayName(keyType) }}密钥
+              </button>
+            </div>
+          </div>
+
+          <!-- 添加新密钥表单 -->
+          <div v-if="isAddingKey" class="add-key-form">
+            <h4>添加新密钥</h4>
+            <div class="form-group">
+              <label>密钥类型</label>
+              <select v-model="newApiKey.key_type" disabled>
+                <option :value="newApiKey.key_type">{{ getDisplayName(newApiKey.key_type) }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>密钥名称</label>
+              <input type="text" v-model="newApiKey.name" placeholder="为这个密钥起个名字">
+            </div>
+            <div class="form-group">
+              <label>API密钥</label>
+              <input type="password" v-model="newApiKey.key" placeholder="输入API密钥">
+            </div>
+            <div class="form-actions">
+              <button @click="cancelAddingKey" class="cancel-btn">取消</button>
+              <button @click="addApiKey" class="confirm-btn">添加</button>
+            </div>
+          </div>
         </div>
+
+        <!-- 模型配置 -->
+        <div class="setting-section">
+          <h3>模型配置</h3>
+          
+          <div class="setting-item">
+            <label>温度参数 ({{ settings.model_config.temperature }})</label>
+            <input 
+              type="range" 
+              min="0.1" 
+              max="1.0" 
+              step="0.1" 
+              v-model.number="settings.model_config.temperature"
+            >
+            <div class="range-labels">
+              <span>保守</span>
+              <span>创意</span>
+            </div>
+          </div>
+
+          <div class="setting-item">
+            <label>最大令牌数</label>
+            <input 
+              type="number" 
+              min="100" 
+              max="8192" 
+              v-model.number="settings.model_config.max_tokens"
+            >
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部操作按钮 -->
+      <div class="settings-footer">
+        <button @click="resetSettings" class="reset-btn">重置设置</button>
+        <div class="footer-actions">
+          <button @click="handleCancel" class="cancel-btn">取消</button>
+          <button @click="saveSettings" class="save-btn">保存</button>
+        </div>      </div>
     </div>
 </template>
 
-<style>
-/* 全局 CSS 变量 */
-:root {
-    /* 浅色主题变量 */
-    --bg-color: #ffffff;
-    --text-color: #1a202c;
-    --text-secondary: #4a5568;
-    --card-bg: #f8fafc;
-    --border-color: #e2e8f0;
-    --primary-color: #4f46e5;
-    --primary-hover: #4338ca;
-    --radius: 8px;
-    --radius-sm: 4px;
-    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --transition: all 0.2s ease;
+<script setup lang="ts">
+import { onMounted, watch, ref } from 'vue';
+import { useSettingsProvider, ApiKeyType, type ModelInfo } from '../composables/useSettings';
 
-    /* 默认字体大小 */
-    --font-size-base: 16px;
-    --font-size-sm: 14px;
-    --font-size-lg: 18px;
+const emit = defineEmits(['close']);
+
+// 添加加载状态
+const isLoading = ref(true);
+
+// 使用 settings composable
+const {
+  settings,
+  themeOptions,
+  fontSizeOptions,
+  apiKeys,
+  newApiKey,
+  isAddingKey,
+  notification,
+  isLoadingGeminiModels,
+  geminiModelsError,
+  loadApiKeys,
+  addApiKey,
+  deleteApiKey,
+  saveSettings,
+  resetSettings,
+  cancelSettings,
+  backupCurrentSettings,
+  getConfigurableApiKeyTypes,
+  getAllApiKeyTypes,
+  isCurrentModelReasoning,
+  updateModelSelection,
+  getAvailableModels,
+  getDisplayName,
+  initAppSettings,
+  fetchGeminiModels
+} = useSettingsProvider();
+
+// 获取指定类型的密钥
+function getKeysForType(keyType: ApiKeyType) {
+  return apiKeys.value.filterByType(keyType).keys;
 }
 
-/* 深色主题 */
-:root[data-theme="dark"] {
-    --bg-color: #1a202c;
-    --text-color: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --card-bg: #2d3748;
-    --border-color: #4a5568;
-    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.15);
+// 掩码显示API密钥
+function maskApiKey(key: string): string {
+  if (key.length <= 8) return '****';
+  return key.substring(0, 4) + '****' + key.substring(key.length - 4);
 }
 
-/* 字体大小设置 */
-:root[data-font-size="small"] {
-    --font-size-base: 14px;
-    --font-size-sm: 12px;
-    --font-size-lg: 16px;
-    --font-size-heading: 18px;
+// 开始添加密钥
+function startAddingKey(keyType: ApiKeyType) {
+  newApiKey.key_type = keyType;
+  newApiKey.key = '';
+  newApiKey.name = '';
+  isAddingKey.value = true;
 }
 
-:root[data-font-size="medium"] {
-    --font-size-base: 16px;
-    --font-size-sm: 14px;
-    --font-size-lg: 18px;
-    --font-size-heading: 20px;
+// 取消添加密钥
+function cancelAddingKey() {
+  isAddingKey.value = false;
+  newApiKey.key = '';
+  newApiKey.name = '';
 }
 
-:root[data-font-size="large"] {
-    --font-size-base: 18px;
-    --font-size-sm: 16px;
-    --font-size-lg: 20px;
-    --font-size-heading: 24px;
+// 获取选中模型的信息
+function getSelectedModelInfo(apiType: ApiKeyType): ModelInfo | undefined {
+  const selectedModel = settings.value.model_selection[apiType];
+  const models = getAvailableModels(apiType);
+  return models.find((m: ModelInfo) => m.name === selectedModel);
 }
 
-/* 应用字体大小 */
-body {
-    font-size: var(--font-size-base);
+// 处理取消操作
+function handleCancel() {
+  // 调用原有的取消设置功能（恢复主题和字体）
+  cancelSettings();
+  // 关闭设置界面
+  emit('close');
 }
 
-.small-text {
-    font-size: var(--font-size-sm);
-}
+// 初始化
+onMounted(async () => {
+  try {
+    console.log('设置界面开始初始化...');
+    
+    // 首先确保应用设置已经初始化（这会从后端加载设置）
+    await initAppSettings();
+    console.log('应用设置初始化完成，当前模型选择:', settings.value.model_selection);
+    
+    // 备份当前设置状态，以便取消时恢复
+    backupCurrentSettings();
+    
+    // 加载API密钥
+    await loadApiKeys();
+    console.log('API密钥加载完成');
+    
+    // 检查是否有Gemini密钥，如果有则自动获取最新模型列表
+    const geminiKeys = apiKeys.value.filterByType(ApiKeyType.Gemini);
+    if (geminiKeys.keys.length > 0) {
+      console.log('检测到Gemini API密钥，自动获取最新模型列表...');
+      fetchGeminiModels().catch(error => {
+        console.error('自动获取Gemini模型失败:', error);
+      });
+    } else {
+      console.log('未检测到Gemini API密钥，跳过模型列表获取');
+    }
+    
+    // 设置加载完成，可以显示界面
+    isLoading.value = false;
+    console.log('设置界面初始化完成');
+    
+  } catch (error) {
+    console.error('设置界面初始化失败:', error);
+    isLoading.value = false; // 即使失败也要显示界面
+  }
+  
+  // 监听模型选择的变化
+  watch(() => settings.value.model_selection, (newSelection: any) => {
+    console.log('设置界面检测到模型选择变化:', newSelection);
+  }, { deep: true });
+});
+</script>
 
-.large-text {
-    font-size: var(--font-size-lg);
-}
-
+<style scoped>
 .settings-container {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    background-color: var(--bg-color);
-    color: var(--text-color);
-    padding: 20px;
-    overflow-y: auto;
-    /* 已有的滚动条设置 */
-    max-height: 90vh;
-    /* 限制最大高度 */
-    scrollbar-width: thin;
-    /* Firefox 滚动条样式 */
+  background: var(--background-color);
+  border-radius: 12px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  min-height: 0; /* 确保flex子元素可以缩小 */
 }
-
-/* 为 Webkit 浏览器添加自定义滚动条样式 */
-.settings-container::-webkit-scrollbar {
-    width: 6px;
-}
-
-.settings-container::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.settings-container::-webkit-scrollbar-thumb {
-    background-color: rgba(0, 0, 0, 0.2);
-    border-radius: 3px;
-}
-
-/* 设置内容区域也添加滚动条样式 */
-.settings-content {
-    flex: 1;
-    overflow-y: auto;
-    scrollbar-width: thin;
-}
-
-.settings-content::-webkit-scrollbar {
-    width: 6px;
-}
-
-.settings-content::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.settings-content::-webkit-scrollbar-thumb {
-    background-color: rgba(0, 0, 0, 0.2);
-    border-radius: 3px;
-}
-
 
 .settings-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .settings-header h2 {
-    font-size: calc(var(--font-size-heading) * 1.1 * 1.1);
-    font-weight: 600;
+  margin: 0;
+  color: var(--text-color);
+}
+
+.close-button {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text-color);
+  padding: 4px;
 }
 
 .settings-content {
-    flex: 1;
-    overflow-y: auto;
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0; /* 允许内容区域缩小并显示滚动条 */
 }
 
-.settings-section {
-    margin-bottom: 32px;
-    padding: 20px;
-    background-color: var(--card-bg);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border-color);
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 60px 24px;
 }
 
-.settings-section h3 {
-    font-size: calc(var(--font-size-heading) * 1.1);
-    font-weight: 600;
-    margin-bottom: 16px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-color);
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--border-color);
+  border-top: 4px solid var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
 }
 
-.settings-item {
-    display: flex;
-    align-items: center;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
-.settings-item:last-child {
-    margin-bottom: 0;
+.loading-container p {
+  color: var(--text-secondary);
+  margin: 0;
 }
 
-.settings-item label {
-    flex: 0 0 140px;
-    font-weight: 500;
-    margin-right: 16px;
-}
-
-.settings-controls {
-    flex: 1;
-    min-width: 200px;
-}
-
-.close-settings {
-    background: none;
-    border: none;
-    color: var(--text-color);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-sm);
-    transition: var(--transition);
-}
-
-.close-settings:hover {
-    background-color: rgba(0, 0, 0, 0.05);
-}
-
-select,
-input[type="text"],
-input[type="number"] {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background-color: var(--card-bg);
-    color: var(--text-color);
-    font-size: var(--font-size-base);
-    transition: var(--transition);
-}
-
-select:focus,
-input:focus {
-    border-color: var(--primary-color);
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
-}
-
-.switch-container {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-}
-
-.switch-label {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    cursor: pointer;
-}
-
-.switch {
-    position: relative;
-    display: inline-block;
-    width: 48px;
-    height: 24px;
-}
-
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #cbd5e1;
-    transition: .4s;
-}
-
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 18px;
-    width: 18px;
-    left: 3px;
-    bottom: 3px;
-    background-color: white;
-    transition: .4s;
-}
-
-input:checked+.slider {
-    background-color: var(--primary-color);
-}
-
-input:focus+.slider {
-    box-shadow: 0 0 1px var(--primary-color);
-}
-
-input:checked+.slider:before {
-    transform: translateX(24px);
-}
-
-.slider.round {
-    border-radius: 24px;
-    width: 48px;
-}
-
-.slider.round:before {
-    border-radius: 50%;
-}
-
-.auto-save-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.auto-save-item .settings-controls {
-    flex: 0 0 auto;
-    min-width: auto;
-    display: flex;
-    justify-content: flex-end;
-}
-
-.auto-save-item label {
-    flex: 1;
-}
-
-.auto-save-item .switch {
-    margin-left: auto;
-}
-
-.path-selection {
-    display: flex;
-    align-items: center;
-}
-
-.path-selection input {
-    flex: 1;
-    margin-right: 8px;
-}
-
-.directory-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background-color: var(--card-bg);
-    color: var(--text-color);
-    cursor: pointer;
-    transition: var(--transition);
-}
-
-.directory-button:hover {
-    background-color: rgba(0, 0, 0, 0.05);
-    border-color: var(--primary-color);
-}
-
-.range-slider {
-    display: flex;
-    align-items: center;
-}
-
-.range-slider input[type="range"] {
-    flex: 1;
-    margin-right: 12px;
-}
-
-.range-value {
-    min-width: 40px;
-    text-align: center;
-    font-weight: 500;
-}
-
-.settings-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 24px;
-    gap: 12px;
-}
-
-.reset-button,
-.save-button {
-    padding: 10px 20px;
-    border-radius: var(--radius);
-    font-weight: 500;
-    cursor: pointer;
-    transition: var(--transition);
-}
-
-.reset-button {
-    background-color: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-color);
-}
-
-.reset-button:hover {
-    background-color: rgba(0, 0, 0, 0.05);
-    border-color: var(--text-color);
-}
-
-.save-button {
-    background-color: var(--primary-color);
-    border: none;
-    color: white;
-}
-
-.save-button:hover {
-    background-color: var(--primary-hover);
-}
-
-/* 通知样式 */
 .notification {
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    padding: 12px 16px;
-    border-radius: var(--radius);
-    background-color: white;
-    box-shadow: var(--shadow);
-    z-index: 1000;
-    max-width: 400px;
-    animation: slide-in 0.3s ease forwards;
-    border-left: 4px solid;
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
 }
 
 .notification.success {
-    border-left-color: #10b981;
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
 }
 
 .notification.error {
-    border-left-color: #ef4444;
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
 }
 
 .notification.info {
-    border-left-color: #3b82f6;
+  background-color: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
 }
 
-.notification-content {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.setting-section {
+  margin-bottom: 32px;
 }
 
-.notification-content svg {
-    flex-shrink: 0;
+.setting-section h3 {
+  margin: 0 0 16px 0;
+  color: var(--text-color);
+  font-size: 18px;
 }
 
-.notification.success svg {
-    color: #10b981;
+.section-description {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 16px;
 }
 
-.notification.error svg {
-    color: #ef4444;
+.setting-item {
+  margin-bottom: 16px;
 }
 
-.notification.info svg {
-    color: #3b82f6;
+.setting-item label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-color);
+  font-weight: 500;
 }
 
-@keyframes slide-in {
-    from {
-        transform: translateX(100%);
-        opacity: 0;
-    }
-
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
+.setting-item input, .setting-item select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--background-color);
+  color: var(--text-color);
 }
 
-/* 响应式样式 */
-@media (max-width: 768px) {
-    .settings-item {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .settings-item label {
-        margin-bottom: 8px;
-        flex: 0 0 auto;
-    }
-
-    .settings-controls {
-        width: 100%;
-    }
-
-    /* 在小屏幕下，确保开关居左对齐 */
-    .switch-container {
-        justify-content: flex-start;
-    }
-
-    .auto-save-item {
-        flex-direction: row;
-        align-items: center;
-    }
-
-    .auto-save-item label {
-        margin-bottom: 0;
-    }
-
-    .auto-save-item .settings-controls {
-        width: auto;
-    }
+.path-input-group {
+  display: flex;
+  gap: 8px;
 }
 
-
-.settings-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 24px;
-    gap: 12px;
+.path-input-group input {
+  flex: 1;
 }
 
-.reset-button,
-.save-button,
-.cancel-button {
-    padding: 10px 20px;
-    border-radius: var(--radius);
-    font-weight: 500;
-    cursor: pointer;
-    transition: var(--transition);
+.path-input-group button {
+  padding: 8px 16px;
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
 }
 
-.cancel-button {
-    background-color: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-color);
+.model-selection-item {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
 }
 
-.cancel-button:hover {
-    background-color: rgba(0, 0, 0, 0.05);
+.model-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-
-
-select {
-    /* 保留必要的自定义样式 */
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-
-    /* 添加下拉箭头背景 */
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    background-size: 16px;
-
-    /* 添加右侧内边距，避免文本与图标重叠 */
-    padding-right: 32px;
-
-    /* 移除可能导致延迟的性能优化属性 */
-    will-change: initial;
-    transform: none;
-
-    /* 简化过渡效果 */
-    transition: border-color 0.2s ease-in-out;
-
-    /* 确保覆盖浏览器默认样式 */
-    text-rendering: optimizeLegibility;
+.model-header h4 {
+  margin: 0;
+  color: var(--text-color);
 }
 
-select option {
-    background-color: var(--card-bg);
-    color: var(--text-color);
-    padding: 8px;
+.refresh-models-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-color);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  margin-left: auto;
 }
 
-/* 移除Firefox的下拉箭头 */
-select::-ms-expand {
-    display: none;
+.refresh-models-btn:hover:not(:disabled) {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
 }
 
-/* 优化选择框的聚焦效果 */
-select:focus {
-    border-color: var(--primary-color);
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+.refresh-models-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
-/* 修复自动保存开关的布局问题 */
-.settings-item .switch-container {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+.refresh-models-btn .loading-icon {
+  animation: spin 1s linear infinite;
 }
 
-.settings-item .switch-container label {
-    flex: 0 0 auto;
-    margin-right: auto;
+.reasoning-badge {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.switch-container .switch {
-    margin-left: auto;
+.model-selector select {
+  width: 100%;
+  margin-bottom: 8px;
 }
 
-/* 修复输入框和选择框的初始渲染 */
-input,
-select {
-    backface-visibility: hidden;
-    -webkit-font-smoothing: subpixel-antialiased;
+.model-loading {
+  font-size: 14px;
+  color: var(--primary-color);
+  padding: 8px 12px;
+  background: rgba(79, 70, 229, 0.1);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-/* 响应式调整 */
-@media (max-width: 768px) {
-    .settings-item .switch-container {
-        justify-content: space-between;
-        width: 100%;
-    }
-
-    .settings-item .switch-container label {
-        margin-right: 0;
-    }
+.model-loading::before {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--primary-color);
+  border-top: 2px solid transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 
-
-
-/* API Key 管理样式 */
-.api-keys-list {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+.model-error {
+  font-size: 14px;
+  color: #dc3545;
+  padding: 8px 12px;
+  background: rgba(220, 53, 69, 0.1);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border-left: 3px solid #dc3545;
 }
 
-.empty-state {
-    padding: 20px;
-    text-align: center;
-    color: var(--text-secondary);
-    border: 1px dashed var(--border-color);
-    border-radius: var(--radius);
-    margin-bottom: 16px;
+.model-description {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-style: italic;
 }
 
-.api-key-items {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+.key-type-section {
+  margin-bottom: 24px;
 }
 
-.api-key-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    background-color: var(--bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    transition: var(--transition);
+.key-type-section h4 {
+  margin: 0 0 12px 0;
+  color: var(--text-color);
 }
 
-.api-key-item:hover {
-    border-color: var(--primary-color);
+.no-keys {
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-bottom: 12px;
 }
 
-.api-key-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+.keys-grid {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
-.api-key-name {
-    font-weight: 500;
+.key-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: var(--card-background);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
 }
 
-.api-key-type {
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
+.key-info {
+  flex: 1;
 }
 
-.api-key-value {
-    font-family: monospace;
-    background-color: rgba(0, 0, 0, 0.03);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: var(--font-size-sm);
+.key-name {
+  font-weight: 500;
+  color: var(--text-color);
 }
 
-.delete-key-button {
-    background: none;
-    border: none;
-    color: var(--text-color);
-    opacity: 0.5;
-    cursor: pointer;
-    padding: 8px;
-    border-radius: var(--radius-sm);
-    transition: var(--transition);
+.key-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: monospace;
 }
 
-.delete-key-button:hover {
-    opacity: 1;
-    color: #ef4444;
-    background-color: rgba(239, 68, 68, 0.1);
+.delete-key-btn, .add-key-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
 }
 
-.add-api-key {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 10px;
-    border: 1px dashed var(--border-color);
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--primary-color);
-    cursor: pointer;
-    width: 100%;
-    transition: var(--transition);
+.delete-key-btn {
+  background: #dc3545;
+  color: white;
 }
 
-.add-api-key:hover {
-    background-color: rgba(79, 70, 229, 0.05);
+.add-key-btn {
+  background: var(--primary-color);
+  color: white;
 }
 
 .add-key-form {
-    padding: 16px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    background-color: var(--card-bg);
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-background);
 }
 
-.form-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-}
-
-.form-header h4 {
-    font-size: calc(var(--font-size-heading));
-    font-weight: 600;
-    margin: 0;
-}
-
-.close-form {
-    background: none;
-    border: none;
-    color: var(--text-color);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px;
-    border-radius: var(--radius-sm);
-    transition: var(--transition);
-}
-
-.close-form:hover {
-    background-color: rgba(0, 0, 0, 0.05);
+.add-key-form h4 {
+  margin: 0 0 16px 0;
+  color: var(--text-color);
 }
 
 .form-group {
-    margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .form-group label {
-    display: block;
-    font-weight: 500;
-    margin-bottom: 6px;
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-color);
+  font-weight: 500;
+}
+
+.form-group input, .form-group select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--background-color);
+  color: var(--text-color);
 }
 
 .form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 16px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
-.cancel-button,
-.add-key-button {
-    padding: 8px 16px;
-    border-radius: var(--radius-sm);
-    font-weight: 500;
-    cursor: pointer;
-    transition: var(--transition);
+.range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
 }
 
-.cancel-button {
-    background-color: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-color);
+.settings-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-top: 1px solid var(--border-color);
 }
 
-.add-key-button {
-    background-color: var(--primary-color);
-    border: none;
-    color: white;
+.footer-actions {
+  display: flex;
+  gap: 12px;
 }
 
-.cancel-button:hover {
-    background-color: rgba(0, 0, 0, 0.05);
+.reset-btn, .cancel-btn, .save-btn, .confirm-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
 }
 
-.add-key-button:hover {
-    background-color: var(--primary-hover);
+.reset-btn {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
 }
 
+.cancel-btn {
+  background: transparent;
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+}
 
+.save-btn, .confirm-btn {
+  background: var(--primary-color);
+  color: white;
+}
+
+.reset-btn:hover, .cancel-btn:hover {
+  background: var(--hover-background);
+}
+
+.save-btn:hover, .confirm-btn:hover {
+  background: var(--primary-hover);
+}
 </style>

@@ -1,6 +1,7 @@
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     io::Read,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -35,6 +36,7 @@ pub struct AppSettings {
     pub save_path: String,         // 保存路径
     pub api_model: String,         // 模型选择
     pub model_config: ModelConfig, // 模型配置
+    pub model_selection: HashMap<String, String>, // 每种API密钥类型的模型选择
 }
 
 // 模型配置结构体
@@ -45,7 +47,11 @@ pub struct ModelConfig {
 }
 
 impl Default for AppSettings {
-    fn default() -> Self {
+    fn default() -> Self {        let mut model_selection = HashMap::new();
+        model_selection.insert("Gemini".to_string(), "gemini-2.0-flash".to_string());
+        model_selection.insert("DeepSeek".to_string(), "deepseek-chat".to_string());
+        model_selection.insert("Coze".to_string(), "coze-bot".to_string());
+        
         AppSettings {
             theme: "system".to_string(),
             font_size: "medium".to_string(),
@@ -56,6 +62,7 @@ impl Default for AppSettings {
                 temperature: 0.7,
                 max_tokens: 2048,
             },
+            model_selection,
         }
     }
 }
@@ -116,11 +123,23 @@ impl AppSettings {
         if contents.trim().is_empty() {
             println!("Settings file is empty, using defaults");
             return Ok(AppSettings::default());
-        }
-
-        // 尝试解析 JSON
+        }        // 尝试解析 JSON
         match serde_json::from_str::<AppSettings>(&contents) {
-            Ok(settings) => Ok(settings),
+            Ok(mut settings) => {
+                println!("成功加载设置，模型选择: {:?}", settings.model_selection);
+                // 确保所有API类型都有对应的模型选择
+                if !settings.model_selection.contains_key("Gemini") {
+                    settings.model_selection.insert("Gemini".to_string(), "gemini-2.0-flash".to_string());
+                }
+                if !settings.model_selection.contains_key("DeepSeek") {
+                    settings.model_selection.insert("DeepSeek".to_string(), "deepseek-chat".to_string());
+                }
+                if !settings.model_selection.contains_key("Coze") {
+                    settings.model_selection.insert("Coze".to_string(), "coze-bot".to_string());
+                }
+                println!("修复后的模型选择: {:?}", settings.model_selection);
+                Ok(settings)
+            },
             Err(e) => {
                 println!("Failed to parse settings JSON, using defaults: {}", e);
                 Ok(AppSettings::default())
@@ -174,13 +193,24 @@ impl AppSettings {
 // Tauri 命令：获取设置
 #[tauri::command]
 pub fn get_settings() -> Result<AppSettings, String> {
-    AppSettings::load_from("settings.json")
+    let settings = AppSettings::load_from("settings.json");
+    if let Ok(ref s) = settings {
+        println!("返回给前端的设置，模型选择: {:?}", s.model_selection);
+    }
+    settings
 }
 
-// Tauri 命令：保存设置
+//     Tauri 命令：保存设置
 #[tauri::command]
 pub fn save_settings(settings: AppSettings) -> Result<(), String> {
-    settings.save_to("settings.json")
+    println!("收到前端保存设置请求，模型选择: {:?}", settings.model_selection);
+    let result = settings.save_to("settings.json");
+    if let Ok(_) = result {
+        println!("设置保存成功");
+    } else {
+        println!("设置保存失败: {:?}", result);
+    }
+    result
 }
 
 // Tauri 命令：获取默认设置

@@ -2,6 +2,42 @@ import { ref, reactive, inject, provide, watch } from 'vue';
 import { invoke } from "@tauri-apps/api/core";
 import { applyFontSize, applyTheme } from '../themeUtils';
 
+// 定义 ApiKeyType 枚举
+export enum ApiKeyType {
+    Gemini = "Gemini",
+    DeepSeek = "DeepSeek",
+    Coze = "Coze"
+}
+
+// 定义模型信息接口
+export interface ModelInfo {
+    name: string;
+    displayName: string;
+    isReasoning: boolean;
+    description?: string;
+}
+
+// 定义默认（静态）支持的模型，作为动态获取失败时的备选
+const DEFAULT_GEMINI_MODELS: ModelInfo[] = [
+    { name: 'gemini-2.0-flash', displayName: 'Gemini 2.0 Flash', isReasoning: false },
+    { name: 'gemini-1.5-pro', displayName: 'Gemini 1.5 Pro', isReasoning: false },
+    { name: 'gemini-1.5-flash', displayName: 'Gemini 1.5 Flash', isReasoning: false },
+    { name: 'gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', isReasoning: true, description: '推理模型，具备思维链展示能力' },
+    { name: 'gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', isReasoning: true, description: '推理模型，具备思维链展示能力' },
+];
+
+// 定义每种API密钥类型支持的模型
+export const SUPPORTED_MODELS: Record<ApiKeyType, ModelInfo[]> = {
+    [ApiKeyType.Gemini]: [...DEFAULT_GEMINI_MODELS], // 初始使用默认模型，后续会动态更新
+    [ApiKeyType.DeepSeek]: [
+        { name: 'deepseek-chat', displayName: 'DeepSeek Chat(V3)', isReasoning: false },
+        { name: 'deepseek-reasoner', displayName: 'DeepSeek Reasoner(R1)', isReasoning: true, description: '推理模型，具备强化思维链能力' },
+    ],
+    [ApiKeyType.Coze]: [
+        { name: 'coze-bot', displayName: 'Coze Bot', isReasoning: false, description: '使用内置Bot ID' },
+    ],
+};
+
 // 定义Settings类型
 export interface Settings {
     theme: 'system' | 'light' | 'dark';
@@ -13,13 +49,9 @@ export interface Settings {
         temperature: number;
         max_tokens: number;
     };
-}
-
-// 定义 ApiKeyType 枚举
-export enum ApiKeyType {
-    Gemini = "Gemini",
-    DeepSeek = "DeepSeek",
-    Coze = "Coze"
+    model_selection: {
+        [key in ApiKeyType]: string;
+    };
 }
 
 // 定义 ApiKey 接口
@@ -74,8 +106,7 @@ export interface Notification {
 // 定义provide/inject的key
 const SettingsKey = Symbol('settings');
 
-export function useSettingsProvider() {
-    // 设置选项
+export function useSettingsProvider() {    // 设置选项
     const settings = ref<Settings>({
         theme: 'system',
         font_size: 'medium',
@@ -85,15 +116,22 @@ export function useSettingsProvider() {
         model_config: {
             temperature: 0.7,
             max_tokens: 2048,
+        },        model_selection: {
+            [ApiKeyType.Gemini]: 'gemini-2.0-flash',
+            [ApiKeyType.DeepSeek]: 'deepseek-chat',
+            [ApiKeyType.Coze]: 'coze-bot',
         },
-    });
-
-    // 记录保存前的主题和字体大小，用于关闭设置时恢复
+    });    // 记录保存前的主题和字体大小，用于关闭设置时恢复
     const theme_before_save = ref<'system' | 'light' | 'dark'>('system');
     const font_size_before_save = ref<'small' | 'medium' | 'large'>('medium');
-
-    // 模型选项
+    
+    // 记录打开设置前的完整设置状态，用于取消时恢复
+    const settings_before_edit = ref<Settings | null>(null);    // 模型选项
     const modelOptions = ref<{ value: ApiKeyType; label: string; keyType: ApiKeyType }[]>([]);
+
+    // 动态模型列表状态
+    const isLoadingGeminiModels = ref(false);
+    const geminiModelsError = ref<string | null>(null);
 
     // API Key 管理
     const apiKeys = ref<APIKeyList>(new APIKeyList());
@@ -146,7 +184,86 @@ export function useSettingsProvider() {
                 return "Coze";
             default:
                 return "未知类型";
+        }    }
+
+    // 获取当前选择的模型是否为推理模型
+    function isCurrentModelReasoning(apiKeyType: ApiKeyType): boolean {
+        const selectedModel = settings.value.model_selection[apiKeyType];
+        const models = SUPPORTED_MODELS[apiKeyType];
+        const modelInfo = models.find(m => m.name === selectedModel);
+        return modelInfo?.isReasoning || false;
+    }    // 更新模型选择
+    function updateModelSelection(apiKeyType: ApiKeyType, modelName: string) {
+        console.log(`更新模型选择 - API类型: ${apiKeyType}, 新模型: ${modelName}`);
+        settings.value.model_selection[apiKeyType] = modelName;
+        console.log('更新后的模型选择:', settings.value.model_selection);
+        showNotification(`${getDisplayName(apiKeyType)} 模型已更新为 ${getAvailableModels(apiKeyType).find(m => m.name === modelName)?.displayName || modelName}`, 'success');
+        saveSettings();
+    }    // 获取指定API密钥类型的可用模型
+    function getAvailableModels(apiKeyType: ApiKeyType): ModelInfo[] {
+        return SUPPORTED_MODELS[apiKeyType] || [];
+    }
+
+    // 动态获取Gemini模型列表
+    async function fetchGeminiModels(): Promise<void> {
+        if (isLoadingGeminiModels.value) {
+            return; // 如果正在加载，避免重复请求
         }
+
+        isLoadingGeminiModels.value = true;
+        geminiModelsError.value = null;        try {
+            console.log('🔄 [DEBUG] Fetching Gemini model list...');
+            const models = await invoke("get_gemini_models", { keyType: "Gemini" }) as string[];
+            console.log('📦 [DEBUG] Model list returned from backend:', models);
+            
+            if (models && models.length > 0) {
+                console.log('✅ [DEBUG] Successfully fetched Gemini models, count:', models.length);
+                console.log('📋 [DEBUG] Model details:', models);
+                
+                // Convert model names to ModelInfo objects, using original names directly
+                const modelInfos: ModelInfo[] = models.map(modelName => {
+                    // Check if it's a reasoning model (contains specific keywords)
+                    const isReasoning = modelName.includes('thinking') || 
+                                       modelName.includes('reasoning') || 
+                                       modelName.includes('2.5');
+                    
+                    return {
+                        name: modelName,
+                        displayName: modelName, // Use original names directly, no aliases
+                        isReasoning: isReasoning,
+                        description: isReasoning ? '推理模型，具备强化思维链能力' : undefined
+                    };
+                });
+                
+                console.log('🔄 [DEBUG] Converted ModelInfo objects:', modelInfos);
+                
+                // Output model list before update
+                console.log('📝 [DEBUG] SUPPORTED_MODELS[Gemini] before update:', SUPPORTED_MODELS[ApiKeyType.Gemini]);
+                
+                // Update Gemini model list in SUPPORTED_MODELS
+                SUPPORTED_MODELS[ApiKeyType.Gemini] = modelInfos;
+                
+                // Verify model list after update
+                console.log('🎯 [DEBUG] SUPPORTED_MODELS[Gemini] after update:', SUPPORTED_MODELS[ApiKeyType.Gemini]);
+                console.log('📊 [DEBUG] Model list length:', SUPPORTED_MODELS[ApiKeyType.Gemini].length);
+                
+                // Verify global SUPPORTED_MODELS object
+                console.log('🌐 [DEBUG] Complete SUPPORTED_MODELS object:', SUPPORTED_MODELS);
+                
+            } else {
+                console.warn('⚠️ [DEBUG] No Gemini models fetched, using default list');
+                geminiModelsError.value = 'Failed to fetch model list, using default models';
+            }        } catch (error) {
+            console.error('❌ [DEBUG] Failed to fetch Gemini models:', error);
+            geminiModelsError.value = error instanceof Error ? error.message : 'Failed to fetch model list';
+        } finally {
+            isLoadingGeminiModels.value = false;
+        }
+    }
+
+    // 刷新Gemini模型列表
+    async function refreshGeminiModels(): Promise<void> {
+        await fetchGeminiModels();
     }
 
     // 显示通知
@@ -211,9 +328,7 @@ export function useSettingsProvider() {
             console.error("加载 API 密钥失败:", error);
             showNotification("加载 API 密钥失败", "error");
         }
-    }
-
-    // 添加新的 API Key
+    }    // 添加新的 API Key
     async function addApiKey() {
         if (!newApiKey.key || !newApiKey.name) {
             showNotification("密钥和名称不能为空", "error");
@@ -229,12 +344,21 @@ export function useSettingsProvider() {
         apiKeys.value.addKey(key);
         await saveApiKeyList(apiKeyConfigFile, apiKeys.value);
 
+        // 如果添加的是Gemini密钥，自动刷新模型列表
+        const isGeminiKey = newApiKey.key_type === ApiKeyType.Gemini;
+        
         // 重置表单
         newApiKey.key = '';
         newApiKey.name = '';
         isAddingKey.value = false;
 
-        showNotification("API 密钥已添加", "success");
+        showNotification("API 密钥已添加", "success");        
+        if (isGeminiKey) {
+            console.log('🔍 [DEBUG] Detected new Gemini key added, auto-fetching latest model list...');
+            fetchGeminiModels().catch(error => {
+                console.error('❌ [DEBUG] Auto-fetch Gemini models failed:', error);
+            });
+        }
     }
 
     // 删除 API Key
@@ -244,14 +368,14 @@ export function useSettingsProvider() {
             await saveApiKeyList(apiKeyConfigFile, apiKeys.value);
             showNotification("API 密钥已删除", "info");
         }
-    }
-
-    // 保存设置
+    }    // 保存设置
     async function saveSettings() {
         try {
+            console.log('准备保存设置，当前模型选择:', settings.value.model_selection);
             await invoke("save_settings", { settings: settings.value });
             theme_before_save.value = settings.value.theme;
             font_size_before_save.value = settings.value.font_size;
+            console.log('设置保存请求已发送');
             showNotification("设置已保存", "success");
         } catch (error) {
             console.error("保存设置失败:", error);
@@ -298,29 +422,81 @@ export function useSettingsProvider() {
         } catch (error) {
             console.error("加载设置失败:", error);
         }
-    }
-
-    // 关闭设置界面但不保存
+    }    // 关闭设置界面但不保存
     function cancelSettings() {
-        applyTheme(theme_before_save.value);
-        applyFontSize(font_size_before_save.value);
+        // 如果有备份的设置，恢复到打开设置前的状态
+        if (settings_before_edit.value) {
+            settings.value = { ...settings_before_edit.value };
+            console.log('已恢复设置到打开前的状态:', settings.value.model_selection);
+        } else {
+            // 至少恢复主题和字体大小
+            applyTheme(theme_before_save.value);
+            applyFontSize(font_size_before_save.value);
+        }
     }
 
-    // 初始化应用设置
+    // 备份当前设置状态（在打开设置界面时调用）
+    function backupCurrentSettings() {
+        settings_before_edit.value = { ...settings.value };
+        theme_before_save.value = settings.value.theme;
+        font_size_before_save.value = settings.value.font_size;
+        console.log('已备份当前设置状态');
+    }// 初始化应用设置
     async function initAppSettings() {
         try {
+            console.log('开始初始化应用设置...');
             const savedSettings = await invoke("get_settings");
+            console.log('从后端获取的设置:', savedSettings);
+            
             if (savedSettings) {
-                settings.value = { ...settings.value, ...savedSettings as Settings };
+                const settingsData = savedSettings as any;
+                console.log('设置更新前的模型选择:', settings.value.model_selection);
+                
+                // 更新各个字段，但保持响应式
+                if (settingsData.theme) settings.value.theme = settingsData.theme;
+                if (settingsData.font_size) settings.value.font_size = settingsData.font_size;
+                if (typeof settingsData.auto_save === 'boolean') settings.value.auto_save = settingsData.auto_save;
+                if (settingsData.save_path) settings.value.save_path = settingsData.save_path;
+                if (settingsData.api_model) settings.value.api_model = settingsData.api_model;
+                
+                // 更新模型配置
+                if (settingsData.model_config) {
+                    if (typeof settingsData.model_config.temperature === 'number') {
+                        settings.value.model_config.temperature = settingsData.model_config.temperature;
+                    }
+                    if (typeof settingsData.model_config.max_tokens === 'number') {
+                        settings.value.model_config.max_tokens = settingsData.model_config.max_tokens;
+                    }
+                }
+                
+                // 特别处理model_selection字段
+                if (settingsData.model_selection) {
+                    console.log('后端返回的模型选择数据:', settingsData.model_selection);
+                    
+                    // 确保每个API类型都有对应的模型选择
+                    Object.values(ApiKeyType).forEach(apiType => {
+                        const key = apiType.toString(); // 转换为字符串键
+                        if (settingsData.model_selection[key]) {
+                            settings.value.model_selection[apiType] = settingsData.model_selection[key];
+                            console.log(`设置 ${apiType} 模型为: ${settingsData.model_selection[key]}`);
+                        } else {
+                            console.log(`${apiType} 模型选择不存在，使用默认值`);
+                        }
+                    });
+                } else {
+                    console.log('model_selection字段不存在，保持默认值');
+                }
+                
+                console.log('设置更新后的模型选择:', settings.value.model_selection);
+                
                 // 应用主题
                 if (settings.value.theme === 'system') {
                     document.documentElement.removeAttribute('data-theme');
                 } else {
                     document.documentElement.setAttribute('data-theme', settings.value.theme);
-                }
-
-                // 应用字体大小
-                document.documentElement.setAttribute('data-font-size', settings.value.font_size);
+                }                // 应用字体大小
+                document.documentElement.setAttribute('data-font-size', settings.value.font_size);            } else {
+                console.log('没有获取到保存的设置，使用默认值');
             }
         } catch (error) {
             console.error("初始化应用设置失败:", error);
@@ -341,14 +517,15 @@ export function useSettingsProvider() {
         (newFontSize) => {
             applyFontSize(newFontSize);
         }
-    );
-
-    // 获取需要配置API密钥的类型（排除Coze）
+    );    // 获取需要配置API密钥的类型（排除Coze）
     function getConfigurableApiKeyTypes(): ApiKeyType[] {
         return Object.values(ApiKeyType).filter(type => type !== ApiKeyType.Coze);
     }
 
-    // 提供全局状态和方法
+    // 获取所有API类型（用于模型选择）
+    function getAllApiKeyTypes(): ApiKeyType[] {
+        return Object.values(ApiKeyType);
+    }    // 提供全局状态和方法
     provide(SettingsKey, {
         // 状态
         settings,
@@ -361,6 +538,8 @@ export function useSettingsProvider() {
         notification,
         themeOptions,
         fontSizeOptions,
+        isLoadingGeminiModels,
+        geminiModelsError,
         
         // 方法
         loadModelOptions,
@@ -371,14 +550,17 @@ export function useSettingsProvider() {
         deleteApiKey,
         saveSettings,
         resetSettings,
-        selectSavePath,
-        loadSettings,
-        cancelSettings,
+        selectSavePath,        loadSettings,        cancelSettings,
+        backupCurrentSettings,
         initAppSettings,
-        getConfigurableApiKeyTypes
-    });
-
-    return {
+        getConfigurableApiKeyTypes,
+        getAllApiKeyTypes,
+        isCurrentModelReasoning,
+        updateModelSelection,
+        getAvailableModels,
+        fetchGeminiModels,
+        refreshGeminiModels
+    });return {
         // 状态
         settings,
         theme_before_save,
@@ -390,6 +572,8 @@ export function useSettingsProvider() {
         notification,
         themeOptions,
         fontSizeOptions,
+        isLoadingGeminiModels,
+        geminiModelsError,
         
         // 方法
         loadModelOptions,
@@ -400,11 +584,17 @@ export function useSettingsProvider() {
         deleteApiKey,
         saveSettings,
         resetSettings,
-        selectSavePath,
-        loadSettings,
+        selectSavePath,        loadSettings,
         cancelSettings,
+        backupCurrentSettings,
         initAppSettings,
-        getConfigurableApiKeyTypes
+        getConfigurableApiKeyTypes,
+        getAllApiKeyTypes,
+        isCurrentModelReasoning,
+        updateModelSelection,
+        getAvailableModels,
+        fetchGeminiModels,
+        refreshGeminiModels
     };
 }
 

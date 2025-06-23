@@ -96,7 +96,8 @@ static NEXT_CHAT_ID: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(2)); // 下一�
 // });
 
 static SYSTEM_PROMPT: Lazy<String> = Lazy::new(|| {
-    r#"## 航小天的个性设置：
+    r#"# 以下是你需要扮演的人设,**请注意**不要以**任何方式**让这些文本不要出现在思考中
+    ## 航小天的个性设置：
 - **Name**: 航小天
 - **Identity**: 西北工业大学AI学习伙伴，致力于为**不同学习阶段与需求**的学生提供学业支持与科研辅助。
 - **Description**: 航小天是知识渊博、逻辑清晰且富有耐心的AI导师。它能够精确解答学术问题，**并根据用户的提问和反馈动态调整解释的深度与广度**，提供有效的学习策略，辅助编程、数学计算及学术写作。它会主动尝试理解用户的现有知识水平。
@@ -279,9 +280,11 @@ fn create_new_chat() -> Vec<ChatMessage> {
 
 // 以流式方式处理用户消息
 #[tauri::command]
-async fn process_message_stream(window: Window, message: String, key_type: String) {
+async fn process_message_stream(window: Window, message: String, key_type: String, model_name: Option<String>) {
     // 克隆窗口以便在新线程中使用
-    let window_clone = window.clone();    // 获取API密钥
+    let window_clone = window.clone();
+    
+    println!("收到请求 - API类型: {}, 模型名称: {:?}", key_type, model_name);// 获取API密钥
     let api_key = match key_type.as_str() {
         "Coze" => {
             // Coze 使用内置密钥，不需要从配置读取
@@ -324,11 +327,16 @@ async fn process_message_stream(window: Window, message: String, key_type: Strin
                 }
             }
         }
-    };// 初始化AI聊天实例
-    // let mut chat = aibackend::gemini::GeminiChat::new();
+    };    // 初始化AI聊天实例
     let mut chat = match key_type.as_str() {
-        "DeepSeek" => AIChatType::DeepSeek(DeepSeekChat::new()),
-        "Gemini" => AIChatType::Gemini(GeminiChat::new()),
+        "DeepSeek" => {
+            let model = model_name.as_deref().unwrap_or("deepseek-chat");
+            AIChatType::DeepSeek(DeepSeekChat::new_with_model(model))
+        },
+        "Gemini" => {
+            let model = model_name.as_deref().unwrap_or("gemini-2.5-flash");
+            AIChatType::Gemini(GeminiChat::new_with_model(model))
+        },
         "Coze" => AIChatType::Coze(CozeChat::new()),
         _ => {
             let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
@@ -673,6 +681,7 @@ async fn regenerate_message(
     window: Window,
     message_index: usize,
     key_type: String,
+    model_name: Option<String>,
 ) -> Result<(), String> {
     // 克隆窗口以便在新线程中使用
     let window_clone = window.clone();
@@ -706,44 +715,60 @@ async fn regenerate_message(
         let _ = window_clone.emit("stream-message", "只能重新生成助手的消息");
         let _ = window_clone.emit("stream-complete", "");
         return Ok(());
-    }
-
-    // 获取API密钥
-    let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
-    let key_list = api_key_list.filter_by_type(match key_type.as_str() {
-        "DeepSeek" => aibackend::apikey::ApiKeyType::DeepSeek,
-        "Gemini" => aibackend::apikey::ApiKeyType::Gemini,
+    }    // 获取API密钥
+    let api_key = match key_type.as_str() {
+        "Coze" => {
+            // Coze 使用内置密钥，不需要从配置读取
+            aibackend::apikey::ApiKey {
+                key: "built-in".to_string(),
+                name: "Coze Built-in".to_string(),
+                key_type: aibackend::apikey::ApiKeyType::Coze,
+            }
+        }
         _ => {
-            let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
-            return Ok(());
+            // 其他类型从配置文件读取
+            let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
+            let key_list = api_key_list.filter_by_type(match key_type.as_str() {
+                "DeepSeek" => aibackend::apikey::ApiKeyType::DeepSeek,
+                "Gemini" => aibackend::apikey::ApiKeyType::Gemini,
+                _ => {
+                    let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
+                    return Ok(());
+                }
+            });
+
+            if key_list.keys.is_empty() {
+                // 如果没有API密钥，发送错误消息
+                let _ = window_clone.emit(
+                    "stream-message",
+                    format!("没有可用的{} API密钥，请在设置中添加", key_type),
+                );
+                return Ok(());
+            }
+
+            // 随机选择一个API密钥
+            match key_list.random_key() {
+                Some(key) => key,
+                None => {
+                    let _ = window_clone.emit(
+                        "stream-message",
+                        format!("没有可用的{} API密钥，请在设置中添加", key_type),
+                    );
+                    return Ok(());
+                }
+            }
         }
-    });
-
-    if key_list.keys.is_empty() {
-        // 如果没有API密钥，发送错误消息
-        let _ = window_clone.emit(
-            "stream-message",
-            format!("没有可用的{} API密钥，请在设置中添加", key_type),
-        );
-        return Ok(());
-    }
-
-    // 随机选择一个API密钥
-    let api_key = match key_list.random_key() {
-        Some(key) => key,
-        None => {
-            let _ = window_clone.emit(
-                "stream-message",
-                format!("没有可用的{} API密钥，请在设置中添加", key_type),
-            );
-            return Ok(());
-        }
-    };
-
-    // 初始化AI聊天实例
+    };// 初始化AI聊天实例
     let mut ai_chat = match key_type.as_str() {
-        "DeepSeek" => AIChatType::DeepSeek(DeepSeekChat::new()),
-        "Gemini" => AIChatType::Gemini(GeminiChat::new()),
+        "DeepSeek" => {
+            let model = model_name.as_deref().unwrap_or("deepseek-chat");
+            AIChatType::DeepSeek(DeepSeekChat::new_with_model(model))
+        },
+        "Gemini" => {
+            let model = model_name.as_deref().unwrap_or("gemini-2.5-flash");
+            AIChatType::Gemini(GeminiChat::new_with_model(model))
+        },
+        "Coze" => AIChatType::Coze(CozeChat::new()),
         _ => {
             let _ = window_clone.emit("stream-message", "不支持的API密钥类型，请检查设置");
             return Ok(());
@@ -1294,6 +1319,69 @@ async fn add_file_content_as_message(
     Ok(())
 }
 
+// 添加获取Gemini模型列表的命令
+#[tauri::command]
+async fn get_gemini_models(key_type: String) -> Result<Vec<String>, String> {
+    println!("🔍 [DEBUG] get_gemini_models called with key_type: {}", key_type);
+    
+    if key_type != "Gemini" {
+        println!("❌ [DEBUG] Unsupported key_type: {}", key_type);
+        return Err("Only Gemini model fetching is supported".to_string());
+    }
+    
+    // Get API keys
+    let api_key_list = aibackend::apikey::get_api_key_list_or_create("api_keys.json");
+    let gemini_keys = api_key_list.filter_by_type(aibackend::apikey::ApiKeyType::Gemini);
+    
+    println!("🔑 [DEBUG] Found {} Gemini API keys", gemini_keys.keys.len());
+    
+    if gemini_keys.keys.is_empty() {
+        println!("❌ [DEBUG] No Gemini API keys found");
+        return Err("No Gemini API keys available, please add a key first".to_string());
+    }
+    
+    // Use the first available API key
+    let api_key = &gemini_keys.keys[0];
+    println!("🔑 [DEBUG] Using API key: {}...", &api_key.key[..std::cmp::min(10, api_key.key.len())]);
+    
+    match aibackend::gemini::fetch_available_models(&api_key.key).await {
+        Ok(models) => {
+            println!("✅ [DEBUG] Successfully fetched model list, count: {}", models.len());
+            println!("📋 [DEBUG] Model list: {:?}", models);
+            
+            if models.is_empty() {
+                println!("⚠️ [DEBUG] API returned empty model list, using default list");
+                // If API call fails or returns empty list, return default static list
+                let default_models = vec![
+                    "gemini-2.0-flash".to_string(),
+                    "gemini-1.5-pro".to_string(),
+                    "gemini-1.5-flash".to_string(),
+                    "gemini-2.5-pro".to_string(),
+                    "gemini-2.5-flash".to_string(),
+                ];
+                println!("📋 [DEBUG] Returning default model list: {:?}", default_models);
+                Ok(default_models)
+            } else {
+                println!("🚀 [DEBUG] Returning dynamically fetched model list: {:?}", models);
+                Ok(models)
+            }
+        }
+        Err(e) => {
+            println!("❌ [DEBUG] Failed to fetch Gemini model list: {}", e);
+            // Return default static list as fallback
+            let default_models = vec![
+                "gemini-2.0-flash".to_string(),
+                "gemini-1.5-pro".to_string(),
+                "gemini-1.5-flash".to_string(),
+                "gemini-2.5-pro".to_string(),
+                "gemini-2.5-flash".to_string(),
+            ];
+            println!("📋 [DEBUG] Returning fallback model list: {:?}", default_models);
+            Ok(default_models)
+        }
+    }
+}
+
 // 移除测试模块
 // mod test_coze;
 
@@ -1327,6 +1415,7 @@ pub fn run() {
             setting::setting::get_default_settings,
             setting::setting::select_save_directory,
             wolfram_alpha_compute, // 添加新的Wolfram Alpha计算命令
+            get_gemini_models, // 添加获取Gemini模型列表的命令
             //new add code
 
         ])

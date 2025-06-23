@@ -657,13 +657,16 @@ body {
     position: relative;
     width: 90%;
     max-width: 800px;
+    height: 90vh; /* 设置固定高度 */
     max-height: 90vh;
     border-radius: var(--radius-lg);
     background-color: var(--card-bg);
     box-shadow: var(--shadow);
-    overflow: hidden;
+    overflow: hidden; /* 防止整个容器滚动 */
     animation: modal-in 0.3s ease forwards;
     z-index: 1001;
+    display: flex;
+    flex-direction: column; /* 确保内部组件可以正确处理flex布局 */
 }
 
 @keyframes modal-in {
