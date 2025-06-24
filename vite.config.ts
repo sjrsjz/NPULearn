@@ -50,13 +50,17 @@ export default defineConfig(async () => ({
       'entities/escape': 'entities/dist/escape.js'
     }
   },
-  
-  // 添加构建配置
+    // 添加构建配置
   build: {
     commonjsOptions: {
       include: [/entities/, /node_modules/]
-    }
+    },
+    // 确保字体文件被正确复制
+    assetsInclude: ['**/*.ttf', '**/*.woff', '**/*.woff2', '**/*.otf']
   },
+  
+  // 添加静态资源处理
+  assetsInclude: ['**/*.ttf', '**/*.woff', '**/*.woff2', '**/*.otf'],
   
   // 定义全局变量
   define: {

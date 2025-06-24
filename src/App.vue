@@ -27,6 +27,7 @@ import { Window } from '@tauri-apps/api/window';
 import { loadMathJax, renderMathInElement } from "./App/mathjax.ts";
 import { createNewChat, loadChatHistory, selectHistory } from "./App/chatHistory.ts";
 import { initMermaid, changeMermaidTheme, setupAllMermaidInteractions } from "./App/typesetting/mermaidRenderer.ts";
+import { renderTypstDocuments, setupAllTypstInteractions } from "./App/typesetting/typstRenderer.ts";
 import { applyHighlight, setupAllCopyButtons } from "./App/typesetting/typesetting.ts";
 import { chatHistory, eventBus, isLoading, isStreaming } from "./App/eventBus.ts";
 import { ChatHistory, ChatMessage } from "./App/types.ts";
@@ -203,11 +204,12 @@ function isWhitelistedElement(element: HTMLElement): boolean {
         currentElement.closest('.interactive-command-button')) {
       return true;
     }
-    
-    // 图表交互按钮（Mermaid 和 Pintora）
+      // 图表交互按钮（Mermaid、Pintora 和 Typst）
     if (currentElement.classList.contains('refresh-diagram-button') ||
         currentElement.classList.contains('zoom-diagram-button') ||
-        currentElement.closest('.refresh-diagram-button, .zoom-diagram-button')) {
+        currentElement.classList.contains('refresh-typst-button') ||
+        currentElement.classList.contains('zoom-typst-button') ||
+        currentElement.closest('.refresh-diagram-button, .zoom-diagram-button, .refresh-typst-button, .zoom-typst-button')) {
       return true;
     }
     
@@ -372,15 +374,18 @@ function setupFunctions() {
   setupExternalLinks();
   setupActionButtons(); 
   setupAllCopyButtons();
-  
-  // 重要：为所有 Mermaid 图表绑定交互事件（包括流式传输结束后的图表）
+    // 重要：为所有 Mermaid 图表绑定交互事件（包括流式传输结束后的图表）
   const chatMessagesContainer = document.querySelector('.chat-messages') as HTMLElement;
   if (chatMessagesContainer) {
     console.log('在聊天内容更新后，重新绑定所有 Mermaid 图表的交互事件');
     setupAllMermaidInteractions(chatMessagesContainer);
+    console.log('在聊天内容更新后，重新绑定所有 Typst 文档的交互事件');
+    setupAllTypstInteractions(chatMessagesContainer);
   } else {
     console.log('在聊天内容更新后，使用全局容器绑定 Mermaid 图表的交互事件');
     setupAllMermaidInteractions(document.body);
+    console.log('在聊天内容更新后，使用全局容器绑定 Typst 文档的交互事件');
+    setupAllTypstInteractions(document.body);
   }
   
   scrollToBottom(true, false); // 强制滚动，因为这是新内容渲染
@@ -480,9 +485,17 @@ async function setupStreamListeners() {
 
       // 同样检查是否为最新更新
       requestAnimationFrame(() => {
-        if (finalUpdateId === latestUpdateId) {
-          updateChatContent(chatContent);
+        if (finalUpdateId === latestUpdateId) {          updateChatContent(chatContent);
           nextTick(() => {
+            // 处理流式传输结束后的 Typst 文档渲染
+            setTimeout(() => {
+              const chatMessagesContainer = document.querySelector('.chat-messages') as HTMLElement;
+              if (chatMessagesContainer) {
+                console.log('流式传输完成，开始渲染 Typst 文档');
+                renderTypstDocuments(0, 3, chatMessagesContainer);
+              }
+            }, 500); // 给DOM一些时间完全更新
+
             invoke("get_chat_history_items").then((historyItems: any) => {
               chatHistory.value = historyItems as ChatHistory[];
               console.log("聊天历史已更新:", chatHistory.value);
@@ -1084,7 +1097,7 @@ onMounted(async () => {
     if (geminiKeys.keys.length > 0) {
       console.log('应用启动时检测到Gemini API密钥，自动获取最新模型列表...');
       // 异步获取，不阻塞应用启动
-      fetchGeminiModels().catch(error => {
+      fetchGeminiModels().catch((error: any) => {
         console.error('应用启动时获取Gemini模型失败:', error);
       });
     } else {

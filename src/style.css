@@ -166,13 +166,36 @@ html[data-theme="dark"] .pintora-container {
   border: 1px solid #334155;
 }
 
+/* Typst文档容器样式 */
+.typst-container {
+  background-color: #f6f8fa;
+  border-radius: 6px;
+  margin: 16px 0;
+  padding: 16px;
+  overflow: hidden;
+  overflow-x: auto;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e1e4e8;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+html[data-theme="dark"] .typst-container {
+  background-color: #1e293b;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  border: 1px solid #334155;
+}
+
 /* 移除加载动画，使图表立即显示 */
 .mermaid-container.loaded {
   opacity: 1;
   transform: scale(1);
 }
 
-.mermaid-loading, .pintora-loading {
+.mermaid-loading, .pintora-loading, .typst-loading {
   color: var(--text-secondary);
   font-size: 14px;
 }
@@ -1801,6 +1824,17 @@ chat-messages a:active {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
+/* Typst 容器可点击样式 */
+.typst-container.clickable-container {
+    cursor: zoom-in;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.typst-container.clickable-container:hover {
+    transform: scale(1.01);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
 /* 图表容器操作按钮 */
 .mermaid-container {
     position: relative;
@@ -1873,7 +1907,9 @@ chat-messages a:active {
 }
 
 .refresh-diagram-button,
-.zoom-diagram-button {
+.zoom-diagram-button,
+.refresh-typst-button,
+.zoom-typst-button {
     position: absolute;
     background-color: var(--card-bg);
     border: 1px solid var(--border-color);
@@ -1890,25 +1926,31 @@ chat-messages a:active {
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
-.refresh-diagram-button {
+.refresh-diagram-button,
+.refresh-typst-button {
     top: 8px;
     right: 8px;
 }
 
-.zoom-diagram-button {
+.zoom-diagram-button,
+.zoom-typst-button {
     top: 8px;
     right: 44px;
     /* 位于刷新按钮旁边 */
 }
 
 .refresh-diagram-button:hover,
-.zoom-diagram-button:hover {
+.zoom-diagram-button:hover,
+.refresh-typst-button:hover,
+.zoom-typst-button:hover {
     opacity: 1;
     transform: scale(1.1);
 }
 
 .refresh-diagram-button svg,
-.zoom-diagram-button svg {
+.zoom-diagram-button svg,
+.refresh-typst-button svg,
+.zoom-typst-button svg {
     color: var(--text-color);
 }
 
@@ -2077,20 +2119,23 @@ chat-messages a:active {
 
     .chart-viewer-body {
         padding: 16px;
-    }
-
-    .refresh-diagram-button,
-    .zoom-diagram-button {
+    }    .refresh-diagram-button,
+    .zoom-diagram-button,
+    .refresh-typst-button,
+    .zoom-typst-button {
         width: 24px;
         height: 24px;
     }
 
-    .zoom-diagram-button {
+    .zoom-diagram-button,
+    .zoom-typst-button {
         right: 40px;
     }
 
     .refresh-diagram-button svg,
-    .zoom-diagram-button svg {
+    .zoom-diagram-button svg,
+    .refresh-typst-button svg,
+    .zoom-typst-button svg {
         width: 14px;
         height: 14px;
     }
@@ -2531,6 +2576,77 @@ chat-messages a:active {
     background-color: rgba(255, 255, 255, 0.05);
 }
 
+.typst-error {
+    padding: 10px;
+    border: 1px solid #ff6b6b;
+    border-radius: 4px;
+    background-color: rgba(255, 107, 107, 0.1);
+    margin: 10px 0;
+}
+
+.typst-error p {
+    color: #e74c3c;
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.typst-error .error-message {
+    color: #e74c3c;
+    background-color: rgba(231, 76, 60, 0.05);
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    max-height: 500px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.typst-source details {
+    margin-top: 10px;
+}
+
+.typst-source summary {
+    cursor: pointer;
+    color: #3498db;
+    font-size: 14px;
+    padding: 5px 0;
+    user-select: none;
+}
+
+.typst-source .code-container {
+    position: relative;
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-top: 5px;
+}
+
+.typst-source .code-content {
+    background-color: rgba(0, 0, 0, 0.02);
+    padding: 10px;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .typst-error {
+    border-color: #ff7675;
+    background-color: rgba(255, 118, 117, 0.1);
+}
+
+[data-theme="dark"] .typst-source .code-container {
+    border-color: #444;
+}
+
+[data-theme="dark"] .typst-source .code-content {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
 
 /* Typst 文档容器样式 */
 .typst-container {
@@ -2580,7 +2696,6 @@ chat-messages a:active {
     padding: 10px;
     border-radius: 4px;
     margin: 10px 0;
-    border-left: 4px solid #d32f2f;
 }
 
 .typst-source-error {

@@ -364,7 +364,7 @@ onMounted(async () => {
     const geminiKeys = apiKeys.value.filterByType(ApiKeyType.Gemini);
     if (geminiKeys.keys.length > 0) {
       console.log('检测到Gemini API密钥，自动获取最新模型列表...');
-      fetchGeminiModels().catch(error => {
+      fetchGeminiModels().catch((error: any) => {
         console.error('自动获取Gemini模型失败:', error);
       });
     } else {
