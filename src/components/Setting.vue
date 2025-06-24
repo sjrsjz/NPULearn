@@ -9,7 +9,7 @@
     <div v-if="isLoading" class="loading-container">
       <div class="loading-spinner"></div>
       <p>正在加载设置...</p>
-    </div>    <!-- 设置内容 -->
+    </div> <!-- 设置内容 -->
     <div v-else class="settings-content">
       <!-- 基础设置 -->
       <div class="setting-section">
@@ -36,16 +36,18 @@
       <div class="setting-section">
         <h3>模型管理</h3>
         <p class="section-description">为每种AI服务选择要使用的模型</p>
-        <div v-for="apiType in getAllApiKeyTypes()" :key="apiType" class="model-selection-item">          <div class="model-header">
+        <div v-for="apiType in getAllApiKeyTypes()" :key="apiType" class="model-selection-item">
+          <div class="model-header">
             <h4>{{ getDisplayName(apiType) }}</h4>
             <span v-if="isCurrentModelReasoning(apiType)" class="reasoning-badge">推理模型</span>
-            
+
             <!-- Gemini模型加载状态显示在标题右边 -->
             <div v-if="apiType === 'Gemini' && isLoadingGeminiModels" class="model-loading-inline">
               <div class="loading-spinner-small"></div>
               <span>获取模型列表中...</span>
             </div>
-          </div>          <div class="model-selector">
+          </div>
+          <div class="model-selector">
             <select v-model="settings.model_selection[apiType]"
               @change="updateModelSelection(apiType, ($event.target as HTMLSelectElement).value)"
               :disabled="apiType === 'Gemini' && isLoadingGeminiModels">
@@ -216,14 +218,12 @@ const {
   isAddingKey,
   isLoadingGeminiModels,
   geminiModelsError,
-  loadApiKeys,
-  addApiKey,
+  loadApiKeys, addApiKey,
   deleteApiKey,
   saveSettings,
   resetSettings,
   cancelSettings,
   backupCurrentSettings,
-  getConfigurableApiKeyTypes,
   getAllApiKeyTypes,
   isCurrentModelReasoning,
   updateModelSelection,
@@ -240,32 +240,6 @@ const showNotification = (message: string, type: 'success' | 'error' | 'info' = 
 
 // API 密钥类型选项
 const apiKeyTypes = Object.values(ApiKeyType);
-
-// 获取指定类型的密钥
-function getKeysForType(keyType: ApiKeyType) {
-  return apiKeys.value.filterByType(keyType).keys;
-}
-
-// 掩码显示API密钥
-function maskApiKey(key: string): string {
-  if (key.length <= 8) return '****';
-  return key.substring(0, 4) + '****' + key.substring(key.length - 4);
-}
-
-// 开始添加密钥
-function startAddingKey(keyType: ApiKeyType) {
-  newApiKey.key_type = keyType;
-  newApiKey.key = '';
-  newApiKey.name = '';
-  isAddingKey.value = true;
-}
-
-// 取消添加密钥
-function cancelAddingKey() {
-  isAddingKey.value = false;
-  newApiKey.key = '';
-  newApiKey.name = '';
-}
 
 // 添加用于API密钥删除确认的状态
 const showConfirmDeleteKey = ref(false);
@@ -328,7 +302,7 @@ function handleCancel() {
 async function handleSaveAndClose() {
   try {
     await saveSettings();
-    
+
     showNotification('设置已保存', 'success');
 
     // 确保样式已经应用

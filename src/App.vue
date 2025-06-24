@@ -138,20 +138,20 @@ function preventAllNavigation() {
   document.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
     const link = target.closest('a');
-    
+
     // 检查是否是白名单中的元素，如果是则不阻止
     if (isWhitelistedElement(target)) {
       console.log('允许白名单元素的点击事件:', target);
       return; // 不阻止白名单元素的事件
     }
-    
+
     if (link && link.href) {
       e.preventDefault();
       e.stopPropagation();
-      
+
       const href = link.href;
       console.log('阻止链接跳转:', href);
-      
+
       // 可以选择将链接复制到剪贴板
       if (href.startsWith('http://') || href.startsWith('https://')) {
         writeText(href).then(() => {
@@ -175,8 +175,7 @@ function preventAllNavigation() {
   }, true);
 
   // 阻止 window.open
-  const originalOpen = window.open;
-  window.open = function(url?: string | URL, target?: string, features?: string) {
+  window.open = function (url?: string | URL) {
     console.log('阻止 window.open:', url);
     showNotification('已阻止弹出新窗口', 'warning');
     return null;
@@ -187,60 +186,60 @@ function preventAllNavigation() {
 function isWhitelistedElement(element: HTMLElement): boolean {
   // 检查元素本身和其父元素是否包含白名单的类名或属性
   let currentElement: HTMLElement | null = element;
-  
+
   while (currentElement) {
     // WolframAlpha 相关查询的白名单
     if (currentElement.closest('.wolfram-related-queries')) {
       return true;
     }
-    
+
     // 具有 data-query 属性的元素（WolframAlpha 查询项）
     if (currentElement.hasAttribute('data-query')) {
       return true;
     }
-    
+
     // Interactive Button 相关元素
     if (currentElement.classList.contains('interactive-command-button') ||
-        currentElement.closest('.interactive-command-button')) {
+      currentElement.closest('.interactive-command-button')) {
       return true;
     }
-      // 图表交互按钮（Mermaid、Pintora 和 Typst）
+    // 图表交互按钮（Mermaid、Pintora 和 Typst）
     if (currentElement.classList.contains('refresh-diagram-button') ||
-        currentElement.classList.contains('zoom-diagram-button') ||
-        currentElement.classList.contains('refresh-typst-button') ||
-        currentElement.classList.contains('zoom-typst-button') ||
-        currentElement.closest('.refresh-diagram-button, .zoom-diagram-button, .refresh-typst-button, .zoom-typst-button')) {
+      currentElement.classList.contains('zoom-diagram-button') ||
+      currentElement.classList.contains('refresh-typst-button') ||
+      currentElement.classList.contains('zoom-typst-button') ||
+      currentElement.closest('.refresh-diagram-button, .zoom-diagram-button, .refresh-typst-button, .zoom-typst-button')) {
       return true;
     }
-    
+
     // 代码复制按钮
     if (currentElement.classList.contains('code-copy-button') ||
-        currentElement.closest('.code-copy-button')) {
+      currentElement.closest('.code-copy-button')) {
       return true;
     }
-    
+
     // 应用内的其他交互按钮
     if (currentElement.classList.contains('interactive-button') ||
-        currentElement.classList.contains('wolfram-query-item') ||
-        currentElement.classList.contains('allow-navigation') ||
-        currentElement.classList.contains('markdown-button') ||
-        currentElement.classList.contains('copy-button') ||
-        currentElement.classList.contains('regenerate-button') ||
-        currentElement.hasAttribute('data-allow-click')) {
+      currentElement.classList.contains('wolfram-query-item') ||
+      currentElement.classList.contains('allow-navigation') ||
+      currentElement.classList.contains('markdown-button') ||
+      currentElement.classList.contains('copy-button') ||
+      currentElement.classList.contains('regenerate-button') ||
+      currentElement.hasAttribute('data-allow-click')) {
       return true;
     }
-    
+
     // 特定容器内的所有元素（如果容器本身允许交互）
     if (currentElement.closest('.interactive-button-container') ||
-        currentElement.closest('.wolfram-result-container') ||
-        currentElement.closest('.message-actions')) {
+      currentElement.closest('.wolfram-result-container') ||
+      currentElement.closest('.message-actions')) {
       return true;
     }
-    
+
     // 检查父元素
     currentElement = currentElement.parentElement;
   }
-  
+
   return false;
 }
 
@@ -372,9 +371,9 @@ function setupFunctions() {
   // 其他需要在DOM更新后执行的代码...
   renderMathInElement();
   setupExternalLinks();
-  setupActionButtons(); 
+  setupActionButtons();
   setupAllCopyButtons();
-    // 重要：为所有 Mermaid 图表绑定交互事件（包括流式传输结束后的图表）
+  // 重要：为所有 Mermaid 图表绑定交互事件（包括流式传输结束后的图表）
   const chatMessagesContainer = document.querySelector('.chat-messages') as HTMLElement;
   if (chatMessagesContainer) {
     console.log('在聊天内容更新后，重新绑定所有 Mermaid 图表的交互事件');
@@ -387,7 +386,7 @@ function setupFunctions() {
     console.log('在聊天内容更新后，使用全局容器绑定 Typst 文档的交互事件');
     setupAllTypstInteractions(document.body);
   }
-  
+
   scrollToBottom(true, false); // 强制滚动，因为这是新内容渲染
 
   // 内容渲染完成后重新设置滚动监听器和检查滚动按钮状态
@@ -485,7 +484,8 @@ async function setupStreamListeners() {
 
       // 同样检查是否为最新更新
       requestAnimationFrame(() => {
-        if (finalUpdateId === latestUpdateId) {          updateChatContent(chatContent);
+        if (finalUpdateId === latestUpdateId) {
+          updateChatContent(chatContent);
           nextTick(() => {
             // 处理流式传输结束后的 Typst 文档渲染
             setTimeout(() => {
@@ -593,10 +593,10 @@ function setupActionButtons() {
           const currentModelName = getCurrentSelectedModel(currentApiType);
 
           // 调用后端重新生成消息
-          await invoke("regenerate_message", { 
-            messageIndex, 
-            keyType: selectedModel.value, 
-            modelName: currentModelName 
+          await invoke("regenerate_message", {
+            messageIndex,
+            keyType: selectedModel.value,
+            modelName: currentModelName
           });
 
           // 处理将在事件监听器中完成
@@ -787,20 +787,20 @@ async function sendStreamMessage() {
 
   // 先设置状态，确保在任何渲染发生前就已标记为流传输
   isStreaming.value = true;
-  isLoading.value = true;  console.log("开始流式传输消息");
+  isLoading.value = true; console.log("开始流式传输消息");
   scrollToBottom(true, true); // 强制滚动到底部
 
   // 获取当前选择的模型名称
   const currentApiType = selectedModel.value as ApiKeyType;
   const currentModelName = getCurrentSelectedModel(currentApiType);
-  
+
   console.log(`当前API类型: ${currentApiType}, 选择的模型: ${currentModelName}`);
-  
+
   // 使用 Promise 包装后端调用，但不等待它完成
-  invoke("process_message_stream", { 
-    message, 
+  invoke("process_message_stream", {
+    message,
     keyType: selectedModel.value,
-    modelName: currentModelName 
+    modelName: currentModelName
   })
     .catch(error => {
       console.error("消息发送失败:", error);
@@ -855,10 +855,10 @@ async function sendStreamMessageDirect(message: string) {
   const currentModelName = getCurrentSelectedModel(currentApiType);
 
   // 使用 Promise 包装后端调用，但不等待它完成
-  invoke("process_message_stream", { 
-    message, 
+  invoke("process_message_stream", {
+    message,
     keyType: selectedModel.value,
-    modelName: currentModelName 
+    modelName: currentModelName
   })
     .catch(error => {
       console.error("消息发送失败:", error);
@@ -1514,10 +1514,10 @@ async function regenerateCurrentMessage() {
       const currentModelName = getCurrentSelectedModel(currentApiType);
 
       // 调用后端重新生成消息
-      await invoke("regenerate_message", { 
-        messageIndex: messageContextMenuIndex.value, 
+      await invoke("regenerate_message", {
+        messageIndex: messageContextMenuIndex.value,
         keyType: selectedModel.value,
-        modelName: currentModelName 
+        modelName: currentModelName
       });
 
       // 处理将在事件监听器中完成

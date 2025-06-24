@@ -74,20 +74,41 @@ async function initializeTypst() {
         }
 
         // 使用字体配置初始化
-        $typst.setCompilerInitOptions({
-            getModule: () => compilerWasm,
-            beforeBuild: beforeBuild
-        });
+        try {
+            $typst.setCompilerInitOptions({
+                getModule: () => compilerWasm,
+                beforeBuild: beforeBuild
+            });
+        } catch (e) {
+            if (e instanceof Error && e.message.includes('compiler has been initialized')) {
+                console.warn('Typst 编译器已初始化，跳过重复初始化');
+            } else {
+                throw e;
+            }
+        }
 
-        $typst.setRendererInitOptions({
-            getModule: () => rendererWasm,
-        });
+        try {
+            $typst.setRendererInitOptions({
+                getModule: () => rendererWasm,
+            });
+        } catch (e) {
+            if (e instanceof Error && e.message.includes('renderer has been initialized')) {
+                console.warn('Typst 渲染器已初始化，跳过重复初始化');
+            } else {
+                throw e;
+            }
+        }
 
         initialized = true;
         console.log("Typst 渲染器初始化成功，加载了字体文件");
     } catch (error) {
-        console.error("Typst 渲染器初始化失败:", error);
-        throw error;
+        if (error instanceof Error && error.message.includes('compiler has been initialized')) {
+            console.warn('Typst 编译器已初始化（全局捕获），跳过');
+            initialized = true;
+        } else {
+            console.error("Typst 渲染器初始化失败:", error);
+            throw error;
+        }
     }
 }
 
@@ -205,7 +226,7 @@ export async function renderTypstToSVG(
         const textColor = isDark ? '#ffffff' : '#000000';        // 添加默认字体设置和暗色模式适配到content前
         const contentWithFontFallback = `
 #set page(
-  width: auto, 
+  width: 50em, 
   height: auto,
   fill: rgb("${backgroundColor}")
 )
