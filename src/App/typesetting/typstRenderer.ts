@@ -1,4 +1,8 @@
-import { $typst } from '@myriaddreamin/typst.ts/dist/esm/contrib/snippet.mjs';
+// 根据官方文档，导入正确的 API
+import { $typst } from '@myriaddreamin/typst.ts';
+// 导入 WASM 模块
+import compilerWasm from '@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm?url';
+import rendererWasm from '@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm?url';
 
 import { isStreaming } from '../eventBus';
 
@@ -59,41 +63,17 @@ async function initializeTypst(fontConfig?: FontConfig) {
     if (initialized) return;
 
     try {
-        const compilerOptions: any = {
-            getModule: () =>
-                'https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm',
-        };
+        // 使用正确的初始化 API 设置编译器选项
+        $typst.setCompilerInitOptions({
+            getModule: () => compilerWasm,
+            ...(fontConfig && { fontArgs: buildFontArgs(fontConfig) })
+        });
 
-        // 添加字体配置
-        if (fontConfig) {
-            compilerOptions.fontArgs = [];
-            if (fontConfig.fontPaths) {
-                compilerOptions.fontArgs.push({ fontPaths: fontConfig.fontPaths });
-            }
-            if (fontConfig.fontBlobs) {
-                compilerOptions.fontArgs.push({ fontBlobs: fontConfig.fontBlobs });
-            }
-        }
-
-        $typst.setCompilerInitOptions(compilerOptions);
-
-        const rendererOptions: any = {
-            getModule: () =>
-                'https://cdn.jsdelivr.net/npm/@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm'
-        };
-
-        // 添加字体配置
-        if (fontConfig) {
-            rendererOptions.fontArgs = [];
-            if (fontConfig.fontPaths) {
-                rendererOptions.fontArgs.push({ fontPaths: fontConfig.fontPaths });
-            }
-            if (fontConfig.fontBlobs) {
-                rendererOptions.fontArgs.push({ fontBlobs: fontConfig.fontBlobs });
-            }
-        }
-
-        $typst.setRendererInitOptions(rendererOptions);
+        // 使用正确的初始化 API 设置渲染器选项
+        $typst.setRendererInitOptions({
+            getModule: () => rendererWasm,
+            ...(fontConfig && { fontArgs: buildFontArgs(fontConfig) })
+        });
 
         initialized = true;
         console.log("Typst 渲染器初始化成功");
@@ -103,9 +83,49 @@ async function initializeTypst(fontConfig?: FontConfig) {
     }
 }
 
+// 辅助函数：构建字体参数
+function buildFontArgs(fontConfig: FontConfig): any[] {
+    const fontArgs = [];
+    
+    if (fontConfig.fontPaths && fontConfig.fontPaths.length > 0) {
+        fontArgs.push({ fontPaths: fontConfig.fontPaths });
+    }
+    
+    if (fontConfig.fontBlobs && fontConfig.fontBlobs.length > 0) {
+        fontArgs.push({ fontBlobs: fontConfig.fontBlobs });
+    }
+    
+    return fontArgs;
+}
+
+/**
+ * 检测当前是否为暗色模式
+ */
+function isDarkMode(): boolean {
+    // 检查 document.documentElement 的 data-theme 属性
+    const theme = document.documentElement.getAttribute('data-theme');
+    if (theme) {
+        return theme === 'dark';
+    }
+    
+    // 检查 CSS 类名
+    if (document.documentElement.classList.contains('dark')) {
+        return true;
+    }
+    
+    // 检查系统偏好
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        return true;
+    }
+    
+    return false;
+}
+
 /**
  * 渲染 Typst 代码为 SVG
  * @param content Typst 代码内容
+ * @param fontConfig 字体配置
+ * @param webFonts 网络字体配置
  * @returns 渲染后的 SVG 字符串
  */
 export async function renderTypstToSVG(
@@ -113,39 +133,90 @@ export async function renderTypstToSVG(
     fontConfig?: FontConfig,
     webFonts?: WebFontConfig[]
 ): Promise<string> {
-    // 如果提供了网络字体配置，先加载网络字体
-    if (webFonts && webFonts.length > 0) {
-        const webFontConfig = await loadWebFonts(webFonts);
-        // 合并字体配置
-        fontConfig = {
-            fontPaths: [...(fontConfig?.fontPaths || [])],
-            fontBlobs: [
-                ...(webFontConfig.fontBlobs || []),
-                ...(fontConfig?.fontBlobs || [])
-            ]
-        };
-    }
-    await initializeTypst(fontConfig);
     try {
-        // 添加默认字体设置到content前
+        // 如果提供了网络字体配置，先加载网络字体
+        if (webFonts && webFonts.length > 0) {
+            const webFontConfig = await loadWebFonts(webFonts);
+            // 合并字体配置
+            fontConfig = {
+                fontPaths: [...(fontConfig?.fontPaths || [])],
+                fontBlobs: [
+                    ...(webFontConfig.fontBlobs || []),
+                    ...(fontConfig?.fontBlobs || [])
+                ]
+            };
+        }
+
+        await initializeTypst(fontConfig);
+
+        // 检测暗色模式并设置相应的颜色
+        const isDark = isDarkMode();
+        const backgroundColor = isDark ? '#1a1a1a' : '#ffffff';
+        const textColor = isDark ? '#ffffff' : '#000000';
+
+        // 添加默认字体设置和暗色模式适配到content前
         const contentWithFontFallback = `
+#set page(
+  width: auto, 
+  height: auto,
+  fill: rgb("${backgroundColor}")
+)
 #set text(
   font: (
     "Noto Sans SC",
   ),
-  size: 16pt
+  size: 16pt,
+  fill: rgb("${textColor}")
 )
-#set page(width: auto, height: auto)
 
 ${content}`;
 
+        // 使用 $typst.svg API 进行渲染
         let svg = await $typst.svg({ mainContent: contentWithFontFallback });
+
+        // 后处理 SVG 以确保暗色模式适配
+        if (isDark) {
+            svg = processSvgForDarkMode(svg, backgroundColor, textColor);
+        }
 
         return svg;
     } catch (error) {
         console.error("Typst 渲染失败:", error);
         throw error;
     }
+}
+
+/**
+ * 处理 SVG 以适配暗色模式
+ */
+function processSvgForDarkMode(svg: string, backgroundColor: string, textColor: string): string {
+    // 确保 SVG 有正确的背景色
+    if (svg.includes('<svg')) {
+        // 添加样式来处理暗色模式
+        const style = `
+        <style>
+        .typst-svg-dark {
+            background-color: ${backgroundColor};
+        }
+        .typst-svg-dark text {
+            fill: ${textColor} !important;
+        }
+        .typst-svg-dark path[fill="#000000"],
+        .typst-svg-dark path[fill="#000"] {
+            fill: ${textColor} !important;
+        }
+        .typst-svg-dark rect[fill="#ffffff"],
+        .typst-svg-dark rect[fill="#fff"] {
+            fill: ${backgroundColor} !important;
+        }
+        </style>`;
+        
+        // 在 SVG 开始标签后插入样式
+        svg = svg.replace('<svg', `<svg class="typst-svg-dark"`);
+        svg = svg.replace('>', '>' + style);
+    }
+    
+    return svg;
 }
 /**
  * 处理typst_render API调用
@@ -162,18 +233,15 @@ export async function handleTypstRender(apiInfo: any): Promise<string> {
     const typstId = `typst-doc-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
     // 编码内容，以便在属性中安全存储
-    const encodedContent = encodeURIComponent(typstCode);
-
-    // 如果不是流式输出，直接渲染Typst代码
+    const encodedContent = encodeURIComponent(typstCode);    // 如果不是流式输出，直接渲染Typst代码
     if (!isStreaming.value) {
         try {
             const svg = await renderTypstToSVG(typstCode, fontConfig, webFonts);
-
-
+            const isDark = isDarkMode();
 
             // 构建包含已渲染SVG的HTML
             return `
-            <div class="special-api-call typst-api-call">
+            <div class="special-api-call typst-api-call ${isDark ? 'dark-mode' : ''}">
                 <div class="api-call-header">
                     <span class="api-call-icon">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -186,7 +254,7 @@ export async function handleTypstRender(apiInfo: any): Promise<string> {
                     </span>
                     <span class="api-call-title">Typst 文档</span>
                 </div>
-                <div class="typst-container loaded" data-typst-id="${typstId}" data-typst-content="${encodedContent}">
+                <div class="typst-container loaded ${isDark ? 'dark-mode' : ''}" data-typst-id="${typstId}" data-typst-content="${encodedContent}">
                     <div class="typst-document-container">${svg}</div>
                 </div>
                 <div class="api-call-footer">
@@ -198,8 +266,9 @@ export async function handleTypstRender(apiInfo: any): Promise<string> {
             </div>
             `;
         } catch (error) {
+            const isDark = isDarkMode();
             return `
-            <div class="special-api-call typst-api-call">
+            <div class="special-api-call typst-api-call ${isDark ? 'dark-mode' : ''}">
                 <div class="api-call-header">
                     <span class="api-call-icon">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -212,7 +281,7 @@ export async function handleTypstRender(apiInfo: any): Promise<string> {
                     </span>
                     <span class="api-call-title">Typst 文档</span>
                 </div>
-                <div class="typst-container" data-typst-id="${typstId}">
+                <div class="typst-container ${isDark ? 'dark-mode' : ''}" data-typst-id="${typstId}">
                     <div class="typst-error">渲染 Typst 文档失败: ${error instanceof Error ? error.message : String(error)}</div>
                     <pre class="typst-source-error"><code>${typstCode.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>
                 </div>
@@ -222,8 +291,9 @@ export async function handleTypstRender(apiInfo: any): Promise<string> {
     }
 
     // 如果是流式输出，返回包含占位符的HTML（与原来类似）
+    const isDark = isDarkMode();
     return `
-    <div class="special-api-call typst-api-call">
+    <div class="special-api-call typst-api-call ${isDark ? 'dark-mode' : ''}">
       <div class="api-call-header">
         <span class="api-call-icon">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -236,7 +306,7 @@ export async function handleTypstRender(apiInfo: any): Promise<string> {
         </span>
         <span class="api-call-title">Typst 文档</span>
       </div>
-      <div class="typst-container" data-typst-id="${typstId}" data-typst-content="${encodedContent}">
+      <div class="typst-container ${isDark ? 'dark-mode' : ''}" data-typst-id="${typstId}" data-typst-content="${encodedContent}">
         <div class="typst-loading">Typst 文档渲染中...</div>
         <div class="typst-document-container"></div>
       </div>

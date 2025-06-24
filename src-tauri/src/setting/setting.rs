@@ -60,7 +60,7 @@ impl Default for AppSettings {
             api_model: "gemini".to_string(),
             model_config: ModelConfig {
                 temperature: 0.7,
-                max_tokens: 2048,
+                max_tokens: 8192,
             },
             model_selection,
         }

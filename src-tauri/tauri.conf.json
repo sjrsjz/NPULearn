@@ -8,8 +8,7 @@
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
-  },
-  "app": {
+  },  "app": {
     "windows": [
       {
         "title": "NPULearn",
@@ -18,10 +17,11 @@
         "decorations": false,
         "transparent": true
       }
-    ],
-    "security": {
-      "csp": null
-    }
+    ],    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:*; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';",
+      "dangerousDisableAssetCspModification": false
+    },
+    "withGlobalTauri": false
   },
   "bundle": {
     "active": true,

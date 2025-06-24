@@ -383,6 +383,12 @@ body {
     --radius: 8px;
     --radius-lg: 12px;
     --transition: all 0.2s ease;
+    
+    /* 新增的样式变量 */
+    --background-secondary: #f8fafc;
+    --background-hover: #f1f5f9;
+    --border: #e2e8f0;
+    --border-hover: #cbd5e1;
 }
 
 
@@ -1258,15 +1264,13 @@ send-icon {
     position: fixed;
     top: 16px;
     right: 16px;
-    left: 16px;
     padding: 12px 16px;
     border-radius: var(--radius);
     background-color: var(--card-bg);
     box-shadow: var(--shadow);
     z-index: 1000;
     max-width: 400px;
-    width: auto;
-    margin-left: auto;
+    width: max-content;
     animation: notification-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     border-left: 4px solid;
     color: var(--text-color);
@@ -1701,6 +1705,12 @@ chat-messages a:active {
 :root[data-theme="system"] {
     --scrollbar-thumb: rgba(148, 163, 184, 0.4);
     --scrollbar-thumb-hover: rgba(148, 163, 184, 0.7);
+    
+    /* 深色主题下的新增样式变量 */
+    --background-secondary: rgba(15, 23, 42, 0.6);
+    --background-hover: rgba(30, 41, 59, 0.7);
+    --border: rgba(51, 65, 85, 0.8);
+    --border-hover: rgba(71, 85, 105, 0.9);
 }
 
 /* 特定区域滚动条定制 */
@@ -2524,7 +2534,7 @@ chat-messages a:active {
 
 /* Typst 文档容器样式 */
 .typst-container {
-    background-color: #ffffff;
+    background-color: var(--card-bg);
     border-radius: 8px;
     margin: 15px 0;
     padding: 20px;
@@ -2555,7 +2565,7 @@ chat-messages a:active {
 
 /* Typst 源代码容器 */
 .typst-source {
-    background-color: #f7f7f7;
+    background-color: var(--card-bg);
     border-radius: 4px;
     padding: 10px;
     margin-top: 8px;
@@ -2566,7 +2576,7 @@ chat-messages a:active {
 /* Typst 错误信息 */
 .typst-error {
     color: #d32f2f;
-    background-color: #ffebee;
+    background-color: var(--error-bg, rgba(211, 47, 47, 0.1));
     padding: 10px;
     border-radius: 4px;
     margin: 10px 0;
@@ -2580,19 +2590,19 @@ chat-messages a:active {
 
 /* Typst API 调用卡片样式 */
 .typst-api-call {
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     overflow: hidden;
     margin: 15px 0;
-    background-color: #fff;
+    background-color: var(--card-bg);
 }
 
 .typst-api-call .api-call-header {
     display: flex;
     align-items: center;
     padding: 10px 15px;
-    background-color: #f5f5f5;
-    border-bottom: 1px solid #e0e0e0;
+    background-color: var(--card-bg);
+    border-bottom: 1px solid var(--border-color);
     font-weight: 500;
 }
 
@@ -2602,15 +2612,15 @@ chat-messages a:active {
 }
 
 .typst-api-call .api-call-footer {
-    border-top: 1px solid #e0e0e0;
+    border-top: 1px solid var(--border-color);
     padding: 8px 15px;
-    background-color: #f9f9f9;
+    background-color: var(--card-bg);
     font-size: 0.9em;
 }
 
 .typst-api-call .api-call-code {
     margin-top: 8px;
-    background-color: #f5f5f5;
+    background-color: var(--card-bg);
     padding: 8px;
     border-radius: 4px;
     max-height: 200px;
@@ -2619,12 +2629,12 @@ chat-messages a:active {
 
 .typst-api-call .api-call-title {
     font-weight: 600;
-    color: #333;
+    color: var(--text-color);
 }
 
 .typst-api-call .api-call-footer {
     font-weight: 600;
-    color: #333;
+    color: var(--text-color);
 }
 
 .special-api-call {

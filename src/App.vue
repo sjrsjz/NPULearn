@@ -26,8 +26,7 @@ import { Window } from '@tauri-apps/api/window';
 
 import { loadMathJax, renderMathInElement } from "./App/mathjax.ts";
 import { createNewChat, loadChatHistory, selectHistory } from "./App/chatHistory.ts";
-import { initMermaid } from "./App/typesetting/mermaidRenderer.ts";
-import { changeMermaidTheme } from "./App/typesetting/mermaidRenderer.ts";
+import { initMermaid, changeMermaidTheme, setupAllMermaidInteractions } from "./App/typesetting/mermaidRenderer.ts";
 import { applyHighlight, setupAllCopyButtons } from "./App/typesetting/typesetting.ts";
 import { chatHistory, eventBus, isLoading, isStreaming } from "./App/eventBus.ts";
 import { ChatHistory, ChatMessage } from "./App/types.ts";
@@ -130,6 +129,117 @@ function setupExternalLinks() {
       });
     }
   });
+}
+
+// 全局阻止所有链接跳转的函数
+function preventAllNavigation() {
+  // 阻止所有 a 标签的默认跳转行为
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    const link = target.closest('a');
+    
+    // 检查是否是白名单中的元素，如果是则不阻止
+    if (isWhitelistedElement(target)) {
+      console.log('允许白名单元素的点击事件:', target);
+      return; // 不阻止白名单元素的事件
+    }
+    
+    if (link && link.href) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const href = link.href;
+      console.log('阻止链接跳转:', href);
+      
+      // 可以选择将链接复制到剪贴板
+      if (href.startsWith('http://') || href.startsWith('https://')) {
+        writeText(href).then(() => {
+          showNotification(`外部链接已复制到剪贴板: ${href}`, 'info');
+        }).catch(error => {
+          console.error('复制链接失败:', error);
+          showNotification('复制链接失败', 'error');
+        });
+      }
+    }
+  }, true); // 使用捕获阶段
+
+  // 阻止表单提交到外部
+  document.addEventListener('submit', (e) => {
+    const form = e.target as HTMLFormElement;
+    if (form.action && (form.action.startsWith('http://') || form.action.startsWith('https://'))) {
+      e.preventDefault();
+      console.log('阻止表单提交到外部:', form.action);
+      showNotification('已阻止表单提交到外部网站', 'warning');
+    }
+  }, true);
+
+  // 阻止 window.open
+  const originalOpen = window.open;
+  window.open = function(url?: string | URL, target?: string, features?: string) {
+    console.log('阻止 window.open:', url);
+    showNotification('已阻止弹出新窗口', 'warning');
+    return null;
+  };
+}
+
+// 检查元素是否在白名单中
+function isWhitelistedElement(element: HTMLElement): boolean {
+  // 检查元素本身和其父元素是否包含白名单的类名或属性
+  let currentElement: HTMLElement | null = element;
+  
+  while (currentElement) {
+    // WolframAlpha 相关查询的白名单
+    if (currentElement.closest('.wolfram-related-queries')) {
+      return true;
+    }
+    
+    // 具有 data-query 属性的元素（WolframAlpha 查询项）
+    if (currentElement.hasAttribute('data-query')) {
+      return true;
+    }
+    
+    // Interactive Button 相关元素
+    if (currentElement.classList.contains('interactive-command-button') ||
+        currentElement.closest('.interactive-command-button')) {
+      return true;
+    }
+    
+    // 图表交互按钮（Mermaid 和 Pintora）
+    if (currentElement.classList.contains('refresh-diagram-button') ||
+        currentElement.classList.contains('zoom-diagram-button') ||
+        currentElement.closest('.refresh-diagram-button, .zoom-diagram-button')) {
+      return true;
+    }
+    
+    // 代码复制按钮
+    if (currentElement.classList.contains('code-copy-button') ||
+        currentElement.closest('.code-copy-button')) {
+      return true;
+    }
+    
+    // 应用内的其他交互按钮
+    if (currentElement.classList.contains('interactive-button') ||
+        currentElement.classList.contains('wolfram-query-item') ||
+        currentElement.classList.contains('allow-navigation') ||
+        currentElement.classList.contains('markdown-button') ||
+        currentElement.classList.contains('copy-button') ||
+        currentElement.classList.contains('regenerate-button') ||
+        currentElement.hasAttribute('data-allow-click')) {
+      return true;
+    }
+    
+    // 特定容器内的所有元素（如果容器本身允许交互）
+    if (currentElement.closest('.interactive-button-container') ||
+        currentElement.closest('.wolfram-result-container') ||
+        currentElement.closest('.message-actions')) {
+      return true;
+    }
+    
+    // 检查父元素
+    currentElement = currentElement.parentElement;
+  }
+  
+  return false;
 }
 
 
@@ -260,7 +370,19 @@ function setupFunctions() {
   // 其他需要在DOM更新后执行的代码...
   renderMathInElement();
   setupExternalLinks();
-  setupActionButtons(); setupAllCopyButtons();
+  setupActionButtons(); 
+  setupAllCopyButtons();
+  
+  // 重要：为所有 Mermaid 图表绑定交互事件（包括流式传输结束后的图表）
+  const chatMessagesContainer = document.querySelector('.chat-messages') as HTMLElement;
+  if (chatMessagesContainer) {
+    console.log('在聊天内容更新后，重新绑定所有 Mermaid 图表的交互事件');
+    setupAllMermaidInteractions(chatMessagesContainer);
+  } else {
+    console.log('在聊天内容更新后，使用全局容器绑定 Mermaid 图表的交互事件');
+    setupAllMermaidInteractions(document.body);
+  }
+  
   scrollToBottom(true, false); // 强制滚动，因为这是新内容渲染
 
   // 内容渲染完成后重新设置滚动监听器和检查滚动按钮状态
@@ -944,13 +1066,16 @@ onMounted(async () => {
     await initAppSettings();
 
     // 初始化Mermaid (主题应基于 initAppSettings 后的全局设置)
-    initMermaid();
-
-    // 加载 MathJax
+    initMermaid();    // 加载 MathJax
     await loadMathJax();
 
     // 设置流式消息监听器
-    await setupStreamListeners();    // 加载聊天历史和当前对话内容
+    await setupStreamListeners();
+
+    // 初始化全局链接拦截
+    preventAllNavigation();
+
+    // 加载聊天历史和当前对话内容
     await loadChatHistory();
 
     // 加载API密钥并检查是否需要获取Gemini模型
