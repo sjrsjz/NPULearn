@@ -67,6 +67,12 @@ pub struct GeminiChat {
     top_k: Option<u32>,
     last_prompt: Option<String>,
     tools: Vec<Tool>, // Consider if this needs to be stored if tools are passed per call
+    
+    // Google 搜索依据功能配置
+    google_search_enabled: bool, // 是否启用 Google 搜索依据
+    
+    // URL 上下文工具配置
+    url_context_enabled: bool, // 是否启用 URL 上下文工具
 
     chat_id: u32,  // 用于唯一标识聊天会话
     title: Option<String>, // 聊天标题
@@ -431,6 +437,8 @@ impl GeminiChat {
             top_k: Some(40),        // 设置默认值
             last_prompt: None,
             tools: Vec::new(),
+            google_search_enabled: true, // 默认启用 Google 搜索
+            url_context_enabled: true, // 默认启用 URL 上下文工具
             chat_id: 0,                    // 初始化为0或其他默认值
             title: None, // 初始化标题
             time: "".to_string(),          // 初始化时间
@@ -442,6 +450,26 @@ impl GeminiChat {
         let mut chat = Self::new();
         chat.model = model.to_string();
         chat
+    }
+
+    /// 启用或禁用 Google 搜索依据功能
+    pub fn set_google_search_enabled(&mut self, enabled: bool) {
+        self.google_search_enabled = enabled;
+    }
+
+    /// 检查是否启用了 Google 搜索依据功能
+    pub fn is_google_search_enabled(&self) -> bool {
+        self.google_search_enabled
+    }
+
+    /// 启用或禁用 URL 上下文工具功能
+    pub fn set_url_context_enabled(&mut self, enabled: bool) {
+        self.url_context_enabled = enabled;
+    }
+
+    /// 检查是否启用了 URL 上下文工具功能
+    pub fn is_url_context_enabled(&self) -> bool {
+        self.url_context_enabled
     }    fn build_system_instruction(&self) -> String {
         let typeset_infos = vec![
             TypesetInfo {
@@ -657,6 +685,38 @@ impl GeminiChat {
                     if let Some(config_val) = tool_config.get("toolConfig") {
                         obj.insert("toolConfig".to_string(), config_val.clone());
                     }
+                }
+            }
+        }
+
+        // 添加 Google 搜索工具支持
+        if self.google_search_enabled {
+            if let Some(obj) = request_body.as_object_mut() {
+                // 检查是否已有工具配置
+                if let Some(existing_tools) = obj.get_mut("tools") {
+                    // 如果已有工具，添加 Google 搜索到现有工具列表
+                    if let Some(tools_array) = existing_tools.as_array_mut() {
+                        tools_array.push(json!({"google_search": {}}));
+                    }
+                } else {
+                    // 如果没有工具，创建新的工具配置
+                    obj.insert("tools".to_string(), json!([{"google_search": {}}]));
+                }
+            }
+        }
+
+        // 添加 URL 上下文工具支持
+        if self.url_context_enabled {
+            if let Some(obj) = request_body.as_object_mut() {
+                // 检查是否已有工具配置
+                if let Some(existing_tools) = obj.get_mut("tools") {
+                    // 如果已有工具，添加 URL 上下文到现有工具列表
+                    if let Some(tools_array) = existing_tools.as_array_mut() {
+                        tools_array.push(json!({"url_context": {}}));
+                    }
+                } else {
+                    // 如果没有工具，创建新的工具配置
+                    obj.insert("tools".to_string(), json!([{"url_context": {}}]));
                 }
             }
         }
@@ -947,6 +1007,16 @@ impl AIChat for GeminiChat {
                 )
             }
             "model" => self.model = value,
+            "google_search" => {
+                self.google_search_enabled = value
+                    .parse::<bool>()
+                    .map_err(|e| format!("Invalid google_search value: {}", e))?
+            }
+            "url_context" => {
+                self.url_context_enabled = value
+                    .parse::<bool>()
+                    .map_err(|e| format!("Invalid url_context value: {}", e))?
+            }
             // 可以添加 top_k 等其他参数
             _ => return Err(format!("Unknown parameter: {}", key).into()),
         }
