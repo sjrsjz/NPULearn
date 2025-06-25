@@ -1084,8 +1084,19 @@ onMounted(async () => {
     await initAppSettings();
 
     // 初始化Mermaid 和 Pintora (主题应基于 initAppSettings 后的全局设置)
-    initMermaid();
-    initPintora();    
+    try {
+      await initMermaid();
+      console.log('Mermaid 初始化完成');
+    } catch (error) {
+      console.error('Mermaid 初始化失败，将跳过图表渲染功能:', error);
+    }
+    
+    try {
+      await initPintora();
+      console.log('Pintora 初始化完成');
+    } catch (error) {
+      console.error('Pintora 初始化失败，将跳过图表渲染功能:', error);
+    }    
     // 加载 MathJax
     await loadMathJax();
 
@@ -2083,7 +2094,19 @@ async function uploadFile() {
 </template>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+/* 使用本地字体替代 Google Fonts */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 300 600;
+  font-display: swap;
+  src: local('Inter'), local('system-ui'), local('-apple-system'), local('BlinkMacSystemFont'), local('Segoe UI'), local('Roboto'), local('Oxygen'), local('Ubuntu'), local('Cantarell'), local('Open Sans'), local('Helvetica Neue'), sans-serif;
+}
+
+/* 备用字体定义 */
+body {
+  font-family: 'Inter', 'Noto Sans SC', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
 </style>
 <style>
 .history-sidebar {

@@ -60,20 +60,30 @@ async function initializeTypst() {
 
     try {
         // 尝试加载本地字体文件
-        const localFontBlobs = await loadLocalFontBlobs();
-        console.log('成功加载字体文件数量:', localFontBlobs.length);
+        let localFontBlobs: ArrayBuffer[] = [];
+        try {
+            localFontBlobs = await loadLocalFontBlobs();
+            console.log('成功加载字体文件数量:', localFontBlobs.length);
+        } catch (fontError) {
+            console.warn('字体加载失败，将继续使用默认字体:', fontError);
+            localFontBlobs = [];
+        }
 
-        // 准备字体配置
+        // 准备字体配置 - 使用空的 beforeBuild 数组，避免默认的 CDN 字体加载
         const beforeBuild = [];
 
         if (localFontBlobs.length > 0) {
-            // 将 ArrayBuffer 转换为 Uint8Array 并添加到字体配置
-            const fontData = localFontBlobs.map(blob => new Uint8Array(blob));
-            beforeBuild.push(preloadRemoteFonts(fontData));
-            console.log('添加字体到 beforeBuild 配置');
+            try {
+                // 将 ArrayBuffer 转换为 Uint8Array 并添加到字体配置
+                const fontData = localFontBlobs.map(blob => new Uint8Array(blob));
+                beforeBuild.push(preloadRemoteFonts(fontData));
+                console.log('添加本地字体到 beforeBuild 配置');
+            } catch (fontConfigError) {
+                console.warn('字体配置失败，将使用默认字体:', fontConfigError);
+            }
         }
 
-        // 使用字体配置初始化
+        // 使用字体配置初始化编译器
         try {
             $typst.setCompilerInitOptions({
                 getModule: () => compilerWasm,
@@ -100,7 +110,7 @@ async function initializeTypst() {
         }
 
         initialized = true;
-        console.log("Typst 渲染器初始化成功，加载了字体文件");
+        console.log("Typst 渲染器初始化成功" + (localFontBlobs.length > 0 ? `，加载了 ${localFontBlobs.length} 个字体文件` : "，使用默认系统字体"));
     } catch (error) {
         if (error instanceof Error && error.message.includes('compiler has been initialized')) {
             console.warn('Typst 编译器已初始化（全局捕获），跳过');
@@ -115,9 +125,14 @@ async function initializeTypst() {
 async function loadLocalFontBlobs(): Promise<ArrayBuffer[]> {
     const fontBlobs: ArrayBuffer[] = [];
 
-    // 尝试多种字体加载方式
+    // 优先尝试 public 目录下的字体文件（这些文件在 Vite 中可以直接访问）
     const fontSources = [
-        // 尝试通过 Vite 动态导入
+        // public 目录字体文件（最优先）
+        () => Promise.resolve('/fonts/NotoSansSC-VF.ttf'),
+        () => Promise.resolve('./fonts/NotoSansSC-VF.ttf'),
+        () => Promise.resolve('fonts/NotoSansSC-VF.ttf'),
+        
+        // 尝试通过 Vite 动态导入 assets 目录
         async () => {
             try {
                 const fontModule = await import('../../assets/fonts/NotoSansSC-VF.ttf?url');
@@ -129,21 +144,17 @@ async function loadLocalFontBlobs(): Promise<ArrayBuffer[]> {
                 return null;
             }
         },
-        // 直接尝试各种路径
-        () => Promise.resolve('/src/assets/fonts/NotoSansSC-VF.ttf'),
-        () => Promise.resolve('./src/assets/fonts/NotoSansSC-VF.ttf'),
-        () => Promise.resolve('src/assets/fonts/NotoSansSC-VF.ttf'),
+        
+        // 备用路径
         () => Promise.resolve('/assets/fonts/NotoSansSC-VF.ttf'),
         () => Promise.resolve('./assets/fonts/NotoSansSC-VF.ttf'),
-        () => Promise.resolve('assets/fonts/NotoSansSC-VF.ttf'),
-        () => Promise.resolve('/fonts/NotoSansSC-VF.ttf'), // public 目录
-        () => Promise.resolve('./fonts/NotoSansSC-VF.ttf'),
-        () => Promise.resolve('fonts/NotoSansSC-VF.ttf')
+        () => Promise.resolve('assets/fonts/NotoSansSC-VF.ttf')
     ];
 
     for (const fontSource of fontSources) {
+        let fontUrl: string | null = null;
         try {
-            const fontUrl = await fontSource();
+            fontUrl = await fontSource();
             if (!fontUrl) continue;
 
             console.log('尝试加载字体文件:', fontUrl);
@@ -155,17 +166,14 @@ async function loadLocalFontBlobs(): Promise<ArrayBuffer[]> {
                 console.log('成功加载字体文件:', fontUrl, '大小:', fontBlob.byteLength);
                 return fontBlobs; // 成功加载一个字体文件后返回
             } else {
-                console.warn('字体文件响应错误:', fontUrl, response.status);
+                console.warn('字体文件响应错误:', fontUrl, response.status, response.statusText);
             }
         } catch (error) {
-            console.warn('尝试加载字体文件失败:', error);
+            console.warn('尝试加载字体文件失败:', fontUrl || 'unknown', error);
         }
     }
 
-    if (fontBlobs.length === 0) {
-        console.warn('所有字体路径都加载失败，将使用系统默认字体');
-    }
-
+    console.warn('所有字体路径都加载失败，将不使用自定义字体，依赖系统字体');
     return fontBlobs;
 }
 

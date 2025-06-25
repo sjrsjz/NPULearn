@@ -1,27 +1,97 @@
-import { pintoraStandalone } from '@pintora/standalone';
 import { nextTick } from "vue";
 import { AppEvents, isStreaming } from '../eventBus';
 
+// 动态导入 Pintora 以避免构建时的模块加载问题
+let pintoraStandalone: any = null;
+
+// 防止重复初始化的标志
+let isPintoraInitialized = false;
+let pintoraInitPromise: Promise<void> | null = null;
+
+// 加载 Pintora 模块
+async function loadPintoraModule() {
+    if (pintoraStandalone) {
+        return pintoraStandalone;
+    }
+    
+    try {
+        const module = await import('@pintora/standalone');
+        pintoraStandalone = module.pintoraStandalone;
+        return pintoraStandalone;
+    } catch (error) {
+        console.error('Failed to load Pintora module:', error);
+        throw error;
+    }
+}
+
 // 初始化Pintora配置
-function initPintora() {
-    // 修复：初始化函数不接受 defaultConfig 参数
-    pintoraStandalone.initBrowser();
+async function initPintora() {
+    // 如果已经初始化或正在初始化，返回现有的 Promise
+    if (isPintoraInitialized) {
+        return Promise.resolve();
+    }
     
-    // 初始化后单独设置主题
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-        (document.documentElement.getAttribute('data-theme') === 'system' &&
-            window.matchMedia('(prefers-color-scheme: dark)').matches);
-    
-    // 使用setConfig而不是传入defaultConfig
-    pintoraStandalone.setConfig({
-        themeConfig: {
-            theme: isDark ? 'dark' : 'default'
+    if (pintoraInitPromise) {
+        return pintoraInitPromise;
+    }
+
+    pintoraInitPromise = new Promise<void>(async (resolve, reject) => {
+        try {
+            // 延迟初始化以确保所有依赖已加载
+            setTimeout(async () => {
+                try {
+                    // 动态加载 Pintora 模块
+                    const standalone = await loadPintoraModule();
+                    
+                    // 检查 pintoraStandalone 是否正确加载
+                    if (!standalone || typeof standalone.initBrowser !== 'function') {
+                        throw new Error('Pintora Standalone 未正确加载');
+                    }
+
+                    // 修复：初始化函数不接受 defaultConfig 参数
+                    standalone.initBrowser();
+                    
+                    // 初始化后单独设置主题
+                    const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+                        (document.documentElement.getAttribute('data-theme') === 'system' &&
+                            window.matchMedia('(prefers-color-scheme: dark)').matches);
+                    
+                    // 使用setConfig而不是传入defaultConfig
+                    standalone.setConfig({
+                        themeConfig: {
+                            theme: isDark ? 'dark' : 'default'
+                        }
+                    });
+
+                    isPintoraInitialized = true;
+                    console.log('Pintora 初始化成功');
+                    resolve();
+                } catch (error) {
+                    console.error('Pintora 初始化失败:', error);
+                    reject(error);
+                }
+            }, 200); // 增加延迟到 200ms
+        } catch (error) {
+            console.error('Pintora 初始化过程中出错:', error);
+            reject(error);
         }
     });
+
+    return pintoraInitPromise;
 }
 
 // 渲染Pintora图表函数
 async function renderPintoraDiagrams(retryCount = 0, maxRetries = 3, container: HTMLElement = document.body) {
+    // 确保 Pintora 已初始化
+    if (!isPintoraInitialized) {
+        try {
+            await initPintora();
+        } catch (error) {
+            console.error('无法初始化 Pintora，跳过图表渲染:', error);
+            return;
+        }
+    }
+
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
         (document.documentElement.getAttribute('data-theme') === 'system' &&
             window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -75,7 +145,7 @@ async function renderPintoraDiagrams(retryCount = 0, maxRetries = 3, container: 
                                                     theme: isDark ? 'dark' : 'default'
                                                 }
                                             },
-                                            onError: (renderError) => {
+                                            onError: (renderError: any) => {
                                                 console.error(`单个图表渲染失败 ID ${id}:`, renderError);
                                                 element.innerHTML = `
                                                     <div class="pintora-error">
@@ -385,12 +455,14 @@ function setupPintoraRefresh(container: HTMLElement = document.body) {
 
 // 更改Pintora主题
 function changePintoraTheme(theme: string) {
-    // 修复：使用 setConfig 而不是不存在的 updateConfig
-    pintoraStandalone.setConfig({
-        themeConfig: {
-            theme: theme === 'dark' ? 'dark' : 'default'
-        }
-    });
+    if (pintoraStandalone) {
+        // 修复：使用 setConfig 而不是不存在的 updateConfig
+        pintoraStandalone.setConfig({
+            themeConfig: {
+                theme: theme === 'dark' ? 'dark' : 'default'
+            }
+        });
+    }
 }
 
 /**
@@ -433,7 +505,7 @@ async function handlePintoraRender(apiInfo: any): Promise<string> {
                         theme: isDark ? 'dark' : 'default'
                     }
                 },
-                onError: (error) => {
+                onError: (error: any) => {
                     console.error("Pintora 渲染失败:", error);
                     initialContent = `
                         <div class="pintora-error">

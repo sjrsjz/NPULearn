@@ -1,26 +1,53 @@
-import mermaid from 'mermaid'; // 导入Mermaid.js库
 import { nextTick } from "vue";
-
 import { AppEvents, isStreaming } from '../eventBus';
 
+// 动态导入 Mermaid 以避免构建时的模块加载问题
+let mermaid: any = null;
+
+// 加载 Mermaid 模块
+async function loadMermaidModule() {
+    if (mermaid) {
+        return mermaid;
+    }
+    
+    try {
+        const module = await import('mermaid');
+        mermaid = module.default;
+        return mermaid;
+    } catch (error) {
+        console.error('Failed to load Mermaid module:', error);
+        throw error;
+    }
+}
+
 // 初始化Mermaid.js配置
-function initMermaid() {
-    mermaid.initialize({
-        startOnLoad: false,
-        theme: document.documentElement.getAttribute('data-theme') === 'dark' ||
-            (document.documentElement.getAttribute('data-theme') === 'system' &&
-                window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'default',
-        securityLevel: 'loose',
-        flowchart: {
-            htmlLabels: true,
-            useMaxWidth: true,
-        },
-        fontSize: 14
-    });
+async function initMermaid() {
+    try {
+        const mermaidInstance = await loadMermaidModule();
+        mermaidInstance.initialize({
+            startOnLoad: false,
+            theme: document.documentElement.getAttribute('data-theme') === 'dark' ||
+                (document.documentElement.getAttribute('data-theme') === 'system' &&
+                    window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'default',
+            securityLevel: 'loose',
+            flowchart: {
+                htmlLabels: true,
+                useMaxWidth: true,
+            },
+            fontSize: 14
+        });
+    } catch (error) {
+        console.error('Mermaid 初始化失败:', error);
+    }
 }
 
 // 修改渲染Mermaid图表函数，接受容器参数
 async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3, container: HTMLElement = document.body) {
+    if (!mermaid) {
+        console.error('Mermaid 模块未加载');
+        return;
+    }
+
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
         (document.documentElement.getAttribute('data-theme') === 'system' &&
             window.matchMedia('(prefers-color-scheme: dark)').matches);

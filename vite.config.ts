@@ -38,9 +38,11 @@ export default defineConfig(async () => ({
       '@myriadddreamin/typst-ts-renderer',
       'entities',
       'entities/dist/decode.js',
-      'entities/dist/escape.js'
+      'entities/dist/escape.js',
+      'mathjax',
+      'mermaid'
     ],
-    exclude: ['@myriaddreamin/typst-ts-node-compiler']
+    exclude: ['@myriaddreamin/typst-ts-node-compiler', '@pintora/standalone']
   },
   
   // 添加解析别名
@@ -56,7 +58,20 @@ export default defineConfig(async () => ({
       include: [/entities/, /node_modules/]
     },
     // 确保字体文件被正确复制
-    assetsInclude: ['**/*.ttf', '**/*.woff', '**/*.woff2', '**/*.otf']
+    assetsInclude: ['**/*.ttf', '**/*.woff', '**/*.woff2', '**/*.otf'],
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          mathjax: ['mathjax'],
+          mermaid: ['mermaid'],
+          pintora: ['@pintora/standalone']
+        }
+      },
+      external: (id) => {
+        // 不要将这些模块外部化，让它们被正确打包
+        return false;
+      }
+    }
   },
   
   // 添加静态资源处理

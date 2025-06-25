@@ -1,6 +1,6 @@
 [package]
 name = "npulearn"
-version = "0.1.0"
+version = "0.2.0"
 description = "NPULearn - 智能学习助手桌面应用"
 authors = ["NPULearn Contributors"]
 license = "CC-BY-NC-SA-4.0"

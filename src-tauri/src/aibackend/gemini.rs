@@ -437,8 +437,8 @@ impl GeminiChat {
             top_k: Some(40),        // 设置默认值
             last_prompt: None,
             tools: Vec::new(),
-            google_search_enabled: true, // 默认启用 Google 搜索
-            url_context_enabled: true, // 默认启用 URL 上下文工具
+            google_search_enabled: false, // 默认禁用 Google 搜索
+            url_context_enabled: false, // 默认禁用 URL 上下文工具
             chat_id: 0,                    // 初始化为0或其他默认值
             title: None, // 初始化标题
             time: "".to_string(),          // 初始化时间

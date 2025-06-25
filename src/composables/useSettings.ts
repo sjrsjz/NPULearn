@@ -525,6 +525,24 @@ export function useSettingsProvider() {
 
                 console.log('设置更新后的模型选择:', settings.value.model_selection);
 
+                // 特别处理persona_config字段
+                if (settingsData.persona_config) {
+                    console.log('后端返回的人格配置数据:', settingsData.persona_config);
+                    
+                    if (typeof settingsData.persona_config.use_custom === 'boolean') {
+                        settings.value.persona_config.use_custom = settingsData.persona_config.use_custom;
+                    }
+                    if (settingsData.persona_config.preset_persona) {
+                        settings.value.persona_config.preset_persona = settingsData.persona_config.preset_persona;
+                    }
+                    if (settingsData.persona_config.custom_persona) {
+                        settings.value.persona_config.custom_persona = settingsData.persona_config.custom_persona;
+                    }
+                    console.log('人格配置更新完成:', settings.value.persona_config);
+                } else {
+                    console.log('persona_config字段不存在，保持默认值');
+                }
+
                 // 应用主题
                 if (settings.value.theme === 'system') {
                     document.documentElement.removeAttribute('data-theme');
