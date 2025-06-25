@@ -166,6 +166,57 @@
         </div>
       </div>
 
+      <!-- 人格提示词设置 -->
+      <div class="setting-section">
+        <h3>人格提示词设置</h3>
+        <p class="section-description">配置AI的对话风格和行为模式</p>
+        
+        <div class="setting-item">
+          <label>使用模式</label>
+          <div class="persona-mode-selector">
+            <label class="radio-option">
+              <input type="radio" name="persona-mode" :value="false" v-model="settings.persona_config.use_custom">
+              <span class="radio-label">预设人格</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="persona-mode" :value="true" v-model="settings.persona_config.use_custom">
+              <span class="radio-label">自定义人格</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 预设人格选择 -->
+        <div v-if="!settings.persona_config.use_custom" class="setting-item">
+          <label>预设人格</label>
+          <select v-model="settings.persona_config.preset_persona">
+            <option v-for="preset in PERSONA_PRESETS" :key="preset.value" :value="preset.value">
+              {{ preset.label }}
+            </option>
+          </select>
+          <div v-if="getSelectedPresetInfo()" class="persona-description">
+            <div class="preset-description">{{ getSelectedPresetInfo()?.description }}</div>
+            <div class="preset-prompt-preview">
+              <strong>提示词预览：</strong>
+              <div class="prompt-text">{{ getSelectedPresetInfo()?.prompt }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 自定义人格输入 -->
+        <div v-if="settings.persona_config.use_custom" class="setting-item">
+          <label>自定义人格提示词</label>
+          <textarea 
+            v-model="settings.persona_config.custom_persona" 
+            placeholder="请输入自定义的人格提示词，描述AI应该如何与用户交流..."
+            rows="6"
+            class="persona-textarea">
+          </textarea>
+          <div class="textarea-hint">
+            提示：清晰描述你希望AI展现的性格特点、说话风格和行为方式
+          </div>
+        </div>
+      </div>
+
       <!-- 模型配置 -->
       <div class="setting-section">
         <h3>模型配置</h3>
@@ -199,7 +250,7 @@
 
 <script setup lang="ts">
 import { onMounted, watch, ref } from 'vue';
-import { useSettingsProvider, ApiKeyType, type ModelInfo } from '../composables/useSettings';
+import { useSettingsProvider, ApiKeyType, type ModelInfo, PERSONA_PRESETS } from '../composables/useSettings';
 import { applyTheme, applyFontSize } from '../themeUtils';
 import { AppEvents } from '../App/eventBus';
 
@@ -230,7 +281,8 @@ const {
   getAvailableModels,
   getDisplayName,
   initAppSettings,
-  fetchGeminiModels
+  fetchGeminiModels,
+  getSelectedPresetInfo
 } = useSettingsProvider();
 
 // 本地通知函数，使用事件总线
@@ -1067,5 +1119,118 @@ onMounted(async () => {
 .save-btn:hover,
 .confirm-btn:hover {
   background: var(--primary-hover);
+}
+
+/* 人格提示词设置样式 */
+.persona-mode-selector {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.radio-option:hover {
+  border-color: var(--primary-color);
+  background: rgba(79, 70, 229, 0.05);
+}
+
+.radio-option input[type="radio"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
+.radio-label {
+  font-weight: 500;
+  color: var(--text-color);
+  padding-left: 8px;
+  vertical-align: middle;
+}
+
+.persona-description {
+  background: var(--background-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.preset-description {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.preset-prompt-preview {
+  font-size: 13px;
+}
+
+.preset-prompt-preview strong {
+  color: var(--text-color);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.prompt-text {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px;
+  color: var(--text-secondary);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.persona-textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--text-color);
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 120px;
+  box-sizing: border-box;
+}
+
+.persona-textarea:focus {
+  border-color: var(--primary-color);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+}
+
+.persona-textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.textarea-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+[data-theme="dark"] .persona-description {
+  background: rgba(30, 41, 59, 0.4);
+  border-color: rgba(71, 85, 105, 0.5);
+}
+
+[data-theme="dark"] .prompt-text {
+  background: rgba(15, 23, 42, 0.6);
+  border-color: rgba(71, 85, 105, 0.5);
 }
 </style>
