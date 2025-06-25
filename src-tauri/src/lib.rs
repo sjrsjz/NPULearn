@@ -17,6 +17,7 @@ use history_msg::history::{ChatHistory, ChatMessage, ChatMessageType};
 #[cfg(target_os = "android")]
 use multi_platform::android::android_file_utils;
 use once_cell::sync::Lazy;
+use regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -660,6 +661,14 @@ impl ASTOptimizer {
     }
 }
 
+// ANSI颜色控制字符清理函数
+fn strip_ansi_colors(text: &str) -> String {
+    // 匹配所有ANSI转义序列的正则表达式
+    // 包括：颜色、光标位置、清屏等控制序列
+    let re = regex::Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").unwrap();
+    re.replace_all(text, "").to_string()
+}
+
 #[tauri::command]
 fn parse_code(code: String) -> Result<String, String> {
     let tokens = lexer::tokenize(&code);
@@ -672,7 +681,11 @@ fn parse_code(code: String) -> Result<String, String> {
             let serialized_ast = ast.serialize();
             Ok(serialized_ast)
         }
-        Err(e) => Err(e.format(&tokens, code.clone())),
+        Err(e) => {
+            let error_msg = e.format(&tokens, code.clone());
+            // 清理错误信息中的ANSI颜色控制字符
+            Err(strip_ansi_colors(&error_msg))
+        }
     }
 }
 

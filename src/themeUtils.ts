@@ -129,6 +129,10 @@ export function refreshGlobalStyles(): void {
   document.documentElement.style.setProperty('--message-color', isDark ? '#f1f5f9' : '#1f2937');
   document.documentElement.style.setProperty('--primary-color', '#3b82f6');
   document.documentElement.style.setProperty('--primary-hover', '#2563eb');
+  document.documentElement.style.setProperty('--background-secondary', isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc');
+  document.documentElement.style.setProperty('--background-hover', isDark ? 'rgba(30, 41, 59, 0.7)' : '#f1f5f9');
+  document.documentElement.style.setProperty('--border', isDark ? 'rgba(51, 65, 85, 0.8)' : '#e2e8f0');
+  document.documentElement.style.setProperty('--border-hover', isDark ? 'rgba(71, 85, 105, 0.9)' : '#cbd5e1');
 
   // 4. 覆盖所有使用媒体查询的样式
   overrideMediaQueryStyles(isDark);
@@ -425,6 +429,55 @@ function overrideMediaQueryStyles(isDark: boolean): void {
 
   if (isDark) {
     overrideStyles.textContent = `
+            .avatar-icon { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); }
+            .message-wrapper.assistant .avatar-icon, .message-wrapper.system .avatar-icon { background-color: #4a5568; color: #e2e8f0; }
+            .message-content { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
+            .message-wrapper.assistant .message-content, .message-wrapper.system .message-content { background-color: var(--message-bg); border: 1px solid var(--message-border); color: var(--message-color); }
+            .typst-container { background-color: #1e293b; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); border: 1px solid #334155; }
+            .markdown-body h1 { border-bottom: 1px solid #334155; }
+            .markdown-body h2 { border-bottom: 1px solid #334155; }
+            .markdown-body a { color: #58a6ff; }
+            .markdown-body img { box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4); }
+            .preview-code { background-color: rgba(255, 255, 255, 0.05); }
+            .chart-viewer-code { background-color: rgba(255, 255, 255, 0.05); }
+            .code-copy-button { background-color: rgba(255, 255, 255, 0.1); color: var(--dark-text-secondary); }
+            .code-copy-button:hover { background-color: rgba(255, 255, 255, 0.2); color: var(--dark-text-color); }
+            .context-menu-item:hover { background-color: rgba(255, 255, 255, 0.1); }
+            .tool-api-param { background-color: rgba(255, 255, 255, 0.1); }
+            .mermaid-error { border-color: #ff7675; background-color: rgba(255, 118, 117, 0.1); }
+            .mermaid-source .code-container { border-color: #444; }
+            .mermaid-source .code-content { background-color: rgba(255, 255, 255, 0.05); }
+            .typst-error { border-color: #ff7675; background-color: rgba(255, 118, 117, 0.1); }
+            .typst-source .code-container { border-color: #444; }
+            .typst-source .code-content { background-color: rgba(255, 255, 255, 0.05); }
+            .wolfram-item-code code, .wolfram-related-queries { background-color: rgba(255, 255, 255, 0.05); }
+            .markdown-body code { color: #f1f5f9; }
+            .markdown-body pre code .hljs-keyword { color: #c792ea; font-weight: normal; }
+            .markdown-body pre code .hljs-string { color: #c3e88d; }
+            .markdown-body pre code .hljs-comment { color: #676e95; }
+            .markdown-body pre code .hljs-function { color: #82AAFF; }
+            .markdown-body pre code .hljs-number { color: #F78C6C; }
+            .markdown-body pre code .hljs-title { color: #f07178; }
+            .markdown-body pre code .hljs-attr { color: #FFCB6B; }
+            .markdown-body pre code .hljs-selector-class { color: #FFCB6B; }
+            .markdown-body blockquote { color: #9ca3af; border-left: 4px solid #3b82f6; background-color: rgba(30, 41, 59, 0.5); }
+            .markdown-body table { border: 1px solid #334155; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); }
+            .markdown-body table th, .markdown-body table td { border: 1px solid #334155; }
+            .markdown-body table th { background-color: #1e293b; color: #f1f5f9; }
+            .markdown-body table tr:nth-child(2n) { background-color: rgba(71, 85, 105, 0.1); }
+            .markdown-body hr { background-color: #334155; }
+            .thinking-summary { background-color: var(--card-bg, #1e293b); border-color: var(--border-color, #334155); }
+            .thinking-summary:hover { background-color: var(--hover-bg, #2d3748); }
+            .thinking-content { border-color: var(--border-color, #334155); background-color: var(--card-bg, #1e293b); }
+            .model-selector select:disabled { background-color: rgba(255, 255, 255, 0.05); }
+            .scroll-to-bottom-button { background-color: rgba(96, 165, 250, 0.5); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4); }
+            .scroll-to-bottom-button:hover { background-color: rgba(59, 130, 246, 0.9); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+            .scroll-to-bottom-button:active { background-color: rgba(37, 99, 235, 0.25); }
+            .ast-tree-view { background-color: var(--dark-card-bg); border-color: var(--dark-border-color); }
+            .json-details summary { color: var(--dark-text-color); }
+            .json-details summary::before { color: var(--dark-text-secondary); }
+            .json-array-list, .json-object-list { border-left-color: var(--dark-border-color); }
+            .json-details summary:hover { background-color: rgba(255, 255, 255, 0.05); }
             .title { color: var(--dark-text-color) ; }
             .empty-chat-icon { background-color: #1e293b ; border-color: #334155 ; }
             .window-controls button:hover { background-color: rgba(255, 255, 255, 0.1) ; }

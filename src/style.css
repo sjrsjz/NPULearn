@@ -45,10 +45,6 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-html[data-theme="dark"] .avatar-icon {
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
 .message-wrapper.user .avatar-icon {
   background-color: var(--primary-color);
   color: white;
@@ -58,12 +54,6 @@ html[data-theme="dark"] .avatar-icon {
 .message-wrapper.system .avatar-icon {
   background-color: #e2e8f0;
   color: #475569;
-}
-
-html[data-theme="dark"] .message-wrapper.assistant .avatar-icon,
-html[data-theme="dark"] .message-wrapper.system .avatar-icon {
-  background-color: #4a5568;
-  color: #e2e8f0;
 }
 
 .avatar-icon svg {
@@ -95,10 +85,6 @@ html[data-theme="dark"] .message-wrapper.system .avatar-icon {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
-html[data-theme="dark"] .message-content {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
 .message-wrapper.user .message-content {
   background-color: var(--primary-color);
   color: white;
@@ -111,13 +97,6 @@ html[data-theme="dark"] .message-content {
   border: 1px solid var(--border-color);
   border-top-left-radius: 4px;
   color: var(--text-color);
-}
-
-html[data-theme="dark"] .message-wrapper.assistant .message-content,
-html[data-theme="dark"] .message-wrapper.system .message-content {
-  background-color: var(--message-bg);
-  border: 1px solid var(--message-border);
-  color: var(--message-color);
 }
 
 /* Mermaid图表容器样式 - 移除动画效果 */
@@ -137,12 +116,6 @@ html[data-theme="dark"] .message-wrapper.system .message-content {
   text-align: center;
 }
 
-html[data-theme="dark"] .mermaid-container {
-  background-color: #1e293b;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-  border: 1px solid #334155;
-}
-
 /* Pintora图表容器样式 */
 .pintora-container {
   background-color: #f6f8fa;
@@ -160,12 +133,6 @@ html[data-theme="dark"] .mermaid-container {
   align-items: center;
 }
 
-html[data-theme="dark"] .pintora-container {
-  background-color: #1e293b;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-  border: 1px solid #334155;
-}
-
 /* Typst文档容器样式 */
 .typst-container {
   background-color: #f6f8fa;
@@ -181,6 +148,18 @@ html[data-theme="dark"] .pintora-container {
   flex-direction: column;
   justify-content: center;
   align-items: center;
+}
+
+html[data-theme="dark"] .mermaid-container {
+  background-color: #1e293b;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  border: 1px solid #334155;
+}
+
+html[data-theme="dark"] .pintora-container {
+  background-color: #1e293b;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  border: 1px solid #334155;
 }
 
 html[data-theme="dark"] .typst-container {
@@ -227,18 +206,10 @@ html[data-theme="dark"] .typst-container {
   padding-bottom: 0.3em;
 }
 
-html[data-theme="dark"] .markdown-body h1 {
-  border-bottom: 1px solid #334155;
-}
-
 .markdown-body h2 {
   font-size: 1.5em;
   border-bottom: 1px solid #eaecef;
   padding-bottom: 0.3em;
-}
-
-html[data-theme="dark"] .markdown-body h2 {
-  border-bottom: 1px solid #334155;
 }
 
 .markdown-body h3 {
@@ -255,10 +226,6 @@ html[data-theme="dark"] .markdown-body h2 {
   transition: color 0.2s;
 }
 
-html[data-theme="dark"] .markdown-body a {
-  color: #58a6ff;
-}
-
 .markdown-body a:hover {
   text-decoration: underline;
 }
@@ -269,10 +236,6 @@ html[data-theme="dark"] .markdown-body a {
   margin: 16px auto;
   border-radius: 6px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-}
-
-html[data-theme="dark"] .markdown-body img {
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
 }
 
 .app-container {
@@ -1292,7 +1255,7 @@ send-icon {
     background-color: var(--card-bg);
     box-shadow: var(--shadow);
     z-index: 1000;
-    max-width: 400px;
+    max-width: 300px;
     width: max-content;
     animation: notification-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     border-left: 4px solid;
@@ -1453,41 +1416,6 @@ chat-messages a:active {
         padding: 10px 6px 10px 2px;
         min-height: 44px;
         height: 44px;
-    }
-}
-
-/* 响应式通知样式 */
-@media (max-width: 768px) {
-    .notification {
-        top: 12px;
-        right: 12px;
-        left: 12px;
-        max-width: none;
-        width: calc(100vw - 24px);
-        margin: 0;
-        padding: 10px 14px;
-        font-size: calc(var(--font-size-base) - 1px);
-    }
-    
-    .notification-content {
-        gap: 6px;
-    }
-    
-    .notification-content svg {
-        width: 14px;
-        height: 14px;
-        flex-shrink: 0;
-    }
-}
-
-@media (max-width: 480px) {
-    .notification {
-        top: 8px;
-        right: 8px;
-        left: 8px;
-        width: calc(100vw - 16px);
-        padding: 8px 12px;
-        font-size: calc(var(--font-size-base) - 2px);
     }
 }
 
@@ -1807,12 +1735,6 @@ chat-messages a:active {
     text-align: left;
 }
 
-/* 暗色主题支持 */
-:root[data-theme="dark"] .preview-code,
-:root[data-theme="system"] .preview-code {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
 /* Mermaid 容器可点击样式 */
 .mermaid-container.clickable-container {
     cursor: zoom-in;
@@ -1820,17 +1742,6 @@ chat-messages a:active {
 }
 
 .mermaid-container.clickable-container:hover {
-    transform: scale(1.01);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-/* Typst 容器可点击样式 */
-.typst-container.clickable-container {
-    cursor: zoom-in;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.typst-container.clickable-container:hover {
     transform: scale(1.01);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
@@ -2141,12 +2052,6 @@ chat-messages a:active {
     }
 }
 
-/* 暗色主题支持 */
-:root[data-theme="dark"] .chart-viewer-code,
-:root[data-theme="system"] .chart-viewer-code {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
 /* 代码块复制按钮样式 */
 .code-block-with-copy {
     position: relative;
@@ -2185,19 +2090,6 @@ chat-messages a:active {
     color: white;
     border-color: #10b981;
     opacity: 1;
-}
-
-/* 暗色主题支持 */
-:root[data-theme="dark"] .code-copy-button,
-:root[data-theme="system"] .code-copy-button {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: var(--dark-text-secondary);
-}
-
-:root[data-theme="dark"] .code-copy-button:hover,
-:root[data-theme="dark"] .code-copy-button:hover {
-    background-color: rgba(255, 255, 255, 0.2);
-    color: var(--dark-text-color);
 }
 
 /* 对话右键菜单样式 */
@@ -2245,12 +2137,6 @@ chat-messages a:active {
 
 .context-menu-item:hover {
     background-color: rgba(0, 0, 0, 0.05);
-}
-
-/* 深色模式下菜单hover效果 */
-:root[data-theme="dark"] .context-menu-item:hover,
-:root[data-theme="dark"] .context-menu-item:hover {
-    background-color: rgba(255, 255, 255, 0.1);
 }
 
 /* 对话重命名和删除确认对话框样式 */
@@ -2563,19 +2449,6 @@ chat-messages a:active {
     box-sizing: border-box;
 }
 
-[data-theme="dark"] .mermaid-error {
-    border-color: #ff7675;
-    background-color: rgba(255, 118, 117, 0.1);
-}
-
-[data-theme="dark"] .mermaid-source .code-container {
-    border-color: #444;
-}
-
-[data-theme="dark"] .mermaid-source .code-content {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
 .typst-error {
     padding: 10px;
     border: 1px solid #ff6b6b;
@@ -2633,20 +2506,6 @@ chat-messages a:active {
     width: 100%;
     box-sizing: border-box;
 }
-
-[data-theme="dark"] .typst-error {
-    border-color: #ff7675;
-    background-color: rgba(255, 118, 117, 0.1);
-}
-
-[data-theme="dark"] .typst-source .code-container {
-    border-color: #444;
-}
-
-[data-theme="dark"] .typst-source .code-content {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
 
 /* Typst 文档容器样式 */
 .typst-container {
@@ -2919,14 +2778,6 @@ chat-messages a:active {
     text-decoration: underline;
 }
 
-/* 暗色主题适配 */
-:root[data-theme="dark"] .wolfram-item-code code,
-:root[data-theme="dark"] .wolfram-related-queries,
-:root[data-theme="system"] .wolfram-item-code code,
-:root[data-theme="system"] .wolfram-related-queries {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
 /* Markdown 代码块样式 */
 .markdown-body pre {
   background-color: var(--card-bg);
@@ -2948,10 +2799,6 @@ chat-messages a:active {
   color: #24292e;
 }
 
-html[data-theme="dark"] .markdown-body code {
-  color: #f1f5f9;
-}
-
 .markdown-body pre code {
   background-color: transparent;
   padding: 0;
@@ -2967,17 +2814,8 @@ html[data-theme="dark"] .markdown-body code {
   font-weight: bold;
 }
 
-html[data-theme="dark"] .markdown-body pre code .hljs-keyword {
-  color: #c792ea;
-  font-weight: normal;
-}
-
 .markdown-body pre code .hljs-string {
   color: #032f62;
-}
-
-html[data-theme="dark"] .markdown-body pre code .hljs-string {
-  color: #c3e88d;
 }
 
 .markdown-body pre code .hljs-comment {
@@ -2985,48 +2823,24 @@ html[data-theme="dark"] .markdown-body pre code .hljs-string {
   font-style: italic;
 }
 
-html[data-theme="dark"] .markdown-body pre code .hljs-comment {
-  color: #676e95;
-}
-
 .markdown-body pre code .hljs-function {
   color: #6f42c1;
-}
-
-html[data-theme="dark"] .markdown-body pre code .hljs-function {
-  color: #82AAFF;
 }
 
 .markdown-body pre code .hljs-number {
   color: #005cc5;
 }
 
-html[data-theme="dark"] .markdown-body pre code .hljs-number {
-  color: #F78C6C;
-}
-
 .markdown-body pre code .hljs-title {
   color: #6f42c1;
-}
-
-html[data-theme="dark"] .markdown-body pre code .hljs-title {
-  color: #f07178;
 }
 
 .markdown-body pre code .hljs-attr {
   color: #005cc5;
 }
 
-html[data-theme="dark"] .markdown-body pre code .hljs-attr {
-  color: #FFCB6B;
-}
-
 .markdown-body pre code .hljs-selector-class {
   color: #6f42c1;
-}
-
-html[data-theme="dark"] .markdown-body pre code .hljs-selector-class {
-  color: #FFCB6B;
 }
 
 .markdown-body blockquote {
@@ -3036,12 +2850,6 @@ html[data-theme="dark"] .markdown-body pre code .hljs-selector-class {
   margin: 16px 0;
   background-color: rgba(246, 248, 250, 0.5);
   border-radius: 0 6px 6px 0;
-}
-
-html[data-theme="dark"] .markdown-body blockquote {
-  color: #9ca3af;
-  border-left: 4px solid #3b82f6;
-  background-color: rgba(30, 41, 59, 0.5);
 }
 
 .markdown-body blockquote p {
@@ -3089,21 +2897,11 @@ html[data-theme="dark"] .markdown-body blockquote {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
-html[data-theme="dark"] .markdown-body table {
-  border: 1px solid #334155;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
 .markdown-body table th,
 .markdown-body table td {
   border: 1px solid #dfe2e5;
   padding: 8px 13px;
   text-align: left;
-}
-
-html[data-theme="dark"] .markdown-body table th,
-html[data-theme="dark"] .markdown-body table td {
-  border: 1px solid #334155;
 }
 
 .markdown-body table th {
@@ -3112,17 +2910,8 @@ html[data-theme="dark"] .markdown-body table td {
   color: #24292e;
 }
 
-html[data-theme="dark"] .markdown-body table th {
-  background-color: #1e293b;
-  color: #f1f5f9;
-}
-
 .markdown-body table tr:nth-child(2n) {
   background-color: rgba(246, 248, 250, 0.7);
-}
-
-html[data-theme="dark"] .markdown-body table tr:nth-child(2n) {
-  background-color: rgba(71, 85, 105, 0.1);
 }
 
 .markdown-body hr {
@@ -3131,10 +2920,6 @@ html[data-theme="dark"] .markdown-body table tr:nth-child(2n) {
   margin: 24px 0;
   background-color: #e1e4e8;
   border: 0;
-}
-
-html[data-theme="dark"] .markdown-body hr {
-  background-color: #334155;
 }
 
 .markdown-body .task-list-item {
@@ -3395,11 +3180,6 @@ html[data-theme="dark"] .thinking-content {
 }
 
 
-:root[data-theme="dark"] .wolfram-related-queries,
-:root[data-theme="system"] .wolfram-related-queries {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-
 /* 响应式设计 */
 @media (max-width: 768px) {
     .wolfram-results {
@@ -3486,6 +3266,26 @@ html[data-theme="dark"] .thinking-content {
     max-height: 500px;
     box-shadow: var(--shadow-sm);
     text-align: left;
+}
+
+/* 防止 MathJax 处理 JSON 树形视图内容和用户消息 */
+.ast-tree-view,
+.ast-tree-view *,
+.json-details,
+.json-details *,
+.tool-code-container,
+.tool-code-container *,
+.mathjax-ignore,
+.mathjax-ignore *,
+.message-wrapper.user,
+.message-wrapper.user *,
+.user-message-right,
+.user-message-right * {
+    /* 明确告诉 MathJax 不要处理这些内容 */
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
 }
 
 /* JSON 结构相关样式 */
@@ -3611,34 +3411,22 @@ html[data-theme="dark"] .thinking-content {
     opacity: 0.8;
 }
 
-/* 暗色主题适配 */
-:root[data-theme="dark"] .ast-tree-view,
-:root[data-theme="system"] .ast-tree-view {
-    background-color: var(--dark-card-bg);
-    border-color: var(--dark-border-color);
+/* 按钮出现/消失的过渡动画 */
+.scroll-button-enter-active,
+.scroll-button-leave-active {
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-:root[data-theme="dark"] .json-details summary,
-:root[data-theme="dark"] .json-details summary {
-    color: var(--dark-text-color);
+.scroll-button-enter-from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.8);
 }
 
-:root[data-theme="dark"] .json-details summary::before,
-:root[data-theme="dark"] .json-details summary::before {
-    color: var(--dark-text-secondary);
+.scroll-button-leave-to {
+    opacity: 0;
+    transform: translateY(20px) scale(0.8);
 }
 
-:root[data-theme="dark"] .json-array-list,
-:root[data-theme="dark"] .json-object-list,
-:root[data-theme="system"] .json-array-list,
-:root[data-theme="system"] .json-object-list {
-    border-left-color: var(--dark-border-color);
-}
-
-:root[data-theme="dark"] .json-details summary:hover,
-:root[data-theme="dark"] .json-details summary:hover {
-    background-color: rgba(255, 255, 255, 0.05);
-}
 
 /* 添加交互动画效果 */
 .json-details summary {
@@ -3794,38 +3582,4 @@ html[data-theme="dark"] .model-selector select:disabled {
 
 .scroll-to-bottom-button:hover svg {
     transform: translateY(1px);
-}
-
-/* 暗色主题适配 */
-html[data-theme="dark"] .scroll-to-bottom-button {
-    background-color: rgba(96, 165, 250, 0.5);
-    /* 暗色主题下的半透明蓝色 */
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-}
-
-html[data-theme="dark"] .scroll-to-bottom-button:hover {
-    background-color: rgba(59, 130, 246, 0.9);
-    /* 悬停时更不透明 */
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-}
-
-html[data-theme="dark"] .scroll-to-bottom-button:active {
-    background-color: rgba(37, 99, 235, 0.25);
-    /* 按下时半透明 */
-}
-
-/* 按钮出现/消失的过渡动画 */
-.scroll-button-enter-active,
-.scroll-button-leave-active {
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.scroll-button-enter-from {
-    opacity: 0;
-    transform: translateY(20px) scale(0.8);
-}
-
-.scroll-button-leave-to {
-    opacity: 0;
-    transform: translateY(20px) scale(0.8);
 }

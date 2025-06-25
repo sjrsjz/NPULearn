@@ -8,6 +8,7 @@ use std::error::Error;
 
 use crate::aibackend::apikey::{ApiKey, ApiKeyType};
 use crate::aibackend::interface::AIChat;
+use crate::aibackend::template::{self, cot_template, TypesetInfo};
 use crate::ChatHistory;
 
 const COZE_API_URL: &str = "https://api.coze.cn/v3/chat";
@@ -26,7 +27,7 @@ pub struct CozeRequest {
     additional_messages: Vec<CozeMessage>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CozeMessage {
     role: String,
     content: String,
@@ -123,7 +124,102 @@ impl CozeChat {
             time: chrono::Local::now().format("%H:%M").to_string(),
         }
     }
-    // 发送流式对话请求
+
+    /// 构建系统指令，包含排版格式提示词
+    fn build_system_instruction(&self) -> String {
+        let base_prompt = self.system_prompt.clone().unwrap_or_else(|| "You are a helpful assistant".to_string());
+        
+        // 使用 COT 模板，包含所有排版功能
+        cot_template(&[
+            TypesetInfo {
+                name: "mermaid_render".to_string(),
+                description: "render mermaid graph".to_string(),
+                detail: "render mermaid graph by using mermaid.js renderer, should write down CORRECT mermaid code for sucessfully rendering".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("mermaid_code".to_string(), Value::String("mermaid code which you what to render".to_string()));
+                    args
+                },
+            },
+            TypesetInfo {
+                name: "pintora_render".to_string(),
+                description: "render pintora graph".to_string(),
+                detail: "render pintora graph by using pintora.js renderer, should write down CORRECT pintora code for sucessfully rendering".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("diagram".to_string(), Value::String("pintora code which you what to render".to_string()));
+                    args.insert("scale".to_string(), Value::Number(1.into()));
+                    args
+                },
+            },
+            TypesetInfo {
+                name: "interactive_button".to_string(),
+                description: "show a interactive button signed `message`, when user clicks on it, then you will receive `command` text".to_string(),
+                detail: r#"show a interactive button signed `message`, when user clicks on it, then you will receive `command` text
+    It is a good way for you to show a button for user to click when user learns something new
+    - `message`: the text which you want to show on the button
+    - `command`: the text which will be sent when user clicks the button
+    > You can use it to give some hints to user, like "click me to send `Hello!`" or "click me to send `Bye!`"
+    "#.to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("message".to_string(), Value::String("click me to send `Hello!`".to_string()));
+                    args.insert("command".to_string(), Value::String("Hello!".to_string()));
+                    args
+                },
+            },
+            TypesetInfo {
+                name: "typst_render".to_string(),
+                description: "render typst document".to_string(),
+                detail: "render typst document by using typst.ts renderer, should write down CORRECT typst code for successfully rendering mathematical formulas, diagrams, and professional documents".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("typst_code".to_string(), Value::String("typst code which you want to render".to_string()));
+                    args
+                },
+            },
+            TypesetInfo {
+                name: "html_render".to_string(),
+                description: "render HTML content in a sandboxed environment".to_string(),
+                detail: r#"render HTML content safely in a sandboxed iframe, which tolerates malformed HTML without affecting the page layout
+    - `html`: the HTML content to render
+    - `title`: optional title for the HTML container (default: "HTML内容")
+    - `show_border`: optional boolean to show/hide border (default: true)"#.to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("html".to_string(), Value::String("<div>Your HTML content here</div>".to_string()));
+                    args.insert("title".to_string(), Value::String("HTML内容".to_string()));
+                    args.insert("show_border".to_string(), Value::Bool(true));
+                    args
+                },
+            },
+            TypesetInfo {
+                name: "katex_render".to_string(),
+                description: "render mathematical formulas".to_string(),
+                detail: "render mathematical formulas by using katex renderer, should write down CORRECT latex code for successfully rendering mathematical formulas. No need to wrap by `$`. Be careful with backslashes: use double backslashes (\\\\) for commands like \\\\alpha instead of \\alpha, as single backslashes may be interpreted as escape characters (e.g., \\n becomes a newline).".to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("katex_code".to_string(), Value::String("Katex code which you want to render. No need to wrap by `$`. Remember to escape backslashes properly.".to_string()));
+                    args
+                },
+            },
+            TypesetInfo {
+                name: "wolfram_alpha_compute".to_string(),
+                description: "compute queries using Wolfram Alpha".to_string(),
+                detail: r#"compute mathematical expressions, solve equations, convert units, and answer factual questions using Wolfram Alpha's computational engine
+    - `query`: the query to compute (e.g., mathematical expressions, word problems, unit conversions)
+    - `image_only`: optional boolean to return only image result (default: false)
+    - `format`: optional format for results, only `html` avaliable"#.to_string(),
+                args: {
+                    let mut args = HashMap::new();
+                    args.insert("query".to_string(), Value::String("1+1".to_string()));
+                    args.insert("image_only".to_string(), Value::Bool(false));
+                    args.insert("format".to_string(), Value::String("html".to_string()));
+                    args
+                },
+            },
+        ], &base_prompt)
+    }    // 发送流式对话请求
     pub async fn send_stream_request<F>(
         &self,
         message: &str,
@@ -132,16 +228,38 @@ impl CozeChat {
     where
         F: FnMut(String) + Send + 'static,
     {
+        // 构建包含系统指令的消息数组
+        let mut messages = vec![];
+        
+        // 添加系统指令
+        if !self.conversation_history.is_empty() || self.system_prompt.is_some() {
+            messages.push(CozeMessage {
+                role: "assistant".to_string(),
+                content: format!(
+                    "# I have double checked that my basic system settings are as follows, I will never disobey them:\n{}\n",
+                    self.build_system_instruction()
+                ),
+                content_type: "text".to_string(),
+            });
+        }
+          // 添加历史对话
+        for msg in &self.conversation_history {
+            messages.push(msg.clone());
+        }
+        
+        // 添加当前用户消息
+        messages.push(CozeMessage {
+            role: "user".to_string(),
+            content: message.to_string(),
+            content_type: "text".to_string(),
+        });
+
         let request_body = CozeRequest {
             bot_id: BOT_ID.to_string(),
             user_id: USER_ID.to_string(),
             stream: true, // 启用流式请求
             auto_save_history: false,
-            additional_messages: vec![CozeMessage {
-                role: "user".to_string(),
-                content: message.to_string(),
-                content_type: "text".to_string(),
-            }],
+            additional_messages: messages,
         };
 
         let response = self
@@ -160,8 +278,17 @@ impl CozeChat {
         }
 
         // 使用新的 Coze SSE 流式处理函数
-        process_coze_stream_response(response, callback).await
-    } // 获取对话结果
+        let response_text = process_coze_stream_response(response, callback).await?;
+        
+        // 应用模板提取
+        let final_text = if let Some(extracted) = template::extract_response(&response_text) {
+            extracted
+        } else {
+            response_text
+        };
+        
+        Ok(final_text)
+    }// 获取对话结果
 }
 
 // AIChat trait 将在 interface.rs 中通过其他方式实现

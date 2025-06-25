@@ -5,4 +5,6 @@ declare global {
     }
 }
 
+declare module 'mathjax/es5/tex-svg';
+
 export { };

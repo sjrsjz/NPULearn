@@ -27,6 +27,7 @@ import { Window } from '@tauri-apps/api/window';
 import { loadMathJax, renderMathInElement } from "./App/mathjax.ts";
 import { createNewChat, loadChatHistory, selectHistory } from "./App/chatHistory.ts";
 import { initMermaid, changeMermaidTheme, setupAllMermaidInteractions } from "./App/typesetting/mermaidRenderer.ts";
+import { initPintora, changePintoraTheme, setupAllPintoraInteractions } from "./App/typesetting/pintoraRenderer.ts";
 import { renderTypstDocuments, setupAllTypstInteractions } from "./App/typesetting/typstRenderer.ts";
 import { applyHighlight, setupAllCopyButtons } from "./App/typesetting/typesetting.ts";
 import { chatHistory, eventBus, isLoading, isStreaming } from "./App/eventBus.ts";
@@ -170,7 +171,6 @@ function preventAllNavigation() {
     if (form.action && (form.action.startsWith('http://') || form.action.startsWith('https://'))) {
       e.preventDefault();
       console.log('阻止表单提交到外部:', form.action);
-      showNotification('已阻止表单提交到外部网站', 'warning');
     }
   }, true);
 
@@ -373,16 +373,20 @@ function setupFunctions() {
   setupExternalLinks();
   setupActionButtons();
   setupAllCopyButtons();
-  // 重要：为所有 Mermaid 图表绑定交互事件（包括流式传输结束后的图表）
+  // 重要：为所有图表绑定交互事件（包括流式传输结束后的图表）
   const chatMessagesContainer = document.querySelector('.chat-messages') as HTMLElement;
   if (chatMessagesContainer) {
     console.log('在聊天内容更新后，重新绑定所有 Mermaid 图表的交互事件');
     setupAllMermaidInteractions(chatMessagesContainer);
+    console.log('在聊天内容更新后，重新绑定所有 Pintora 图表的交互事件');
+    setupAllPintoraInteractions(chatMessagesContainer);
     console.log('在聊天内容更新后，重新绑定所有 Typst 文档的交互事件');
     setupAllTypstInteractions(chatMessagesContainer);
   } else {
     console.log('在聊天内容更新后，使用全局容器绑定 Mermaid 图表的交互事件');
     setupAllMermaidInteractions(document.body);
+    console.log('在聊天内容更新后，使用全局容器绑定 Pintora 图表的交互事件');
+    setupAllPintoraInteractions(document.body);
     console.log('在聊天内容更新后，使用全局容器绑定 Typst 文档的交互事件');
     setupAllTypstInteractions(document.body);
   }
@@ -1026,11 +1030,12 @@ watch(() => document.documentElement.getAttribute('data-theme'), (newTheme, oldT
   if (newTheme !== oldTheme) {
     console.log("主题变化:", newTheme);
 
-    // 当主题变化时，更新Mermaid配置
+    // 当主题变化时，更新Mermaid和Pintora配置
     const isDark = newTheme === 'dark' ||
       (newTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
     changeMermaidTheme(isDark ? 'dark' : 'default');
+    changePintoraTheme(isDark ? 'dark' : 'default');
 
     // 当主题变化时，重新应用样式
     // 延迟执行，确保全局样式已应用
@@ -1078,8 +1083,10 @@ onMounted(async () => {
     // 初始化应用设置 (这会调用 refreshGlobalStyles)
     await initAppSettings();
 
-    // 初始化Mermaid (主题应基于 initAppSettings 后的全局设置)
-    initMermaid();    // 加载 MathJax
+    // 初始化Mermaid 和 Pintora (主题应基于 initAppSettings 后的全局设置)
+    initMermaid();
+    initPintora();    
+    // 加载 MathJax
     await loadMathJax();
 
     // 设置流式消息监听器
@@ -1124,12 +1131,13 @@ onMounted(async () => {
     console.log('主题已变更:', customEvent.detail);
     // 添加延迟以确保主题变更完全应用
     setTimeout(() => {
-      // 更新Mermaid主题
+      // 更新Mermaid和Pintora主题
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
         (document.documentElement.getAttribute('data-theme') === 'system' &&
           window.matchMedia('(prefers-color-scheme: dark)').matches);
 
       changeMermaidTheme(isDark ? 'dark' : 'default');
+      changePintoraTheme(isDark ? 'dark' : 'default');
       loadChatHistory().catch(error => {
         console.error("加载聊天历史失败:", error);
         showNotification("加载聊天历史失败", "error");

@@ -175,19 +175,21 @@ async function renderPintoraDiagrams(retryCount = 0, maxRetries = 3, container: 
             } else if (failedCount > 0) {
                 console.log(`渲染完成，但有${failedCount}个图表渲染失败，已达到最大重试次数`);
                 // 为失败的图表添加重试按钮事件监听
-                setupRetryButtons(container);
-
-                // 设置图表的可点击功能
-                setupPintoraRefresh(container);
+                setupAllPintoraInteractions(container);
             } else {
                 console.log('所有图表渲染成功');
-
                 // 设置图表的可点击功能
-                setupPintoraRefresh(container);
+                setupAllPintoraInteractions(container);
             }
+
+            // 无论成功失败，都延迟再次调用一次以确保所有图表都得到正确处理
+            setTimeout(() => {
+                console.log('延迟检查，确保所有图表事件绑定正确');
+                setupAllPintoraInteractions(container);
+            }, 500);
         } else {
             // 如果没有需要渲染的图表，也处理已渲染的图表
-            setupPintoraRefresh(container);
+            setupAllPintoraInteractions(container);
         }
     } catch (error) {
         console.error("处理Pintora图表失败:", error);
@@ -196,44 +198,66 @@ async function renderPintoraDiagrams(retryCount = 0, maxRetries = 3, container: 
             setTimeout(() => renderPintoraDiagrams(retryCount + 1, maxRetries, container), 1500);
         } else {
             // 即使出错，也尝试为已渲染的图表添加交互功能
-            setupPintoraRefresh(container);
+            setupAllPintoraInteractions(container);
         }
     }
 }
 
-// 设置图表渲染失败后的重试按钮事件
-function setupRetryButtons(container: HTMLElement = document.body) {
+// 统一处理所有Pintora图表的按钮和事件绑定
+function setupAllPintoraInteractions(container: HTMLElement = document.body) {
+    console.log(`开始设置Pintora图表交互功能，容器:`, container);
+
+    // 使用更长的延迟确保DOM完全更新
     nextTick(() => {
-        container.querySelectorAll('.retry-render-button').forEach(button => {
-            if (button.hasAttribute('data-event-attached')) return;
-            
-            button.setAttribute('data-event-attached', 'true');
-            button.addEventListener('click', async (e) => {
-                e.preventDefault();
-                const targetButton = e.target as HTMLElement;
-                const diagramId = targetButton.getAttribute('data-diagram-id');
-                const diagramContainer = container.querySelector(`.pintora-container[data-render-id="${diagramId}"]`);
+        setTimeout(() => {
+            console.log(`执行Pintora图表交互设置`);
 
-                if (diagramContainer) {
-                    // 移除loaded类以便重新渲染
-                    diagramContainer.classList.remove('loaded');
-                    AppEvents.showNotification("正在重新渲染图表...", "info");
+            // 检查容器内的所有Pintora图表
+            const pintoraContainers = container.querySelectorAll('.pintora-container');
+            console.log(`找到 ${pintoraContainers.length} 个Pintora图表容器`);
 
-                    // 特别处理这个容器
-                    await renderPintoraDiagrams(0, 3, container);
-                }
-            });
-        });
+            // 设置刷新按钮和交互功能
+            setupPintoraRefresh(container);
+            // 设置重试按钮事件
+            setupRetryButtons(container);
+
+            // 再次验证设置结果
+            setTimeout(() => {
+                const updatedContainers = container.querySelectorAll('.pintora-container');
+                updatedContainers.forEach((pintoraContainer, index) => {
+                    const hasRefreshBtn = pintoraContainer.querySelector('.refresh-diagram-button');
+                    const hasZoomBtn = pintoraContainer.querySelector('.zoom-diagram-button');
+                    const hasClickListener = pintoraContainer.hasAttribute('data-has-click-listener');
+                    const id = pintoraContainer.getAttribute('data-render-id');
+
+                    console.log(`Pintora图表 ${index + 1} (ID: ${id}) - 刷新按钮: ${!!hasRefreshBtn}, 放大按钮: ${!!hasZoomBtn}, 点击监听: ${hasClickListener}`);
+                });
+            }, 100);
+        }, 50);
     });
+}
+
+// 设置图表渲染失败后的重试按钮事件（已移除重试按钮，此函数暂时保留以避免调用错误）
+function setupRetryButtons(_container: HTMLElement = document.body) {
+    // 重试按钮已被移除，此函数不再执行任何操作
+    console.log('重试按钮已被移除，setupRetryButtons 函数不再执行操作');
 }
 
 // 设置刷新按钮函数
 function setupPintoraRefresh(container: HTMLElement = document.body) {
     nextTick(() => {
         // 为所有图表容器添加刷新按钮
-        container.querySelectorAll('.pintora-container').forEach(diagramContainer => {
+        const pintoraContainers = container.querySelectorAll('.pintora-container');
+        console.log(`setupPintoraRefresh: 找到 ${pintoraContainers.length} 个 Pintora 容器`);
+        
+        pintoraContainers.forEach((diagramContainer, index) => {
+            const pintoraContainer = diagramContainer as HTMLElement;
+            const containerId = pintoraContainer.getAttribute('data-render-id');
+            
+            console.log(`处理容器 ${index + 1}/${pintoraContainers.length}, ID: ${containerId}`);
+
             // 检查容器是否已经有刷新按钮
-            if (!diagramContainer.querySelector('.refresh-diagram-button')) {
+            if (!pintoraContainer.querySelector('.refresh-diagram-button')) {
                 const refreshButton = document.createElement('button');
                 refreshButton.className = 'refresh-diagram-button';
                 refreshButton.innerHTML = `
@@ -269,15 +293,20 @@ function setupPintoraRefresh(container: HTMLElement = document.body) {
                 });
 
                 // 将按钮添加到容器中
-                diagramContainer.appendChild(refreshButton);
+                pintoraContainer.appendChild(refreshButton);
+                console.log(`已为容器 ${containerId} 添加刷新按钮`);
             }
 
             // 检查图表是否渲染成功
-            const isRenderedSuccessfully = diagramContainer.classList.contains('loaded') &&
-                !diagramContainer.querySelector('.pintora-error');
+            const hasLoadedClass = pintoraContainer.classList.contains('loaded');
+            const hasErrorElement = pintoraContainer.querySelector('.pintora-error');
+            const hasSvgElement = pintoraContainer.querySelector('svg');
+            const isRenderedSuccessfully = hasLoadedClass && !hasErrorElement && hasSvgElement;
+
+            console.log(`容器 ${containerId} 状态检查 - loaded: ${hasLoadedClass}, hasError: ${!!hasErrorElement}, hasSvg: ${!!hasSvgElement}, success: ${isRenderedSuccessfully}`);
 
             // 只有成功渲染的图表才添加放大按钮
-            if (isRenderedSuccessfully && !diagramContainer.querySelector('.zoom-diagram-button')) {
+            if (isRenderedSuccessfully && !pintoraContainer.querySelector('.zoom-diagram-button')) {
                 const zoomButton = document.createElement('button');
                 zoomButton.className = 'zoom-diagram-button';
                 zoomButton.innerHTML = `
@@ -307,27 +336,31 @@ function setupPintoraRefresh(container: HTMLElement = document.body) {
                     }
                 });
 
-                diagramContainer.appendChild(zoomButton);
-            } else if (!isRenderedSuccessfully && diagramContainer.querySelector('.zoom-diagram-button')) {
+                pintoraContainer.appendChild(zoomButton);
+                console.log(`已为容器 ${containerId} 添加放大按钮`);
+            } else if (!isRenderedSuccessfully && pintoraContainer.querySelector('.zoom-diagram-button')) {
                 // 如果图表渲染失败，但之前添加了放大按钮，则移除它
-                const zoomButton = diagramContainer.querySelector('.zoom-diagram-button');
-                if (zoomButton) zoomButton.remove();
+                const zoomButton = pintoraContainer.querySelector('.zoom-diagram-button');
+                if (zoomButton) {
+                    zoomButton.remove();
+                    console.log(`已移除失败图表的放大按钮 - ID: ${containerId}`);
+                }
             }
 
             // 只为成功渲染的图表添加点击事件
             if (isRenderedSuccessfully) {
                 // 为整个容器添加点击事件以打开查看器
-                if (!diagramContainer.hasAttribute('data-has-click-listener')) {
-                    diagramContainer.setAttribute('data-has-click-listener', 'true');
+                if (!pintoraContainer.hasAttribute('data-has-click-listener')) {
+                    pintoraContainer.setAttribute('data-has-click-listener', 'true');
 
-                    diagramContainer.addEventListener('click', (e) => {
+                    pintoraContainer.addEventListener('click', (e) => {
                         // 点击按钮时不触发
                         if ((e.target as HTMLElement).closest('.refresh-diagram-button, .zoom-diagram-button')) {
                             return;
                         }
 
-                        const svgElement = diagramContainer.querySelector('svg');
-                        const contentElement = diagramContainer.getAttribute('data-render-content');
+                        const svgElement = pintoraContainer.querySelector('svg');
+                        const contentElement = pintoraContainer.getAttribute('data-render-content');
 
                         if (svgElement && contentElement) {
                             const svgContent = svgElement.outerHTML;
@@ -337,11 +370,14 @@ function setupPintoraRefresh(container: HTMLElement = document.body) {
                     });
 
                     // 添加视觉提示，表明容器可点击
-                    diagramContainer.classList.add('clickable-container');
+                    pintoraContainer.classList.add('clickable-container');
+                    console.log(`已为容器 ${containerId} 添加点击事件`);
                 }
             } else {
-                // 如果图表渲染失败，移除点击相关的类
-                diagramContainer.classList.remove('clickable-container');
+                // 如果图表渲染失败，移除点击相关的类和属性
+                pintoraContainer.classList.remove('clickable-container');
+                pintoraContainer.removeAttribute('data-has-click-listener');
+                console.log(`已移除失败图表的点击功能 - ID: ${containerId}`);
             }
         });
     });
@@ -362,7 +398,7 @@ function changePintoraTheme(theme: string) {
  * @param apiInfo API 调用信息
  * @returns 生成的 HTML 内容
  */
-export async function handlePintoraRender(apiInfo: any): Promise<string> {
+async function handlePintoraRender(apiInfo: any): Promise<string> {
     // 获取 Pintora 代码参数
     const pintoraCode = apiInfo.arguments.diagram || '';
     console.log("处理 pintora_render:", pintoraCode);
@@ -468,12 +504,19 @@ export async function handlePintoraRender(apiInfo: any): Promise<string> {
     `;
 
     // 非流式传输下，为刚渲染的图表绑定事件
-    if (!isStreaming.value && isLoaded) {
+    if (!isStreaming.value) {
         setTimeout(() => {
             const container = document.getElementById(`${renderId}-container`);
             if (container) {
-                // 给这个图表容器添加按钮和事件绑定
-                setupPintoraRefresh(container);
+                console.log(`立即为非流式图表绑定事件 - ID: ${renderId}, 渲染成功: ${isLoaded}`);
+                // 统一处理图表按钮和事件绑定
+                setupAllPintoraInteractions(container);
+
+                // 再次延迟确保绑定成功
+                setTimeout(() => {
+                    console.log(`延迟再次检查图表事件绑定 - ID: ${renderId}`);
+                    setupAllPintoraInteractions(container);
+                }, 200);
             }
         }, 0);  // 使用setTimeout确保HTML先被添加到DOM
     }
@@ -482,4 +525,4 @@ export async function handlePintoraRender(apiInfo: any): Promise<string> {
 }
 
 // 导出函数
-export { initPintora, renderPintoraDiagrams, setupPintoraRefresh, setupRetryButtons, changePintoraTheme };
+export { initPintora, renderPintoraDiagrams, setupPintoraRefresh, setupRetryButtons, setupAllPintoraInteractions, changePintoraTheme, handlePintoraRender };
