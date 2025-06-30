@@ -62,8 +62,8 @@
   
   #align(center)[
     #text(size: 9pt, fill: gray)[
-      版本：v0.1.0 | 更新日期：2025年5月\
-      适用平台：Windows、macOS、Linux
+      版本：v0.2.0 | 更新日期：2025年6月\
+      适用平台：Windows、macOS、Linux、Android
     ]
   ]
 ]
