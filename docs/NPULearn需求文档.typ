@@ -90,7 +90,7 @@ b) 本项目的任务提出者、开发者、用户及实现该软件的计算�
    - 实现环境：跨平台桌面应用（Windows、macOS、Linux、Android）
 
 c) 该软件系统同其他系统或其他机构的基本的相互来往关系：
-   - 与多种AI服务提供商的API接口（DeepSeek、Gemini）
+   - 与多种AI服务提供商的API接口（DeepSeek、Gemini、Coze）
    - 与Wolfram Alpha计算平台的集成
    - 与学术文献数据库的连接
    - 与校园网络环境的适配
@@ -426,7 +426,7 @@ NPULearn是一个专为西北工业大学校园场景设计的基于人工智能
 - 系统通知服务
 
 === 接口
-- AI服务商API接口（DeepSeek、Gemini）
+- AI服务商API接口（DeepSeek、Gemini、Coze）
 - Wolfram Alpha API接口
 - 系统文件系统接口
 - 系统网络接口
