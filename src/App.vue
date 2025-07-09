@@ -336,13 +336,6 @@ function updateChatContent(messages: ChatMessage[]) {
     }, 100);
   });
 
-  // 延迟检查滚动按钮状态
-  nextTick(() => {
-    setTimeout(() => {
-      checkScrollToBottomButton();
-    }, 100);
-  });
-
   if (!virtualElement) return;
 
   // 在虚拟DOM中应用代码高亮
@@ -356,6 +349,7 @@ function updateChatContent(messages: ChatMessage[]) {
   }).catch(error => {
     console.error("代码高亮失败:", error);
   });
+
 }
 
 function setupFunctions() {
@@ -1090,13 +1084,13 @@ onMounted(async () => {
     } catch (error) {
       console.error('Mermaid 初始化失败，将跳过图表渲染功能:', error);
     }
-    
+
     try {
       await initPintora();
       console.log('Pintora 初始化完成');
     } catch (error) {
       console.error('Pintora 初始化失败，将跳过图表渲染功能:', error);
-    }    
+    }
     // 加载 MathJax
     await loadMathJax();
 

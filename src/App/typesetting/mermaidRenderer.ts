@@ -9,7 +9,7 @@ async function loadMermaidModule() {
     if (mermaid) {
         return mermaid;
     }
-    
+
     try {
         const module = await import('mermaid');
         mermaid = module.default;
@@ -107,7 +107,8 @@ async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3, container: 
                                     element.classList.add('loaded');
                                     // 记录已渲染的内容，用于后续比较避免重复渲染
                                     element.setAttribute('data-last-rendered', encodedContent);
-                                    return true;                                } catch (renderError) {
+                                    return true;
+                                } catch (renderError) {
                                     console.error(`单个图表渲染失败 ID ${id}:`, renderError);
                                     element.innerHTML = `
                                         <div class="mermaid-error">
@@ -129,7 +130,8 @@ async function renderMermaidDiagrams(retryCount = 0, maxRetries = 3, container: 
                                 throw new Error("解码后的内容为空或无效。");
                             }
                         })
-                    );                } catch (error) {
+                    );
+                } catch (error) {
                     // 记录更详细的错误信息和失败的内容
                     console.error(`渲染图表 ID ${id} 失败:`, error);
                     console.error("失败的内容 (decoded):", content); // 记录导致失败的解码后内容
@@ -300,7 +302,7 @@ function setupMermaidRefresh(container: HTMLElement = document.body) {
             if (isRenderedSuccessfully) {
                 // 为整个容器添加点击事件以打开查看器
                 if (!mermaidContainer.hasAttribute('data-has-click-listener')) {
-                    mermaidContainer.setAttribute('data-has-click-listener', 'true');                    mermaidContainer.addEventListener('click', (e) => {
+                    mermaidContainer.setAttribute('data-has-click-listener', 'true'); mermaidContainer.addEventListener('click', (e) => {
                         // 点击按钮时不触发
                         if ((e.target as HTMLElement).closest('.refresh-diagram-button, .zoom-diagram-button')) {
                             return;
@@ -378,7 +380,8 @@ async function handleMermaidRender(apiInfo: any) {
             const renderResult = await mermaid.render(diagramId, mermaidCode);
             const svgContent = renderResult.svg;
             initialContent = svgContent;
-            isLoaded = true;        } catch (error) {
+            isLoaded = true;
+        } catch (error) {
             console.error("立即渲染图表失败:", error);
             initialContent = `
                 <div class="mermaid-error">
